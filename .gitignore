@@ -1,0 +1,11 @@
+/docs/
+/bin/
+/rootfs/
+/.cache/
+/.runtime/
+*.test
+*.out
+.DS_Store
+.env
+.env.*
+!.env.example
