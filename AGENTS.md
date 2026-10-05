@@ -2,21 +2,21 @@
 
 ## Project Structure & Module Organization
 
-This directory currently contains no application code, tests, assets, or build configuration. It is not yet initialized as a Git repository. Update this guide as the project takes shape.
+`cmd/mini-docker/` contains the executable entry point. `internal/cli`, `internal/runtime`, `internal/rootfs`, and `internal/cgroup` implement parsing, process supervision, filesystems, and resource limits. Unit tests live beside their packages; privileged Linux tests and bounded helpers live in `tests/integration/`. Development scripts are in `scripts/`, and the Lima configuration is in `dev/`.
 
-When adding the initial implementation, group source files by responsibility and document the entry point in `README.md`. Use the chosen language’s standard layout; keep tests alongside their modules or in a dedicated `tests/` directory. Place supporting scripts in `scripts/` and sample configuration in clearly named example files.
+`docs/` contains local design notes and is excluded from Git. Do not force-add its contents. Keep generated `bin/`, `rootfs/`, and runtime state untracked.
 
 ## Build, Test, and Development Commands
 
-No build, test, or local development commands are currently configured. When introducing a toolchain, provide reproducible commands in `README.md` for installing dependencies, running locally, building, and testing. Explain prerequisites and required configuration. If a `Makefile` is added, consider consistent targets such as `make build`, `make test`, and `make lint`; these commands do not exist yet.
+Use `make build` to compile the static Linux binary, `make rootfs` to generate a BusyBox template, and `make test` / `make vet` for unit tests and static checks. Run `make test-integration` inside the dedicated Linux VM to verify real isolation and resource limits. Launch commands with `scripts/run-linux.sh` to obtain a delegated systemd scope. See `README.md` for VM setup and examples.
 
 ## Coding Style & Naming Conventions
 
-Follow the selected language’s established formatting and naming conventions. Configure its formatter and linter when adding source code, and document their invocation. Keep indentation consistent within each file, use descriptive names, and avoid unrelated formatting changes.
+Use English for repository documentation, identifiers, comments, CLI help, logs, errors, and commit descriptions. Discussions with the user remain in Chinese. Format Go code with gofmt (`make fmt`), follow standard Go naming conventions, and use `//go:build linux` for platform-specific code. Keep unsupported-platform errors explicit.
 
 ## Testing Guidelines
 
-No testing framework or coverage threshold is established. Add tests for new behavior and bug fixes using the selected framework’s naming conventions. Keep tests deterministic and document any external services they require. Run the relevant tests before submitting changes, and report any checks that could not run.
+Use Go's `testing` package, `*_test.go` files, and `TestXxx` functions. Test behavior and failure cleanup rather than mirroring implementation. Keep resource stress helpers bounded. Run relevant unit tests and vet before committing; runtime changes also require privileged Linux integration tests. Report checks that could not run. No coverage percentage is mandated.
 
 ## Commit & Pull Request Guidelines
 

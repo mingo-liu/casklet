@@ -1,0 +1,332 @@
+//go:build linux
+
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/mingo-liu/mini-docker/internal/cgroup"
+	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"golang.org/x/sys/unix"
+)
+
+const (
+	namespaceFlags = unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWIPC | unix.CLONE_NEWNET
+	startupLimit   = 30 * time.Second
+	stopGrace      = 5 * time.Second
+)
+
+var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
+
+type message struct {
+	Kind   string         `json:"kind"`
+	Config *config.Config `json:"config,omitempty"`
+	Error  string         `json:"error,omitempty"`
+}
+
+func Check(template string) error {
+	if os.Geteuid() != 0 {
+		return errors.New("container execution requires root; use scripts/run-linux.sh")
+	}
+	if _, err := rootfs.Validate(template); err != nil {
+		return err
+	}
+	if err := cgroup.Check(); err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), startupLimit)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, "__probe")
+	cmd.Env = baseEnvironment
+	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("probe namespace capabilities: %w: %s", err, output)
+	}
+	return nil
+}
+
+// Probe runs only in a temporary namespace child created by Check.
+func Probe() int {
+	if os.Getpid() != 1 {
+		fmt.Fprintln(os.Stderr, "mini-docker: namespace probe requires container PID 1")
+		return 125
+	}
+	if err := enableLoopback(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 125
+	}
+	if err := unix.Sethostname([]byte("mini-probe")); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 125
+	}
+	return 0
+}
+
+func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr error) {
+	code = 125
+	if err := Check(cfg.RootFS); err != nil {
+		return code, err
+	}
+	template, err := rootfs.Validate(cfg.RootFS)
+	if err != nil {
+		return code, err
+	}
+	incomingSignals := make(chan os.Signal, 8)
+	signals := make(chan os.Signal, 8)
+	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(incomingSignals)
+	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), startupLimit)
+	defer cancelPrepare()
+	signalDone := make(chan struct{})
+	defer close(signalDone)
+	go func() {
+		for {
+			select {
+			case sig := <-incomingSignals:
+				select {
+				case signals <- sig:
+					// Queue the signal before cancellation so failed preparation can
+					// report the requested signal exit code immediately.
+					cancelPrepare()
+				case <-signalDone:
+					return
+				}
+			case <-signalDone:
+				return
+			}
+		}
+	}()
+	if err := recoverRuns(prepareCtx, stderr); err != nil {
+		return preparationError(err, signals)
+	}
+	run, err := createRun()
+	if err != nil {
+		return code, err
+	}
+	defer func() {
+		if err := run.remove(); err != nil {
+			fmt.Fprintf(stderr, "mini-docker: cleanup %s: %v\n", run.path, err)
+		}
+	}()
+	cfg.RootFS = filepath.Join(run.path, "rootfs")
+	if err := os.Mkdir(cfg.RootFS, 0700); err != nil {
+		return code, err
+	}
+	if err := rootfs.Copy(prepareCtx, template, cfg.RootFS); err != nil {
+		return preparationError(fmt.Errorf("prepare rootfs: %w", err), signals)
+	}
+	select {
+	case sig := <-signals:
+		return 128 + int(sig.(syscall.Signal)), nil
+	default:
+	}
+	group, err := cgroup.Create(cfg.Memory, cfg.PidsLimit)
+	if err != nil {
+		return code, err
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), stopGrace)
+		defer cancel()
+		if err := group.Kill(); err != nil {
+			fmt.Fprintf(stderr, "mini-docker: kill cgroup %s: %v\n", group.Path(), err)
+		}
+		if err := group.WaitEmpty(ctx); err != nil {
+			run.keep = true
+			fmt.Fprintf(stderr, "mini-docker: preserve %s: cgroup cleanup: %v\n", run.path, err)
+			return
+		}
+		if oom, err := group.OOMKilled(); err == nil && oom {
+			fmt.Fprintln(stderr, "mini-docker: container exceeded its memory limit (OOM)")
+		}
+		if err := group.Close(); err != nil {
+			fmt.Fprintf(stderr, "mini-docker: remove cgroup %s: %v\n", group.Path(), err)
+		}
+	}()
+	if err := run.record(group.Path()); err != nil {
+		return code, err
+	}
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+	if err != nil {
+		return code, err
+	}
+	control := os.NewFile(uintptr(fds[0]), "supervisor-control")
+	childControl := os.NewFile(uintptr(fds[1]), "init-control")
+	defer control.Close()
+	defer childControl.Close()
+	exe, err := os.Executable()
+	if err != nil {
+		return code, err
+	}
+	cmd := exec.Command(exe, "__init")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	cmd.Env = baseEnvironment
+	cmd.ExtraFiles = []*os.File{childControl, run.lock}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return code, fmt.Errorf("start container init: %w", err)
+	}
+	childControl.Close()
+	waited := make(chan error, 1)
+	waitConsumed := false
+	go func() { waited <- cmd.Wait() }()
+	defer func() {
+		// After the main loop, guarantee Wait has reaped init before disk cleanup.
+		if !waitConsumed {
+			if err := group.Kill(); err != nil {
+				fmt.Fprintf(stderr, "mini-docker: stop init after cgroup kill failure: %v\n", err)
+				_ = cmd.Process.Kill()
+			}
+			select {
+			case <-waited:
+				waitConsumed = true
+			case <-time.After(stopGrace):
+				run.keep = true
+				fmt.Fprintf(stderr, "mini-docker: init did not exit; preserve %s\n", run.path)
+			}
+		}
+	}()
+	if err := group.Add(cmd.Process.Pid); err != nil {
+		// Init may still be outside the workload cgroup on a failed migration.
+		cmd.Process.Kill()
+		return code, fmt.Errorf("attach init to cgroup: %w", err)
+	}
+	encoder := json.NewEncoder(control)
+	if err := control.SetWriteDeadline(time.Now().Add(startupLimit)); err != nil {
+		return code, err
+	}
+	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg}); err != nil {
+		return code, fmt.Errorf("configure init: %w", err)
+	}
+	events := make(chan message, 4)
+	go func() {
+		defer close(events)
+		decoder := json.NewDecoder(control)
+		for {
+			var event message
+			if err := decoder.Decode(&event); err != nil {
+				return
+			}
+			events <- event
+		}
+	}()
+	startupTimer := time.NewTimer(startupLimit)
+	defer startupTimer.Stop()
+	var timeoutTimer, killTimer *time.Timer
+	var timeout, kill <-chan time.Time
+	defer func() {
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+		}
+		if killTimer != nil {
+			killTimer.Stop()
+		}
+	}()
+	started, stopping, timedOut := false, false, false
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			switch event.Kind {
+			case "ready":
+				if stopping {
+					continue
+				}
+				if err := encoder.Encode(message{Kind: "start"}); err != nil {
+					return 125, fmt.Errorf("authorize command: %w", err)
+				}
+			case "started":
+				started = true
+				startupTimer.Stop()
+				if cfg.Timeout > 0 && !stopping {
+					timeoutTimer = time.NewTimer(cfg.Timeout)
+					timeout = timeoutTimer.C
+				}
+			case "error":
+				return 125, fmt.Errorf("container startup: %s", event.Error)
+			}
+		case err := <-waited:
+			waitConsumed = true
+			if timedOut {
+				return 124, nil
+			}
+			if !started {
+				// A short command can exit before its buffered started event is selected.
+				for events != nil {
+					event, ok := <-events
+					if !ok {
+						break
+					}
+					if event.Kind == "error" {
+						return 125, errors.New(event.Error)
+					}
+					if event.Kind == "started" {
+						started = true
+					}
+				}
+			}
+			if !started && !stopping {
+				return 125, fmt.Errorf("init exited before starting the command: %v", err)
+			}
+			return processExitCode(cmd.ProcessState), nil
+		case sig := <-signals:
+			if !stopping {
+				stopping = true
+				timeout = nil
+				killTimer = time.NewTimer(stopGrace)
+				kill = killTimer.C
+			}
+			_ = cmd.Process.Signal(sig)
+		case <-timeout:
+			timedOut, stopping, timeout = true, true, nil
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+			killTimer = time.NewTimer(stopGrace)
+			kill = killTimer.C
+		case <-kill:
+			kill = nil
+			if err := group.Kill(); err != nil {
+				fmt.Fprintf(stderr, "mini-docker: stop init after cgroup kill failure: %v\n", err)
+				if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					return 125, fmt.Errorf("force container shutdown: %w", err)
+				}
+			}
+		case <-startupTimer.C:
+			return 125, errors.New("container startup timed out")
+		}
+	}
+}
+
+func preparationError(err error, signals <-chan os.Signal) (int, error) {
+	select {
+	case sig := <-signals:
+		return 128 + int(sig.(syscall.Signal)), nil
+	default:
+		return 125, err
+	}
+}
+
+func processExitCode(state *os.ProcessState) int {
+	if state == nil {
+		return 125
+	}
+	if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+		return 128 + int(status.Signal())
+	}
+	return state.ExitCode()
+}
