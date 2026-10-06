@@ -59,10 +59,65 @@ func TestMemoryBoundaries(t *testing.T) {
 }
 
 func TestHelpDoesNotRequireRootFS(t *testing.T) {
-	for _, args := range [][]string{nil, {"help"}, {"run", "--help"}, {"doctor", "-h"}, {"ps", "--help"}, {"logs", "-h"}, {"stop", "--help"}, {"rm", "-h"}} {
+	for _, args := range [][]string{nil, {"help"}, {"run", "--help"}, {"doctor", "-h"}, {"ps", "--help"}, {"logs", "-h"}, {"stop", "--help"}, {"rm", "-h"}, {"exec", "--help"}} {
 		r, err := Parse(args)
 		if err != nil || r.Action != "help" {
 			t.Errorf("Parse(%q) = %+v, %v", args, r, err)
+		}
+	}
+}
+
+func TestExecOptions(t *testing.T) {
+	r, err := Parse([]string{"exec", "-i", "--env", "COLOR=blue", "--env", "COLOR=red", "--env", "EMPTY=", "--workdir", "/work/../tmp/", "--timeout", "2s", "worker", "--", "/bin/sh", "-c", "echo '$HOME'; exit 7", "--env", "COMMAND=value", "-it"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Action != "exec" || r.Reference != "worker" || !r.Exec.Interactive || r.Exec.Workdir != "/tmp" || r.Exec.Timeout != 2*time.Second {
+		t.Fatalf("unexpected exec options: %+v", r)
+	}
+	if !reflect.DeepEqual(r.Exec.Env, []string{"COLOR=blue", "COLOR=red", "EMPTY="}) {
+		t.Fatalf("environment changed: %q", r.Exec.Env)
+	}
+	if !reflect.DeepEqual(r.Exec.Command, []string{"/bin/sh", "-c", "echo '$HOME'; exit 7", "--env", "COMMAND=value", "-it"}) {
+		t.Fatalf("command changed: %q", r.Exec.Command)
+	}
+	defaults, err := Parse([]string{"exec", "worker", "--", "true"})
+	if err != nil || defaults.Exec.Interactive || defaults.Exec.Workdir != "" || defaults.Exec.Timeout != 0 || defaults.Exec.Env != nil {
+		t.Fatalf("unexpected exec defaults: %+v, %v", defaults, err)
+	}
+	for _, flag := range []string{"-i", "--interactive", "--interactive=false"} {
+		got, err := Parse([]string{"exec", flag, "worker", "--", "cat"})
+		if err != nil || got.Exec.Interactive != (flag != "--interactive=false") {
+			t.Fatalf("Parse(%q): %+v, %v", flag, got, err)
+		}
+	}
+}
+
+func TestExecRejectsInvalidArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"exec"}, {"exec", "worker"}, {"exec", "worker", "true"},
+		{"exec", "worker", "--"}, {"exec", "worker", "--", ""},
+		{"exec", "a", "b", "--", "true"}, {"exec", "", "--", "true"},
+		{"exec", "worker", "-i", "--", "cat"}, {"exec", "worker", "--env", "K=V", "--", "true"},
+		{"exec", "../worker", "--", "true"}, {"exec", "worker\x00", "--", "true"},
+		{"exec", "--env", "KEY", "worker", "--", "true"},
+		{"exec", "--env", "BAD-KEY=v", "worker", "--", "true"},
+		{"exec", "--env", "KEY=a\x00b", "worker", "--", "true"},
+		{"exec", "--workdir", "relative", "worker", "--", "true"},
+		{"exec", "--workdir", "", "worker", "--", "true"},
+		{"exec", "--workdir", "/a\x00b", "worker", "--", "true"},
+		{"exec", "--timeout", "-1s", "worker", "--", "true"},
+		{"exec", "--user", "0", "worker", "--", "true"},
+		{"exec", "--rootfs", "/tmp", "worker", "--", "true"},
+		{"exec", "worker", "--", "true", "a\x00b"},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid exec arguments: %q", args)
+		}
+	}
+	for _, flag := range []string{"-t", "--tty", "-it", "-ti", "--tty=false"} {
+		if _, err := Parse([]string{"exec", flag, "worker", "--", "true"}); err == nil || !strings.Contains(err.Error(), "terminal allocation is not supported") {
+			t.Errorf("terminal flag %q did not explain unsupported allocation: %v", flag, err)
 		}
 	}
 }

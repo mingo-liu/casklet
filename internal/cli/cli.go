@@ -26,6 +26,7 @@ import (
 
 const usage = `Usage:
   mini-docker run --rootfs DIRECTORY [OPTIONS] -- COMMAND [ARGS...]
+  mini-docker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
   mini-docker ps [-a|--all] [--json]
   mini-docker stop ID|NAME
   mini-docker logs [--tail N] [-f|--follow] ID|NAME
@@ -50,6 +51,12 @@ Run options:
   --read-only    Mount the container root filesystem read-only
   --timeout      Command duration limit; 0 disables it (default: 0)
 
+Exec options:
+  -i, --interactive  Forward stdin (default: no input)
+  --env          Override KEY=VALUE; repeat to add variables
+  --workdir      Existing absolute directory (default: container configuration)
+  --timeout      Command duration limit; 0 disables it (default: 0)
+
 Containers require Linux, root privileges, and a delegated cgroups v2 scope.
 Use scripts/run-linux.sh to launch the CLI in a delegated scope.
 Management flags must precede the container identifier. ps lists active
@@ -58,11 +65,15 @@ entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
 stop sends SIGTERM, then SIGKILL after the grace period. rm requires a stopped
 container. Detached containers receive no input; stdout and stderr are merged.
 Terminal options require a foreground run. -it requires a terminal on stdin.
+exec inherits the container user, isolation, and resource limits. Its output
+goes to the invoking terminal rather than the retained container log.
+exec terminal allocation is not supported yet. Flags must precede ID|NAME.
 `
 
 type Request struct {
 	Action    string
 	Config    config.Config
+	Exec      config.Exec
 	Detach    bool
 	Name      string
 	All       bool
@@ -79,6 +90,9 @@ func Parse(args []string) (Request, error) {
 		return Request{Action: "help"}, nil
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "exec" {
+		return parseExec(r, args[1:])
+	}
 	if r.Action == "ps" || r.Action == "stop" || r.Action == "logs" || r.Action == "rm" {
 		return parseManagement(r, args[1:])
 	}
@@ -282,6 +296,68 @@ func parseManagement(r Request, args []string) (Request, error) {
 	return r, nil
 }
 
+func parseExec(r Request, args []string) (Request, error) {
+	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.BoolVar(&r.Exec.Interactive, "interactive", false, "forward stdin")
+	fs.BoolVar(&r.Exec.Interactive, "i", false, "forward stdin")
+	var tty bool
+	fs.BoolVar(&tty, "tty", false, "allocate a terminal")
+	fs.BoolVar(&tty, "t", false, "allocate a terminal")
+	fs.Func("env", "environment assignment", func(value string) error {
+		r.Exec.Env = append(r.Exec.Env, value)
+		return nil
+	})
+	fs.StringVar(&r.Exec.Workdir, "workdir", "", "working directory")
+	fs.DurationVar(&r.Exec.Timeout, "timeout", 0, "command timeout")
+	separator := -1
+	for i, arg := range args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	options := args
+	if separator >= 0 {
+		options = args[:separator]
+		r.Exec.Command = append([]string(nil), args[separator+1:]...)
+	}
+	if err := fs.Parse(expandTerminalFlags(fs, options)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return Request{Action: "help"}, nil
+		}
+		return r, err
+	}
+	var terminalSpecified, workdirSpecified bool
+	fs.Visit(func(f *flag.Flag) {
+		terminalSpecified = terminalSpecified || f.Name == "t" || f.Name == "tty"
+		workdirSpecified = workdirSpecified || f.Name == "workdir"
+	})
+	if terminalSpecified {
+		return r, errors.New("exec terminal allocation is not supported yet; omit --tty and -t")
+	}
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		return r, errors.New("exec requires exactly one container ID or name before --; flags must precede it")
+	}
+	r.Reference = fs.Arg(0)
+	if strings.ContainsAny(r.Reference, "/\\\x00") || r.Reference == "." || r.Reference == ".." {
+		return r, errors.New("invalid container ID or name")
+	}
+	if separator < 0 {
+		return r, errors.New("a command is required after --")
+	}
+	if workdirSpecified && r.Exec.Workdir == "" {
+		return r, errors.New("--workdir must be an absolute path")
+	}
+	if err := r.Exec.Validate(); err != nil {
+		return r, err
+	}
+	if r.Exec.Workdir != "" {
+		r.Exec.Workdir = path.Clean(r.Exec.Workdir)
+	}
+	return r, nil
+}
+
 func ParseMemory(value string) (int64, error) {
 	original := value
 	value = strings.ToLower(value)
@@ -380,6 +456,15 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return 0
 	case "ps", "stop", "logs", "rm":
 		return executeManagement(r, stdout, stderr)
+	case "exec":
+		signals := make(chan os.Signal, 16)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+		defer signal.Stop(signals)
+		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
+		if err != nil {
+			fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+		}
+		return code
 	default:
 		if r.Detach {
 			return executeManagement(r, stdout, stderr)

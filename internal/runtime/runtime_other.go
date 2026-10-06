@@ -24,6 +24,10 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, _ Observ
 	return Run(cfg, stdin, stdout, stderr)
 }
 
+func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, _ Observer, _ Executor) (int, error) {
+	return Run(cfg, stdin, stdout, stderr)
+}
+
 func RecoverRun(_ context.Context, _ string) error          { return Check("") }
 func RecoverAbandoned(_ context.Context, _ io.Writer) error { return Check("") }
 

@@ -18,6 +18,9 @@ func List(context.Context, bool) ([]Record, error)             { return nil, err
 func Stop(context.Context, string) (Record, error)             { return Record{}, errUnsupportedStore }
 func Logs(context.Context, string, int, bool, io.Writer) error { return errUnsupportedStore }
 func Remove(context.Context, string) error                     { return errUnsupportedStore }
+func Exec(context.Context, string, config.Exec, *os.File, *os.File, *os.File, <-chan os.Signal) (int, error) {
+	return 125, errUnsupportedStore
+}
 func Supervisor(string) int {
 	fmt.Fprintln(os.Stderr, "mini-docker:", errUnsupportedStore)
 	return 125

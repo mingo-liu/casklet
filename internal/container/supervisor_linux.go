@@ -121,7 +121,7 @@ func supervise(store *Store, id string) (int, error, bool) {
 			return nil
 		})
 	}
-	code, runErr := containerruntime.RunWithObserver(cfg, input, writer, writer, observer)
+	code, runErr := containerruntime.RunWithExec(cfg, input, writer, writer, observer, newExecServer(store, id))
 	if runErr != nil {
 		fmt.Fprintln(writer, "mini-docker:", runErr)
 	}

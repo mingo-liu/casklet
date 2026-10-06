@@ -16,6 +16,7 @@ import (
 
 	"github.com/mingo-liu/mini-docker/internal/cgroup"
 	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/ipc"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
@@ -29,10 +30,11 @@ const (
 var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 
 type message struct {
-	Kind     string         `json:"kind"`
-	Config   *config.Config `json:"config,omitempty"`
-	Error    string         `json:"error,omitempty"`
-	ExitCode int            `json:"exit_code,omitempty"`
+	Kind        string         `json:"kind"`
+	Config      *config.Config `json:"config,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	ExitCode    int            `json:"exit_code,omitempty"`
+	ExecEnabled bool           `json:"exec_enabled,omitempty"`
 }
 
 func Check(template string) error {
@@ -84,6 +86,11 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 // RunWithObserver adds durable startup notifications for background supervisors.
 // Cleanup completes before this function returns to its caller.
 func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer) (code int, runErr error) {
+	return RunWithExec(cfg, stdin, stdout, stderr, observer, nil)
+}
+
+// RunWithExec publishes pinned resources for managed container execution.
+func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor) (code int, runErr error) {
 	code = 125
 	if err := cfg.ValidateExecution(); err != nil {
 		return code, err
@@ -182,6 +189,20 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	if err := run.record(group.Path()); err != nil {
 		return code, err
 	}
+	var namespaces []*os.File
+	var executable *os.File
+	if executor != nil {
+		if cfg.TTY {
+			return code, errors.New("managed exec is unavailable for terminal runs")
+		}
+		defer func() {
+			runErr = errors.Join(runErr, executor.Close())
+			ipc.CloseFiles(namespaces)
+			if executable != nil {
+				executable.Close()
+			}
+		}()
+	}
 	event := Event{Phase: "prepared", RunPath: run.path, Cgroup: group.Path()}
 	if observer != nil {
 		if err := observer(event); err != nil {
@@ -200,6 +221,12 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	if err != nil {
 		return code, err
 	}
+	if executor != nil {
+		executable, err = os.Open(exe)
+		if err != nil {
+			return code, err
+		}
+	}
 	cmd := exec.Command(exe, "__init")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if !cfg.Interactive || cfg.TTY {
@@ -213,7 +240,7 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	cmd.Env = baseEnvironment
 	cmd.ExtraFiles = []*os.File{childControl, run.lock}
 	var terminalSocket, childTerminal *os.File
-	if cfg.TTY {
+	if cfg.TTY || executor != nil {
 		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
 		if err != nil {
 			return code, err
@@ -260,7 +287,7 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	if err := control.SetWriteDeadline(time.Now().Add(startupLimit)); err != nil {
 		return code, err
 	}
-	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg}); err != nil {
+	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg, ExecEnabled: executor != nil}); err != nil {
 		return code, fmt.Errorf("configure init: %w", err)
 	}
 	events := make(chan message, 4)
@@ -293,6 +320,11 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 		if started {
 			return nil
 		}
+		if executor != nil {
+			if err := executor.Start(ExecResources{Namespaces: namespaces[:5], Root: namespaces[5], Executable: executable, Group: group, Config: cfg}); err != nil {
+				return fmt.Errorf("enable container exec: %w", err)
+			}
+		}
 		if observer != nil {
 			event.Phase = "started"
 			if err := observer(event); err != nil {
@@ -320,6 +352,13 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 			case "ready":
 				if stopping {
 					continue
+				}
+				if executor != nil {
+					var err error
+					namespaces, err = receiveExecNamespaces(terminalFD(terminalSocket))
+					if err != nil {
+						return 125, fmt.Errorf("receive container namespaces: %w", err)
+					}
 				}
 				if cfg.TTY {
 					master, err := receiveTerminal(terminalFD(terminalSocket))

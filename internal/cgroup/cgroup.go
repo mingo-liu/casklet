@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -83,8 +84,42 @@ func (g *Group) OOMKilled() (bool, error) {
 // Close removes the empty workload leaf. Repeated cleanup is harmless.
 // The manager leaf is owned by the process and removed when systemd ends scope.
 func (g *Group) Close() error {
-	if err := os.Remove(g.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove cgroup %s: %w", g.path, err)
+	return RemoveEmpty(g.path)
+}
+
+var execChildName = regexp.MustCompile(`^exec-[0-9a-f]{24}$`)
+
+// RemoveEmpty removes verified empty execution children before their workload.
+// This also handles abandoned child groups after a supervisor is lost.
+func RemoveEmpty(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !execChildName.MatchString(entry.Name()) {
+			return fmt.Errorf("preserve unexpected cgroup child: %s", entry.Name())
+		}
+		child := filepath.Join(dir, entry.Name())
+		counters, err := readCounters(filepath.Join(child, "cgroup.events"))
+		if err != nil {
+			return err
+		}
+		if populated, ok := counters["populated"]; !ok || populated != 0 {
+			return fmt.Errorf("preserve populated exec cgroup: %s", child)
+		}
+		if err := os.Remove(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove exec cgroup: %w", err)
+		}
+	}
+	if err := os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove cgroup %s: %w", dir, err)
 	}
 	return nil
 }

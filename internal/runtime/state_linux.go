@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mingo-liu/mini-docker/internal/cgroup"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -347,7 +349,7 @@ func reclaimRunAt(path string, paths statePaths) error {
 			if !empty {
 				return errors.New("recorded cgroup still contains processes")
 			}
-			if err := os.Remove(group); err != nil {
+			if err := cgroup.RemoveEmpty(group); err != nil {
 				return fmt.Errorf("remove recorded cgroup: %w", err)
 			}
 		}

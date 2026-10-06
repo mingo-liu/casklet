@@ -70,6 +70,17 @@ func Init() int {
 	if err := enableLoopback(); err != nil {
 		return fail(err)
 	}
+	if prepare.ExecEnabled {
+		if cfg.TTY {
+			return fail(errors.New("terminal init does not accept managed exec"))
+		}
+		unix.CloseOnExec(5)
+		err := sendExecNamespaces(5)
+		unix.Close(5)
+		if err != nil {
+			return fail(fmt.Errorf("share container namespaces: %w", err))
+		}
+	}
 	var terminal, terminalMaster *os.File
 	if cfg.TTY {
 		unix.CloseOnExec(5)
