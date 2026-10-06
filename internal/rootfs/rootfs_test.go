@@ -1,10 +1,12 @@
 package rootfs
 
 import (
+	"bytes"
 	"context"
 	"debug/elf"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -150,7 +152,7 @@ func TestCopyRejectsOverlappingAndNonemptyDestination(t *testing.T) {
 	source := template(t)
 	nested := filepath.Join(source, "destination")
 	must(t, os.Mkdir(nested, 0700))
-	for _, pair := range [][2]string{{source, source}, {source, nested}, {nested, source}, {"/", t.TempDir()}} {
+	for _, pair := range [][2]string{{source, source}, {source, nested}, {nested, source}, {"/", t.TempDir()}, {source, ""}} {
 		if err := Copy(context.Background(), pair[0], pair[1]); err == nil {
 			t.Fatalf("invalid copy %q to %q accepted", pair[0], pair[1])
 		}
@@ -172,6 +174,81 @@ func TestCopyCancellation(t *testing.T) {
 	cancel()
 	if err := Copy(ctx, template(t), t.TempDir()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected cancellation, got %v", err)
+	}
+}
+
+func TestCopyRejectsSymlinkDestinationWithSuffix(t *testing.T) {
+	source := template(t)
+	for _, suffix := range []string{"/", "/."} {
+		t.Run(suffix, func(t *testing.T) {
+			destination := t.TempDir()
+			link := filepath.Join(t.TempDir(), "destination")
+			must(t, os.Symlink(destination, link))
+			if err := Copy(context.Background(), source, link+suffix); err == nil {
+				t.Fatalf("symlink destination with suffix %q was accepted", suffix)
+			}
+			entries, err := os.ReadDir(destination)
+			must(t, err)
+			if len(entries) != 0 {
+				t.Fatal("rejected destination was modified")
+			}
+		})
+	}
+}
+
+func TestCopyDirectorySpecialModes(t *testing.T) {
+	source, destination := template(t), t.TempDir()
+	path := filepath.Join(source, "shared")
+	must(t, os.Mkdir(path, 0700))
+	must(t, os.Chmod(path, 0777|os.ModeSticky|os.ModeSetuid|os.ModeSetgid))
+	must(t, Copy(context.Background(), source, destination))
+	info, err := os.Stat(filepath.Join(destination, "shared"))
+	must(t, err)
+	if info.Mode().Perm() != 0777 || info.Mode()&os.ModeSticky == 0 || info.Mode()&(os.ModeSetuid|os.ModeSetgid) != 0 {
+		t.Fatalf("unexpected shared-directory permissions: %s", info.Mode())
+	}
+}
+
+func TestCopyMultipleChunks(t *testing.T) {
+	source, destination := template(t), t.TempDir()
+	// Distinct nonzero bytes exercise multiple reads and the final short read.
+	data := make([]byte, 96*1024+17)
+	for i := range data {
+		data[i] = byte(i%251 + 1)
+	}
+	must(t, os.WriteFile(filepath.Join(source, "large"), data, 0644))
+	must(t, os.WriteFile(filepath.Join(source, "small"), []byte("short"), 0644))
+	must(t, Copy(context.Background(), source, destination))
+	for name, want := range map[string][]byte{"large": data, "small": []byte("short")} {
+		got, err := os.ReadFile(filepath.Join(destination, name))
+		must(t, err)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("copied file %s has incorrect content", name)
+		}
+	}
+}
+
+func BenchmarkCopyManyFiles(b *testing.B) {
+	source, parent := b.TempDir(), b.TempDir()
+	data := make([]byte, 1024)
+	for i := 0; i < 128; i++ {
+		if err := os.WriteFile(filepath.Join(source, fmt.Sprintf("file-%03d", i)), data, 0644); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		destination, err := os.MkdirTemp(parent, "copy-")
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := Copy(context.Background(), source, destination); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.RemoveAll(destination); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

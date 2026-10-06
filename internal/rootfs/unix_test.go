@@ -27,7 +27,7 @@ func TestCopyFileDoesNotFollowSymlinks(t *testing.T) {
 	link := filepath.Join(directory, "link")
 	must(t, os.WriteFile(target, []byte("secret"), 0600))
 	must(t, os.Symlink(target, link))
-	if err := copyFile(context.Background(), link, filepath.Join(directory, "copy"), 0600); err == nil {
+	if err := copyFile(context.Background(), link, filepath.Join(directory, "copy"), 0600, nil); err == nil {
 		t.Fatal("copyFile followed a source symlink")
 	}
 }

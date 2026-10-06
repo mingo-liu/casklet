@@ -113,6 +113,12 @@ func Copy(ctx context.Context, source, destination string) error {
 	if source == string(filepath.Separator) {
 		return errors.New("the host root cannot be copied as a rootfs")
 	}
+	if destination == "" {
+		return errors.New("rootfs copy destination is required")
+	}
+	// Lstat follows a final symlink when its path ends in a slash or '/.'.
+	// Normalize those suffixes before checking the destination's final entry.
+	destination = filepath.Clean(destination)
 	if err := realDirectory(destination); err != nil {
 		return fmt.Errorf("copy destination: %w", err)
 	}
@@ -138,6 +144,7 @@ func Copy(ctx context.Context, source, destination string) error {
 		mode fs.FileMode
 	}
 	var directories []copiedDirectory
+	buffer := make([]byte, 32*1024)
 	err = filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -164,7 +171,7 @@ func Copy(ctx context.Context, source, destination string) error {
 			}
 			directories = append(directories, copiedDirectory{target, mode})
 		case mode.IsRegular():
-			if err := copyFile(ctx, path, target, mode); err != nil {
+			if err := copyFile(ctx, path, target, mode, buffer); err != nil {
 				return fmt.Errorf("copy %s: %w", rel, err)
 			}
 		case mode&os.ModeSymlink != 0:
@@ -205,7 +212,7 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 
-func copyFile(ctx context.Context, source, destination string, mode fs.FileMode) error {
+func copyFile(ctx context.Context, source, destination string, mode fs.FileMode, buffer []byte) error {
 	in, err := openSource(source)
 	if err != nil {
 		return err
@@ -222,7 +229,9 @@ func copyFile(ctx context.Context, source, destination string, mode fs.FileMode)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(out, contextReader{ctx: ctx, r: in})
+	// Hide File.ReadFrom, which would bypass CopyBuffer's shared buffer. The
+	// context reader still checks cancellation before every bounded read.
+	_, copyErr := io.CopyBuffer(struct{ io.Writer }{out}, contextReader{ctx: ctx, r: in}, buffer)
 	closeErr := out.Close()
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		return err
