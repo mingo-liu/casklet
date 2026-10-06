@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/mini-docker/internal/container"
 )
 
 func TestParseCommandBoundaries(t *testing.T) {
@@ -53,10 +59,139 @@ func TestMemoryBoundaries(t *testing.T) {
 }
 
 func TestHelpDoesNotRequireRootFS(t *testing.T) {
-	for _, args := range [][]string{nil, {"help"}, {"run", "--help"}, {"doctor", "-h"}} {
+	for _, args := range [][]string{nil, {"help"}, {"run", "--help"}, {"doctor", "-h"}, {"ps", "--help"}, {"logs", "-h"}, {"stop", "--help"}, {"rm", "-h"}} {
 		r, err := Parse(args)
 		if err != nil || r.Action != "help" {
 			t.Errorf("Parse(%q) = %+v, %v", args, r, err)
+		}
+	}
+}
+
+func TestDetachedRunOptions(t *testing.T) {
+	for _, detach := range []string{"-d", "--detach"} {
+		r, err := Parse([]string{"run", detach, "--name", "task_1.dev-2", "--rootfs", "/tmp/r", "--", "sh", "--detach", "--name", "command-option"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !r.Detach || r.Name != "task_1.dev-2" {
+			t.Fatalf("unexpected detached options: %+v", r)
+		}
+		if !reflect.DeepEqual(r.Config.Command, []string{"sh", "--detach", "--name", "command-option"}) {
+			t.Fatalf("command arguments changed: %q", r.Config.Command)
+		}
+	}
+	for _, options := range [][]string{
+		{"--name", "task"},
+		{"--detach=false", "--name", "task"},
+		{"-d", "--name", ""},
+		{"-d", "--name", "../task"},
+		{"-d", "--name", "-task"},
+		{"-d", "--name", "task space"},
+		{"-d", "--name", strings.Repeat("a", 64)},
+	} {
+		args := append([]string{"run", "--rootfs", "/tmp/r"}, options...)
+		args = append(args, "--", "sh")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid detached arguments: %q", args)
+		}
+	}
+	r, err := Parse([]string{"run", "-d", "--rootfs", "/tmp/r", "--", "sh"})
+	if err != nil || !r.Detach || r.Name != "" {
+		t.Fatalf("unnamed detached container: %+v, %v", r, err)
+	}
+}
+
+func TestManagementCommands(t *testing.T) {
+	for _, args := range [][]string{{"ps", "-a", "--json"}, {"ps", "--all", "--json"}} {
+		r, err := Parse(args)
+		if err != nil || r.Action != "ps" || !r.All || !r.JSON {
+			t.Fatalf("Parse(%q) = %+v, %v", args, r, err)
+		}
+	}
+	r, err := Parse([]string{"ps"})
+	if err != nil || r.All || r.JSON {
+		t.Fatalf("unexpected ps defaults: %+v, %v", r, err)
+	}
+	for _, action := range []string{"stop", "logs", "rm"} {
+		r, err := Parse([]string{action, "task_1"})
+		if err != nil || r.Action != action || r.Reference != "task_1" {
+			t.Fatalf("Parse(%q) = %+v, %v", action, r, err)
+		}
+		if action == "logs" && (r.Tail != -1 || r.Follow) {
+			t.Fatalf("unexpected logs defaults: %+v", r)
+		}
+	}
+	for _, follow := range []string{"-f", "--follow"} {
+		r, err := Parse([]string{"logs", "--tail", "3", follow, "task"})
+		if err != nil || r.Tail != 3 || !r.Follow || r.Reference != "task" {
+			t.Fatalf("unexpected log options: %+v, %v", r, err)
+		}
+	}
+	for _, tail := range []string{"0", "1000000"} {
+		if _, err := Parse([]string{"logs", "--tail", tail, "task"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagementRejectsInvalidArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"ps", "task"}, {"ps", "--rootfs", "/tmp/r"},
+		{"stop"}, {"stop", "a", "b"}, {"stop", ""}, {"stop", "--force", "task"},
+		{"rm"}, {"rm", "a", "b"}, {"rm", "--force", "task"}, {"rm", "../task"},
+		{"logs"}, {"logs", "a", "b"}, {"logs", "--tail", "-1", "task"},
+		{"logs", "--tail", "1000001", "task"}, {"logs", "--tail", "abc", "task"},
+		{"logs", "task", "--tail", "1"}, {"logs", "task", "-f"},
+		{"logs", "task\x00"}, {"logs", "/task"}, {"rm", "."}, {"rm", ".."},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid management arguments: %q", args)
+		}
+	}
+}
+
+func TestContainerListingOutput(t *testing.T) {
+	code := 7
+	created := time.Date(2026, 10, 6, 10, 11, 12, 0, time.FixedZone("local", 3600))
+	records := []container.Record{{ID: "abc123", Name: "task", State: "exited", CreatedAt: created, ExitCode: &code, Command: []string{"sh", "-c", "echo hello\nexit 7"}}}
+	var out bytes.Buffer
+	if err := writeRecords(&out, records, false); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, want := range []string{"ID", "NAME", "STATUS", "EXIT", "CREATED", "COMMAND", "abc123", "task", "exited", "7", "2026-10-06T09:11:12Z", `sh -c "echo hello\nexit 7"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("listing missing %q: %s", want, text)
+		}
+	}
+	if strings.Count(text, "\n") != 2 {
+		t.Fatalf("command escaped table boundaries: %q", text)
+	}
+	out.Reset()
+	if err := writeRecords(&out, records, true); err != nil {
+		t.Fatal(err)
+	}
+	var decoded []container.Record
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 1 || decoded[0].ID != "abc123" || decoded[0].ExitCode == nil || *decoded[0].ExitCode != 7 || !reflect.DeepEqual(decoded[0].Command, records[0].Command) {
+		t.Fatalf("JSON listing did not preserve records: %+v", decoded)
+	}
+	out.Reset()
+	if err := writeRecords(&out, nil, true); err != nil || out.String() != "[]\n" {
+		t.Fatalf("empty JSON listing = %q, %v", out.String(), err)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
+
+func TestContainerListingPropagatesWriteFailure(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		if err := writeRecords(failingWriter{}, nil, asJSON); err == nil {
+			t.Error("listing ignored output failure")
 		}
 	}
 }

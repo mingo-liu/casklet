@@ -198,6 +198,32 @@ func productionStatePaths() statePaths {
 	}
 }
 
+// RecoverAbandoned honors run locks and reclaims only verified stale resources.
+func RecoverAbandoned(ctx context.Context, stderr io.Writer) error {
+	return recoverRuns(ctx, stderr)
+}
+
+// RecoverRun reclaims only an abandoned foreground working directory. A live
+// init retains its run lock, so background management cannot remove its rootfs.
+func RecoverRun(ctx context.Context, path string) error {
+	paths := productionStatePaths()
+	if err := validateRunPath(paths.runsRoot, path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if err := ensureRunsRoot(); err != nil {
+		return err
+	}
+	lock, err := lockRecoveryCandidate(ctx, path, paths)
+	if err != nil {
+		return fmt.Errorf("lock abandoned container resources: %w", err)
+	}
+	defer lock.Close()
+	return reclaimRunAt(path, paths)
+}
+
 type statePaths struct {
 	runsRoot, cgroupRoot, mountInfo string
 	checkDirectory                  func(string) error

@@ -78,6 +78,12 @@ func Probe() int {
 }
 
 func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr error) {
+	return RunWithObserver(cfg, stdin, stdout, stderr, nil)
+}
+
+// RunWithObserver adds durable startup notifications for background supervisors.
+// Cleanup completes before this function returns to its caller.
+func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer) (code int, runErr error) {
 	code = 125
 	if err := cfg.ValidateExecution(); err != nil {
 		return code, err
@@ -126,6 +132,11 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 			fmt.Fprintf(stderr, "mini-docker: cleanup %s: %v\n", run.path, err)
 		}
 	}()
+	if observer != nil {
+		if err := observer(Event{Phase: "preparing", RunPath: run.path}); err != nil {
+			return code, fmt.Errorf("record container preparation: %w", err)
+		}
+	}
 	cfg.RootFS = filepath.Join(run.path, "rootfs")
 	if err := os.Mkdir(cfg.RootFS, 0700); err != nil {
 		return code, err
@@ -162,6 +173,12 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 	}()
 	if err := run.record(group.Path()); err != nil {
 		return code, err
+	}
+	event := Event{Phase: "prepared", RunPath: run.path, Cgroup: group.Path()}
+	if observer != nil {
+		if err := observer(event); err != nil {
+			return code, fmt.Errorf("record container resources: %w", err)
+		}
 	}
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
 	if err != nil {
@@ -240,6 +257,19 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 		}
 	}()
 	authorized, started, mainExited, stopping, timedOut := false, false, false, false, false
+	recordStarted := func() error {
+		if started {
+			return nil
+		}
+		if observer != nil {
+			event.Phase = "started"
+			if err := observer(event); err != nil {
+				return fmt.Errorf("record command startup: %w", err)
+			}
+		}
+		started = true
+		return nil
+	}
 	commandExit := 125
 	stopTimeout := func() {
 		timeout = nil
@@ -264,7 +294,9 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 				}
 				authorized = true
 			case "started":
-				started = true
+				if err := recordStarted(); err != nil {
+					return 125, err
+				}
 				startupTimer.Stop()
 				if cfg.Timeout > 0 && !stopping {
 					timeoutTimer = time.NewTimer(cfg.Timeout)
@@ -298,7 +330,9 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 						return 125, errors.New(event.Error)
 					}
 				case "started":
-					started = true
+					if err := recordStarted(); err != nil {
+						return 125, err
+					}
 				case "exited":
 					mainExited, commandExit = true, event.ExitCode
 				}
