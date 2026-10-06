@@ -1,12 +1,14 @@
 # mini-docker
 
-A small Go container runtime for Linux arm64 and amd64. Run a foreground command in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory and process limits.
+A small Go container runtime for Linux arm64 and amd64. Run a foreground command in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
+
+The foreground MVP is implemented and validated in the dedicated Linux VM. Subsequent additions provide configurable environments, working directories, numeric users, and read-only root filesystems.
 
 ## Requirements
 
 Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. The launcher obtains a delegated systemd scope rather than modifying systemd's top-level cgroups.
 
-This MVP runs trusted programs as container UID 0 with reduced capabilities. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, rootless execution, or terminal allocation.
+Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, rootless execution, or terminal allocation.
 
 ## Development VM on macOS
 
@@ -46,7 +48,28 @@ printf 'hello\n' | ./scripts/run-linux.sh run \
 
 The launcher uses `sudo systemd-run --scope` and preserves standard input and the command's exit status. Override `MINI_DOCKER_BINARY` to use another executable. Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax.
 
-Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited). Memory suffixes `k`, `m`, and `g` use powers of 1024. Each run copies the rootfs template, mounts independent `/proc` and temporary storage, and removes its working filesystem after exit. Networking contains loopback only. The command receives a fixed environment and starts in `/`.
+Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited). Memory suffixes `k`, `m`, and `g` use powers of 1024. Each run copies the rootfs template, mounts independent `/proc` and temporary storage, and removes its working filesystem after exit. Networking contains loopback only. By default, the command receives a fixed environment and starts in `/`.
+
+### Resource and execution options
+
+```sh
+./scripts/run-linux.sh run --rootfs ./rootfs/busybox \
+  --cpus 0.5 --env MODE=demo --env EMPTY= --workdir /tmp \
+  --user 1000:1000 --read-only \
+  -- /bin/sh -c 'id; pwd; echo "$MODE"; echo hello > result; cat result'
+```
+
+| Option | Behavior |
+| --- | --- |
+| `--cpus` | `0` means unlimited; accept `0.01` through `1000`, with up to three decimal places. Set total container CPU bandwidth over a 100ms period; `0.5` allows half of one CPU. Require the delegated CPU controller only when a limit is requested. |
+| `--env KEY=VALUE` | Repeat to add variables; the last assignment wins. Accept empty values and `=` in values. Names use letters, digits, and underscores and cannot start with a digit. Override the fixed `PATH=/bin:/usr/bin`, `HOME=/`, and `LANG=C` defaults without inheriting host variables. |
+| `--workdir /PATH` | Use an existing directory inside the container; default `/`. Missing or inaccessible directories fail startup. Command lookup uses the configured `PATH` and working directory inside the container. |
+| `--user UID[:GID]` | Use numeric IDs from `0` through `4294967294`; GID defaults to UID. Clear supplementary groups and all capability sets before starting the command. The container init uses the same identity to supervise descendants. |
+| `--read-only` | Mount the copied root read-only. `/tmp` remains a writable, size-limited tmpfs; minimal `/dev` remains usable. The default root is writable and temporary. |
+
+Numeric users are not user-namespace mappings and do not enable rootless execution. Copied files remain owned by root; custom rootfs templates must grant the selected user access to its working directory and executables. `make rootfs` now generates a traversable root directory; regenerate an older template if its root mode is `0700`.
+
+CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu). The supervisor stays outside the workload quota; init, command processes, and their threads share the limit.
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
 
@@ -63,7 +86,11 @@ Normal command exit codes pass through. Signal exits use `128 + signal`; timeout
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Use `./scripts/test-linux.sh -test.run TestExecution` for a focused run. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Use `./scripts/test-linux.sh -test.run TestExecution` for a focused run. Resource tests use bounded helpers and deadlines.
+
+## Next milestones
+
+Implement persistent container lifecycle management (`run -d`, `ps`, `stop`, `logs`, `rm`) next, followed by interactive terminals and `exec`. Image storage/import and external networking follow these milestones. Each addition must retain the foreground isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 
