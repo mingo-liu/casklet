@@ -29,9 +29,10 @@ const (
 var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 
 type message struct {
-	Kind   string         `json:"kind"`
-	Config *config.Config `json:"config,omitempty"`
-	Error  string         `json:"error,omitempty"`
+	Kind     string         `json:"kind"`
+	Config   *config.Config `json:"config,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	ExitCode int            `json:"exit_code,omitempty"`
 }
 
 func Check(template string) error {
@@ -113,9 +114,9 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 	if err := recoverRuns(prepareCtx, stderr); err != nil {
 		return preparationError(err, signals)
 	}
-	run, err := createRun()
+	run, err := createRun(prepareCtx)
 	if err != nil {
-		return code, err
+		return preparationError(err, signals)
 	}
 	defer func() {
 		if err := run.remove(); err != nil {
@@ -235,7 +236,14 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 			killTimer.Stop()
 		}
 	}()
-	started, stopping, timedOut := false, false, false
+	authorized, started, mainExited, stopping, timedOut := false, false, false, false, false
+	commandExit := 125
+	stopTimeout := func() {
+		timeout = nil
+		if timeoutTimer != nil {
+			timeoutTimer.Stop()
+		}
+	}
 	for {
 		select {
 		case event, ok := <-events:
@@ -251,6 +259,7 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 				if err := encoder.Encode(message{Kind: "start"}); err != nil {
 					return 125, fmt.Errorf("authorize command: %w", err)
 				}
+				authorized = true
 			case "started":
 				started = true
 				startupTimer.Stop()
@@ -258,37 +267,58 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 					timeoutTimer = time.NewTimer(cfg.Timeout)
 					timeout = timeoutTimer.C
 				}
+			case "exited":
+				mainExited, commandExit = true, event.ExitCode
+				stopTimeout()
+				if !stopping {
+					stopping = true
+					// Give init time to kill and reap remaining descendants before
+					// enforcing the supervisor's final shutdown boundary.
+					killTimer = time.NewTimer(stopGrace + time.Second)
+					kill = killTimer.C
+				}
 			case "error":
 				return 125, fmt.Errorf("container startup: %s", event.Error)
 			}
 		case err := <-waited:
 			waitConsumed = true
+			// Process all final messages before using init's exit status. A quick
+			// command or forced cleanup can race with the event reader.
+			for events != nil {
+				event, ok := <-events
+				if !ok {
+					break
+				}
+				switch event.Kind {
+				case "error":
+					if !timedOut {
+						return 125, errors.New(event.Error)
+					}
+				case "started":
+					started = true
+				case "exited":
+					mainExited, commandExit = true, event.ExitCode
+				}
+			}
 			if timedOut {
 				return 124, nil
 			}
-			if !started {
-				// A short command can exit before its buffered started event is selected.
-				for events != nil {
-					event, ok := <-events
-					if !ok {
-						break
-					}
-					if event.Kind == "error" {
-						return 125, errors.New(event.Error)
-					}
-					if event.Kind == "started" {
-						started = true
-					}
-				}
+			if mainExited {
+				return commandExit, nil
 			}
 			if !started && !stopping {
 				return 125, fmt.Errorf("init exited before starting the command: %v", err)
 			}
 			return processExitCode(cmd.ProcessState), nil
 		case sig := <-signals:
+			if !authorized {
+				// No command can have started before authorization. Abort setup
+				// promptly rather than leaving init blocked on its start message.
+				return 128 + int(sig.(syscall.Signal)), nil
+			}
 			if !stopping {
 				stopping = true
-				timeout = nil
+				stopTimeout()
 				killTimer = time.NewTimer(stopGrace)
 				kill = killTimer.C
 			}

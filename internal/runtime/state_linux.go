@@ -12,11 +12,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-const runsRoot = "/var/lib/mini-docker/runs"
+const (
+	runsRoot      = "/var/lib/mini-docker/runs"
+	maxStateBytes = 4096
+)
 
 type runDirectory struct {
 	path string
@@ -82,11 +86,21 @@ func openRunLock(path string, create bool) (*os.File, error) {
 	return f, nil
 }
 
-func createRun() (*runDirectory, error) {
+func createRun(ctx context.Context) (*runDirectory, error) {
 	if err := ensureRunsRoot(); err != nil {
 		return nil, err
 	}
-	path, err := os.MkdirTemp(runsRoot, "run-")
+	return createRunAt(ctx, runsRoot)
+}
+
+func createRunAt(ctx context.Context, root string) (*runDirectory, error) {
+	coordination, err := acquireStateLock(ctx, root, false)
+	if err != nil {
+		return nil, err
+	}
+	defer coordination.Close()
+	// Recovery cannot inspect a new directory until its own lock is held.
+	path, err := os.MkdirTemp(root, "run-")
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +155,11 @@ func recoverRuns(ctx context.Context, stderr io.Writer) error {
 	if err := ensureRunsRoot(); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(runsRoot)
+	return recoverRunsAt(ctx, stderr, productionStatePaths())
+}
+
+func recoverRunsAt(ctx context.Context, stderr io.Writer, paths statePaths) error {
+	entries, err := os.ReadDir(paths.runsRoot)
 	if err != nil {
 		return err
 	}
@@ -152,23 +170,20 @@ func recoverRuns(ctx context.Context, stderr io.Writer) error {
 		if !strings.HasPrefix(entry.Name(), "run-") {
 			continue
 		}
-		path := filepath.Join(runsRoot, entry.Name())
-		if err := secureDirectory(path); err != nil {
+		path := filepath.Join(paths.runsRoot, entry.Name())
+		lock, err := lockRecoveryCandidate(ctx, path, paths)
+		if err != nil {
 			// Another supervisor may have removed its completed run since ReadDir.
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.EWOULDBLOCK) {
 				continue
 			}
-			return err
-		}
-		lock, err := openRunLock(filepath.Join(path, "lock"), false)
-		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			fmt.Fprintf(stderr, "mini-docker: leave unrecognized run directory %s: %v\n", path, err)
 			continue
 		}
-		if err := reclaimRun(path); err != nil {
+		if err := reclaimRunAt(path, paths); err != nil {
 			fmt.Fprintf(stderr, "mini-docker: preserve stale run %s: %v\n", path, err)
 		}
 		lock.Close()
@@ -176,16 +191,77 @@ func recoverRuns(ctx context.Context, stderr io.Writer) error {
 	return nil
 }
 
-func reclaimRun(path string) error {
-	return reclaimRunAt(path, statePaths{
+func productionStatePaths() statePaths {
+	return statePaths{
 		runsRoot: runsRoot, cgroupRoot: "/sys/fs/cgroup", mountInfo: "/proc/self/mountinfo",
 		checkDirectory: secureDirectory,
-	})
+	}
 }
 
 type statePaths struct {
 	runsRoot, cgroupRoot, mountInfo string
 	checkDirectory                  func(string) error
+}
+
+func lockRecoveryCandidate(ctx context.Context, path string, paths statePaths) (*os.File, error) {
+	coordination, err := acquireStateLock(ctx, paths.runsRoot, true)
+	if err != nil {
+		return nil, err
+	}
+	defer coordination.Close()
+	if err := paths.checkDirectory(path); err != nil {
+		return nil, err
+	}
+	return openRunLock(filepath.Join(path, "lock"), false)
+}
+
+// The persistent coordination lock covers publication and candidate locking,
+// never rootfs copying, command execution, or recursive cleanup.
+func acquireStateLock(ctx context.Context, root string, shared bool) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(root, ".lock")
+	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "state-coordination")
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&0022 != 0 || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
+		file.Close()
+		return nil, errors.New("state coordination lock must be a singly linked regular file owned by the current user without group or other write permissions")
+	}
+	operation := unix.LOCK_EX
+	if shared {
+		operation = unix.LOCK_SH
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			file.Close()
+			return nil, err
+		}
+		err := unix.Flock(fd, operation|unix.LOCK_NB)
+		if err == nil {
+			return file, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			file.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			file.Close()
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func validateRunPath(root, path string) error {
@@ -211,7 +287,7 @@ func reclaimRunAt(path string, paths statePaths) error {
 	if err := paths.checkDirectory(path); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(filepath.Join(path, "state.json"))
+	data, err := readRunState(filepath.Join(path, "state.json"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -267,6 +343,35 @@ func reclaimRunAt(path string, paths statePaths) error {
 		}
 	}
 	return os.RemoveAll(path)
+}
+
+func readRunState(path string) ([]byte, error) {
+	// A malformed stale artifact must not follow a link, wait for a FIFO writer,
+	// or allocate arbitrary memory before another container can start.
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "run-state")
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("run state must be a regular file")
+	}
+	if info.Size() > maxStateBytes {
+		return nil, errors.New("run state exceeds the size limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxStateBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxStateBytes {
+		return nil, errors.New("run state exceeds the size limit")
+	}
+	return data, nil
 }
 
 func cgroupEmpty(events string) (bool, error) {

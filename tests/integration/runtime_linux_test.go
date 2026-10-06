@@ -27,11 +27,22 @@ func TestMain(m *testing.M) {
 	}
 	if err := prepare(); err != nil {
 		fmt.Fprintln(os.Stderr, "integration prerequisites:", err)
+		_ = cleanupTemplate()
 		os.Exit(1)
 	}
 	code := m.Run()
-	_ = os.RemoveAll(template)
+	if err := cleanupTemplate(); err != nil {
+		fmt.Fprintln(os.Stderr, "integration rootfs cleanup:", err)
+		code = 1
+	}
 	os.Exit(code)
+}
+
+func cleanupTemplate() error {
+	if template == "" {
+		return nil
+	}
+	return os.RemoveAll(template)
 }
 
 func prepare() error {
@@ -89,6 +100,7 @@ type invocation struct {
 	unit           string
 	stdout, stderr *os.File
 	cancel         context.CancelFunc
+	waited         bool
 }
 
 func start(t *testing.T, input string, args ...string) *invocation {
@@ -115,6 +127,9 @@ func start(t *testing.T, input string, args ...string) *invocation {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stopCancel()
 		_ = exec.CommandContext(stopCtx, "systemctl", "stop", unit).Run()
+		if !call.waited && cmd.Process != nil {
+			_ = cmd.Wait()
+		}
 		_ = stdout.Close()
 		_ = stderr.Close()
 	})
@@ -126,6 +141,7 @@ func start(t *testing.T, input string, args ...string) *invocation {
 
 func (call *invocation) wait(t *testing.T) (int, string, string) {
 	t.Helper()
+	call.waited = true
 	err := call.cmd.Wait()
 	call.cancel()
 	code := 0
@@ -279,23 +295,37 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func (call *invocation) supervisorPID() int {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	control, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ControlGroup", "--value", call.unit).Output()
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(control)), "/") {
+		return 0
+	}
+	root := "/sys/fs/cgroup" + strings.TrimSpace(string(control))
+	for _, path := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
+		processes, _ := os.ReadFile(path)
+		for _, value := range strings.Fields(string(processes)) {
+			exe, _ := os.Readlink("/proc/" + value + "/exe")
+			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
+			command := strings.Split(string(args), "\x00")
+			if exe == binary && len(command) > 1 && command[1] == "run" {
+				pid, _ := strconv.Atoi(value)
+				return pid
+			}
+		}
+	}
+	return 0
+}
+
 func (call *invocation) supervisor(t *testing.T) int {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		out, _ := os.ReadFile(call.stdout.Name())
 		if strings.Contains(string(out), "ready") {
-			control, err := exec.Command("systemctl", "show", "--property=ControlGroup", "--value", call.unit).Output()
-			if err == nil && strings.HasPrefix(strings.TrimSpace(string(control)), "/") {
-				root := "/sys/fs/cgroup" + strings.TrimSpace(string(control))
-				processes, _ := os.ReadFile(filepath.Join(root, "manager", "cgroup.procs"))
-				for _, value := range strings.Fields(string(processes)) {
-					exe, _ := os.Readlink("/proc/" + value + "/exe")
-					if exe == binary {
-						pid, _ := strconv.Atoi(value)
-						return pid
-					}
-				}
+			if pid := call.supervisorPID(); pid != 0 {
+				return pid
 			}
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -379,5 +409,145 @@ func TestRunDirectoriesClean(t *testing.T) {
 		if entry.IsDir() {
 			t.Errorf("leftover runtime directory: %s", entry.Name())
 		}
+	}
+}
+
+func TestExitCodeDuringDescendantCleanup(t *testing.T) {
+	for _, expected := range []int{0, 7} {
+		t.Run(fmt.Sprintf("exit-%d", expected), func(t *testing.T) {
+			command := fmt.Sprintf(`
+set -eu
+/bin/sh -c 'trap "" TERM; echo ready > /tmp/orphan-ready; while :; do sleep 30; done' &
+while [ ! -e /tmp/orphan-ready ]; do sleep 0.01; done
+echo main-exited
+exit %d`, expected)
+			started := time.Now()
+			code, out, stderr := run(t, []string{"--timeout", "500ms"}, "/bin/sh", "-c", command)
+			if code != expected || !strings.Contains(out, "main-exited") {
+				t.Fatalf("completed command exit=%d stdout=%q stderr=%q; expected %d", code, out, stderr, expected)
+			}
+			if elapsed := time.Since(started); elapsed > 8*time.Second {
+				t.Fatalf("descendant cleanup exceeded its bound: %v", elapsed)
+			}
+		})
+	}
+}
+
+func TestSignalDuringPreparation(t *testing.T) {
+	require(t)
+	source := t.TempDir()
+	if out, err := exec.Command("cp", "-a", template+"/.", source).CombinedOutput(); err != nil {
+		t.Fatalf("copy template: %v: %s", err, out)
+	}
+	payload := filepath.Join(source, "startup-payload")
+	if err := os.Mkdir(payload, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5000; i++ {
+		if err := os.WriteFile(filepath.Join(payload, fmt.Sprintf("payload-%05d", i)), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(payload, "zz-finished"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	previous := make(map[string]bool)
+	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		previous[entry.Name()] = true
+	}
+	call := start(t, "", "run", "--rootfs", source, "--", "/bin/echo", "command-must-not-start")
+	deadline := time.Now().Add(10 * time.Second)
+	var interrupted string
+	for time.Now().Before(deadline) {
+		entries, _ := os.ReadDir("/var/lib/mini-docker/runs")
+		for _, entry := range entries {
+			if previous[entry.Name()] || !entry.IsDir() {
+				continue
+			}
+			path := filepath.Join("/var/lib/mini-docker/runs", entry.Name())
+			copied := filepath.Join(path, "rootfs", "startup-payload")
+			if _, err := os.Stat(filepath.Join(copied, "payload-00000")); err != nil {
+				continue
+			}
+			pid := call.supervisorPID()
+			if _, err := os.Stat(filepath.Join(copied, "zz-finished")); pid != 0 && os.IsNotExist(err) {
+				if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+					t.Fatal(err)
+				}
+				interrupted = path
+				break
+			}
+		}
+		if interrupted != "" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if interrupted == "" {
+		t.Fatal("did not observe the rootfs preparation phase before completion")
+	}
+	code, out, stderr := call.wait(t)
+	if code != 128+int(syscall.SIGTERM) || strings.Contains(out, "command-must-not-start") {
+		t.Fatalf("startup interruption exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	if _, err := os.Stat(interrupted); !os.IsNotExist(err) {
+		t.Fatalf("interrupted run directory remains: %v", err)
+	}
+}
+
+func TestSignalWhileWaitingForStateLock(t *testing.T) {
+	require(t)
+	// Publish the production coordination lock through a completed runtime run.
+	success(t, nil, "/bin/true")
+	lockPath := "/var/lib/mini-docker/runs/.lock"
+	lock, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+		_ = lock.Close()
+	})
+	call := start(t, "", "run", "--rootfs", template, "--", "/bin/echo", "command-must-not-start")
+	deadline := time.Now().Add(10 * time.Second)
+	pid := 0
+	for time.Now().Before(deadline) {
+		candidate := call.supervisorPID()
+		if candidate != 0 {
+			descriptors, _ := os.ReadDir(fmt.Sprintf("/proc/%d/fd", candidate))
+			for _, descriptor := range descriptors {
+				target, _ := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", candidate, descriptor.Name()))
+				if target == lockPath {
+					pid = candidate
+					break
+				}
+			}
+		}
+		if pid != 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if pid == 0 {
+		t.Fatal("supervisor did not reach the held state coordination lock")
+	}
+	started := time.Now()
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := call.wait(t)
+	if code != 128+int(syscall.SIGTERM) || strings.Contains(out, "command-must-not-start") {
+		t.Fatalf("state lock interruption exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("state lock interruption exceeded its bound: %v", elapsed)
 	}
 }

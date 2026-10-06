@@ -52,7 +52,7 @@ func Init() int {
 	}
 	cfg := prepare.Config
 	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGCHLD)
 	defer signal.Stop(signals)
 	if err := rootfs.Setup(cfg.RootFS); err != nil {
 		return fail(err)
@@ -76,6 +76,7 @@ func Init() int {
 	if start.Kind != "start" {
 		return fail(errors.New("invalid command authorization"))
 	}
+	// No children exist yet, so only external stop signals can be pending.
 	select {
 	case sig := <-signals:
 		return 128 + int(sig.(syscall.Signal))
@@ -107,28 +108,25 @@ func Init() int {
 		_ = decoder.Decode(&unexpected)
 		close(orphaned)
 	}()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
 	mainExited, stopping := false, false
 	exitCode := 125
-	var deadline time.Time
-	for {
-		select {
-		case sig := <-signals:
-			_ = unix.Kill(-process.Pid, sig.(syscall.Signal))
-			if !stopping {
-				stopping = true
-				deadline = time.Now().Add(stopGrace)
-			}
-		case <-orphaned:
-			orphaned = nil
-			_ = unix.Kill(-1, unix.SIGTERM)
-			if !stopping {
-				stopping = true
-				deadline = time.Now().Add(stopGrace)
-			}
-		case <-ticker.C:
+	var shutdownTimer *time.Timer
+	var shutdown <-chan time.Time
+	defer func() {
+		if shutdownTimer != nil {
+			shutdownTimer.Stop()
 		}
+	}()
+	beginShutdown := func() {
+		if !stopping {
+			stopping = true
+			shutdownTimer = time.NewTimer(stopGrace)
+			shutdown = shutdownTimer.C
+		}
+	}
+	for {
+		// Reap every available child before sleeping. SIGCHLD wakes this loop
+		// without polling while idle, including for multiple coalesced exits.
 		for {
 			var status unix.WaitStatus
 			pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
@@ -153,14 +151,27 @@ func Init() int {
 				if status.Signaled() {
 					exitCode = 128 + int(status.Signal())
 				}
-				_ = unix.Kill(-1, unix.SIGTERM)
-				if !stopping {
-					stopping = true
-					deadline = time.Now().Add(stopGrace)
+				if err := encoder.Encode(message{Kind: "exited", ExitCode: exitCode}); err != nil {
+					_ = unix.Kill(-1, unix.SIGKILL)
+					return exitCode
 				}
+				_ = unix.Kill(-1, unix.SIGTERM)
+				beginShutdown()
 			}
 		}
-		if stopping && !time.Now().Before(deadline) {
+		select {
+		case sig := <-signals:
+			if sig == syscall.SIGCHLD {
+				continue
+			}
+			_ = unix.Kill(-process.Pid, sig.(syscall.Signal))
+			beginShutdown()
+		case <-orphaned:
+			orphaned = nil
+			_ = unix.Kill(-1, unix.SIGTERM)
+			beginShutdown()
+		case <-shutdown:
+			shutdown = nil
 			_ = unix.Kill(-1, unix.SIGKILL)
 		}
 	}

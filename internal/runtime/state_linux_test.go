@@ -3,11 +3,15 @@
 package runtime
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -217,5 +221,274 @@ func TestCgroupEmptyRequiresExactValidCounter(t *testing.T) {
 		if (err == nil) != tc.valid || empty != tc.empty {
 			t.Fatalf("%q: got empty=%v, err=%v", tc.input, empty, err)
 		}
+	}
+}
+
+func TestRecoveryPreservesInvalidStateFilesWithoutBlocking(t *testing.T) {
+	for _, kind := range []string{"symlink", "fifo", "directory", "oversized"} {
+		t.Run(kind, func(t *testing.T) {
+			run, paths := testStatePaths(t)
+			state := filepath.Join(run, "state.json")
+			switch kind {
+			case "symlink":
+				target := filepath.Join(filepath.Dir(paths.runsRoot), "external-state.json")
+				if err := os.WriteFile(target, []byte(`{"cgroup":"`+filepath.Join(paths.cgroupRoot, "expired.scope", "container-gone")+`"}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, state); err != nil {
+					t.Fatal(err)
+				}
+			case "fifo":
+				if err := unix.Mkfifo(state, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(state, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "oversized":
+				file, err := os.Create(state)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// A sparse file reproduces unbounded metadata without allocating it.
+				if err := file.Truncate(1 << 30); err != nil {
+					file.Close()
+					t.Fatal(err)
+				}
+				file.Close()
+			}
+			finished := make(chan error, 1)
+			go func() { finished <- reclaimRunAt(run, paths) }()
+			select {
+			case err := <-finished:
+				if err == nil {
+					t.Fatal("invalid state file reclaimed")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("state recovery blocked")
+			}
+			if _, err := os.Stat(run); err != nil {
+				t.Fatalf("invalid state directory removed: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunPublicationWaitsForRecoveryInspection(t *testing.T) {
+	_, paths := testStatePaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	inspection, err := acquireStateLock(ctx, paths.runsRoot, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inspection.Close()
+	type result struct {
+		run *runDirectory
+		err error
+	}
+	created := make(chan result, 1)
+	go func() {
+		run, err := createRunAt(ctx, paths.runsRoot)
+		created <- result{run, err}
+	}()
+	select {
+	case got := <-created:
+		if got.run != nil {
+			got.run.lock.Close()
+		}
+		t.Fatalf("creation bypassed recovery coordination: %v", got.err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	entries, err := os.ReadDir(paths.runsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 { // Existing fixture and persistent .lock only.
+		t.Fatalf("an unlocked run was published: %v", entries)
+	}
+	inspection.Close()
+	var got result
+	select {
+	case got = <-created:
+	case <-ctx.Done():
+		t.Fatal("creation did not resume after recovery inspection")
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	defer got.run.lock.Close()
+	if lock, err := lockRecoveryCandidate(ctx, got.run.path, paths); !errors.Is(err, unix.EWOULDBLOCK) {
+		if lock != nil {
+			lock.Close()
+		}
+		t.Fatalf("published run was not already locked: %v", err)
+	}
+}
+
+func TestConcurrentCreationAndRecoveryPreserveActiveRuns(t *testing.T) {
+	_, paths := testStatePaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	recoverCtx, stopRecovery := context.WithCancel(ctx)
+	defer stopRecovery()
+	recovered := make(chan error, 1)
+	go func() {
+		for recoverCtx.Err() == nil {
+			if err := recoverRunsAt(recoverCtx, io.Discard, paths); err != nil {
+				recovered <- err
+				return
+			}
+		}
+		recovered <- nil
+	}()
+	const count = 32
+	type result struct {
+		run *runDirectory
+		err error
+	}
+	created := make(chan result, count)
+	var workers sync.WaitGroup
+	for range count {
+		workers.Go(func() {
+			run, err := createRunAt(ctx, paths.runsRoot)
+			created <- result{run, err}
+		})
+	}
+	workers.Wait()
+	close(created)
+	runs := make([]*runDirectory, 0, count)
+	for result := range created {
+		if result.err != nil {
+			t.Errorf("concurrent publication failed: %v", result.err)
+			continue
+		}
+		runs = append(runs, result.run)
+		defer result.run.lock.Close()
+	}
+	stopRecovery()
+	if err := <-recovered; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	for _, run := range runs {
+		if _, err := os.Stat(run.path); err != nil {
+			t.Errorf("recovery removed an active run: %v", err)
+		}
+	}
+}
+
+func TestStateCoordinationLockRespectsCancellation(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	holder, err := acquireStateLock(ctx, root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	if lock, err := acquireStateLock(canceled, root, true); !errors.Is(err, context.Canceled) {
+		if lock != nil {
+			lock.Close()
+		}
+		t.Fatalf("canceled lock acquisition: %v", err)
+	}
+	busy, done := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer done()
+	if lock, err := acquireStateLock(busy, root, true); !errors.Is(err, context.DeadlineExceeded) {
+		if lock != nil {
+			lock.Close()
+		}
+		t.Fatalf("busy lock ignored deadline: %v", err)
+	}
+	holder.Close()
+	resumed, err := acquireStateLock(ctx, root, false)
+	if err != nil {
+		t.Fatalf("failed acquisition leaked coordination lock: %v", err)
+	}
+	resumed.Close()
+}
+
+func TestRecoveryReleasesCoordinationBeforeReclaim(t *testing.T) {
+	run, paths := testStatePaths(t)
+	lock, err := openRunLock(filepath.Join(run, "lock"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	checked := paths.checkDirectory
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	checks := 0
+	paths.checkDirectory = func(path string) error {
+		checks++
+		if checks == 2 {
+			close(entered)
+			select {
+			case <-proceed:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return checked(path)
+	}
+	recovered := make(chan error, 1)
+	go func() { recovered <- recoverRunsAt(ctx, io.Discard, paths) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("recovery did not reach reclaim")
+	}
+	created, err := createRunAt(ctx, paths.runsRoot)
+	if err != nil {
+		t.Fatalf("slow reclaim held publication lock: %v", err)
+	}
+	defer created.lock.Close()
+	close(proceed)
+	if err := <-recovered; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStateCoordinationRejectsUnsafeLockFiles(t *testing.T) {
+	for _, kind := range []string{"symlink", "fifo", "hardlink", "writable"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			lock := filepath.Join(root, ".lock")
+			switch kind {
+			case "symlink", "hardlink":
+				target := filepath.Join(t.TempDir(), "external-lock")
+				if err := os.WriteFile(target, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				link := os.Symlink
+				if kind == "hardlink" {
+					link = os.Link
+				}
+				if err := link(target, lock); err != nil {
+					t.Fatal(err)
+				}
+			case "fifo":
+				if err := unix.Mkfifo(lock, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "writable":
+				if err := os.WriteFile(lock, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(lock, 0666); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if file, err := acquireStateLock(ctx, root, false); err == nil {
+				file.Close()
+				t.Fatal("unsafe coordination lock accepted")
+			}
+		})
 	}
 }
