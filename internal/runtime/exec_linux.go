@@ -27,10 +27,13 @@ const execConfigSeals = unix.F_SEAL_SEAL | unix.F_SEAL_WRITE | unix.F_SEAL_GROW 
 
 // ExecuteInContainer isolates each added command in a child cgroup. The
 // namespace descriptors come from the live init, rather than a reusable PID.
-func ExecuteInContainer(ctx context.Context, resources ExecResources, request config.Exec, stdin, stdout, stderr *os.File, signals <-chan syscall.Signal) (code int, runErr error) {
+func ExecuteInContainer(ctx context.Context, resources ExecResources, request config.Exec, stdin, stdout, stderr *os.File, signals <-chan syscall.Signal, terminal ExecTerminal) (code int, runErr error) {
 	code = 125
 	if err := request.Validate(); err != nil {
 		return code, err
+	}
+	if request.TTY && terminal == nil {
+		return code, errors.New("TTY exec requires a terminal client")
 	}
 	if os.Geteuid() != 0 || len(resources.Namespaces) != 5 || resources.Root == nil || resources.Executable == nil || resources.Group == nil {
 		return code, errors.New("container exec requires root and live container resources")
@@ -72,6 +75,17 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 		return code, fmt.Errorf("open exec cgroup: %w", err)
 	}
 	defer groupFile.Close()
+	var terminalParent, terminalChild *os.File
+	if cfg.TTY {
+		pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+		if err != nil {
+			return code, fmt.Errorf("create exec terminal channel: %w", err)
+		}
+		terminalParent = os.NewFile(uintptr(pair[0]), "exec-terminal-parent")
+		terminalChild = os.NewFile(uintptr(pair[1]), "exec-terminal-child")
+		defer terminalParent.Close()
+		defer terminalChild.Close()
+	}
 	// Resolve the executable in the child after ExtraFiles maps the pinned
 	// binary to descriptor 4. Replacing or deleting the launcher on disk
 	// cannot change the helper used by an already running container.
@@ -81,12 +95,35 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.ExtraFiles = append([]*os.File{control, resources.Executable}, resources.Namespaces...)
 	cmd.ExtraFiles = append(cmd.ExtraFiles, resources.Root, groupFile)
+	if terminalChild != nil {
+		cmd.ExtraFiles = append(cmd.ExtraFiles, terminalChild)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start exec namespace helper: %w", err)
 	}
+	if terminalChild != nil {
+		terminalChild.Close()
+	}
 	finished := make(chan error, 1)
 	go func() { finished <- cmd.Wait() }()
+	var terminalResult <-chan error
+	var terminalError error
+	terminalContext, cancelTerminal := context.WithTimeout(ctx, execTerminalStartupLimit)
+	defer cancelTerminal()
+	if terminalParent != nil {
+		result := make(chan error, 1)
+		terminalResult = result
+		go func() { result <- publishExecTerminal(terminalContext, terminalParent, terminal) }()
+		defer func() {
+			cancelTerminal()
+			if terminalResult != nil {
+				// The callback contract requires cancellation awareness. Keep
+				// the socket alive until its worker has finished using it.
+				<-terminalResult
+			}
+		}()
+	}
 	var timeout, grace *time.Timer
 	var deadline, forced <-chan time.Time
 	if request.Timeout > 0 {
@@ -102,6 +139,7 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 	interrupted, timedOut := false, false
 	done := ctx.Done()
 	beginStop := func(sig syscall.Signal) {
+		cancelTerminal()
 		_ = cmd.Process.Signal(sig)
 		if grace == nil {
 			grace = time.NewTimer(stopGrace)
@@ -111,6 +149,9 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 	for {
 		select {
 		case err := <-finished:
+			if terminalError != nil {
+				return 125, terminalError
+			}
 			if timedOut {
 				return 124, nil
 			}
@@ -122,6 +163,12 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 				return execStatus(exitErr.ProcessState), nil
 			}
 			return 125, fmt.Errorf("wait for exec helper: %w", err)
+		case err := <-terminalResult:
+			terminalResult = nil
+			if err != nil && !interrupted && !timedOut {
+				terminalError = fmt.Errorf("prepare exec terminal: %w", err)
+				beginStop(syscall.SIGTERM)
+			}
 		case sig, ok := <-signals:
 			if !ok {
 				signals = nil
@@ -150,6 +197,9 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 			case err = <-finished:
 			case <-time.After(stopGrace):
 				return 125, errors.New("exec namespace helper did not exit after SIGKILL")
+			}
+			if terminalError != nil {
+				return 125, terminalError
 			}
 			if timedOut {
 				return 124, nil
@@ -209,7 +259,7 @@ func readExecConfig(fd int) (config.Config, error) {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return cfg, errors.New("exec configuration contains trailing data")
 	}
-	if cfg.TTY || cfg.Timeout < 0 {
+	if cfg.Timeout < 0 {
 		return cfg, errors.New("invalid exec configuration")
 	}
 	return cfg, cfg.ValidateExecution()
@@ -225,7 +275,8 @@ func EnterExec() int {
 	if os.Geteuid() != 0 {
 		return fail(errors.New("namespace entry requires root"))
 	}
-	if _, err := readExecConfig(3); err != nil {
+	cfg, err := readExecConfig(3)
+	if err != nil {
 		return fail(err)
 	}
 	// ExtraFiles deliberately arrive without CLOEXEC. Only configuration and
@@ -233,6 +284,12 @@ func EnterExec() int {
 	// host cgroup descriptor must not survive into container user code.
 	for fd := 3; fd <= 11; fd++ {
 		unix.CloseOnExec(fd)
+	}
+	if cfg.TTY {
+		unix.CloseOnExec(12)
+		if err := unix.SetNonblock(12, true); err != nil {
+			return fail(fmt.Errorf("prepare terminal channel: %w", err))
+		}
 	}
 	signals := make(chan os.Signal, 16)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGCHLD)
@@ -262,6 +319,27 @@ func EnterExec() int {
 	for fd := 5; fd <= 10; fd++ {
 		_ = unix.Close(fd)
 	}
+	var master, slave *os.File
+	var terminalSocket, terminalGroup *os.File
+	if cfg.TTY {
+		terminalSocket = os.NewFile(12, "exec-terminal-channel")
+		terminalGroup = os.NewFile(11, "exec-terminal-cgroup")
+		defer terminalSocket.Close()
+		defer terminalGroup.Close()
+		master, slave, err = openTerminal(cfg.User)
+		if err != nil {
+			return fail(err)
+		}
+		defer master.Close()
+		defer slave.Close()
+		if err := authorizeExecTerminal(12, master, signals); err != nil {
+			var stopped execTerminalStopped
+			if errors.As(err, &stopped) {
+				return 128 + int(stopped.signal)
+			}
+			return fail(err)
+		}
+	}
 	select {
 	case sig := <-signals:
 		return 128 + int(sig.(syscall.Signal))
@@ -272,14 +350,28 @@ func EnterExec() int {
 	// Go's Pdeathsig handshake compares getppid with the parent's PID. The
 	// parent is outside this child's PID namespace, so getppid is zero and
 	// that check would kill a healthy child. The exec cgroup owns cleanup.
-	process, err := os.StartProcess("/proc/self/fd/4", []string{"mini-docker", "__exec"}, &os.ProcAttr{
+	attributes := &os.ProcAttr{
 		Env:   baseEnvironment,
 		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, control, binary},
 		Sys:   &syscall.SysProcAttr{Setpgid: true, UseCgroupFD: true, CgroupFD: 11},
-	})
+	}
+	if slave != nil {
+		attributes.Files = []*os.File{slave, slave, slave, control, binary, os.Stderr}
+		attributes.Sys.Setpgid = false
+		attributes.Sys.Setsid = true
+		attributes.Sys.Setctty = true
+		attributes.Sys.Ctty = 0
+	}
+	process, err := os.StartProcess("/proc/self/fd/4", []string{"mini-docker", "__exec"}, attributes)
 	control.Close()
 	binary.Close()
-	_ = unix.Close(11)
+	if !cfg.TTY {
+		_ = unix.Close(11)
+	}
+	if cfg.TTY {
+		terminalSocket.Close()
+		slave.Close()
+	}
 	if err != nil {
 		return fail(fmt.Errorf("start container exec bootstrap: %w", err))
 	}
@@ -308,6 +400,13 @@ func EnterExec() int {
 			if sig == syscall.SIGCHLD {
 				continue
 			}
+			if master != nil {
+				// TIOCGPGRP uses the calling task's active PID namespace. This
+				// helper remains in the host PID namespace after setns, so the
+				// returned group can be signaled directly from here.
+				forwardExecTerminalSignal(master, 11, process.Pid, sig.(syscall.Signal))
+				continue
+			}
 			_ = unix.Kill(-process.Pid, sig.(syscall.Signal))
 		}
 	}
@@ -315,8 +414,9 @@ func EnterExec() int {
 
 // ExecInit executes only inside the target namespaces and resource group.
 func ExecInit() int {
+	diagnostics := os.Stderr
 	fail := func(err error) int {
-		fmt.Fprintln(os.Stderr, "mini-docker: exec:", err)
+		fmt.Fprintln(diagnostics, "mini-docker: exec:", err)
 		return 125
 	}
 	if os.Geteuid() != 0 || os.Getpid() == 1 {
@@ -326,10 +426,27 @@ func ExecInit() int {
 	if err != nil {
 		return fail(err)
 	}
+	if cfg.TTY {
+		diagnostics = os.NewFile(5, "exec-diagnostics")
+		defer diagnostics.Close()
+		unix.CloseOnExec(5)
+		// Hide the host diagnostic descriptor from other container processes
+		// while bootstrap drops privileges. Successful exec closes the
+		// descriptor and restores normal dumpability for the user command.
+		if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+			return fail(fmt.Errorf("protect exec diagnostics: %w", err))
+		}
+	}
 	_ = unix.Close(3)
 	_ = unix.Close(4)
 	if err := reducePrivileges(cfg.User); err != nil {
 		return fail(err)
+	}
+	if cfg.TTY {
+		// Credential changes may reset dumpability according to host policy.
+		if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
+			return fail(fmt.Errorf("protect exec diagnostics after privilege reduction: %w", err))
+		}
 	}
 	if err := os.Chdir(cfg.WorkingDirectory()); err != nil {
 		return fail(fmt.Errorf("enter working directory: %w", err))

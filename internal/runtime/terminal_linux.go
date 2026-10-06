@@ -20,21 +20,35 @@ import (
 // prepareTerminal runs after pivot_root, while init still has mount privileges.
 // Each container gets its own bounded devpts instance, never the host's PTYs.
 func prepareTerminal(user *config.User) (*os.File, *os.File, error) {
-	if err := os.Mkdir("/dev/pts", 0755); err != nil {
+	if err := prepareTerminalMounts(); err != nil {
 		return nil, nil, err
+	}
+	return openTerminal(user)
+}
+
+// Managed containers prepare these mounts before dropping privileges so later
+// exec sessions can allocate PTYs in the same private, bounded instance.
+func prepareTerminalMounts() error {
+	if err := os.Mkdir("/dev/pts", 0755); err != nil {
+		return err
 	}
 	if err := unix.Mount("devpts", "/dev/pts", "devpts", unix.MS_NOSUID|unix.MS_NOEXEC, "newinstance,ptmxmode=0666,mode=0600,max=64"); err != nil {
-		return nil, nil, fmt.Errorf("mount private devpts: %w", err)
+		return fmt.Errorf("mount private devpts: %w", err)
 	}
 	if err := os.Symlink("pts/ptmx", "/dev/ptmx"); err != nil {
-		return nil, nil, err
+		return err
 	}
 	if err := unix.Mknod("/dev/tty", unix.S_IFCHR|0666, int(unix.Mkdev(5, 0))); err != nil {
-		return nil, nil, err
+		return err
 	}
 	if err := os.Chmod("/dev/tty", 0666); err != nil {
-		return nil, nil, err
+		return err
 	}
+	return nil
+}
+
+// openTerminal allocates a session without modifying existing terminal mounts.
+func openTerminal(user *config.User) (*os.File, *os.File, error) {
 	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err

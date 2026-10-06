@@ -53,6 +53,7 @@ Run options:
 
 Exec options:
   -i, --interactive  Forward stdin (default: no input)
+  -t, --tty      Allocate a terminal; combine with -i as -it for input
   --env          Override KEY=VALUE; repeat to add variables
   --workdir      Existing absolute directory (default: container configuration)
   --timeout      Command duration limit; 0 disables it (default: 0)
@@ -64,10 +65,10 @@ containers; --all also includes completed containers. logs defaults to the
 entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
 stop sends SIGTERM, then SIGKILL after the grace period. rm requires a stopped
 container. Detached containers receive no input; stdout and stderr are merged.
-Terminal options require a foreground run. -it requires a terminal on stdin.
+run terminal options require a foreground run. -it requires a terminal on stdin.
 exec inherits the container user, isolation, and resource limits. Its output
 goes to the invoking terminal rather than the retained container log.
-exec terminal allocation is not supported yet. Flags must precede ID|NAME.
+exec terminal output merges stdout and stderr. Flags must precede ID|NAME.
 `
 
 type Request struct {
@@ -301,9 +302,8 @@ func parseExec(r Request, args []string) (Request, error) {
 	fs.SetOutput(io.Discard)
 	fs.BoolVar(&r.Exec.Interactive, "interactive", false, "forward stdin")
 	fs.BoolVar(&r.Exec.Interactive, "i", false, "forward stdin")
-	var tty bool
-	fs.BoolVar(&tty, "tty", false, "allocate a terminal")
-	fs.BoolVar(&tty, "t", false, "allocate a terminal")
+	fs.BoolVar(&r.Exec.TTY, "tty", false, "allocate a terminal")
+	fs.BoolVar(&r.Exec.TTY, "t", false, "allocate a terminal")
 	fs.Func("env", "environment assignment", func(value string) error {
 		r.Exec.Env = append(r.Exec.Env, value)
 		return nil
@@ -328,14 +328,10 @@ func parseExec(r Request, args []string) (Request, error) {
 		}
 		return r, err
 	}
-	var terminalSpecified, workdirSpecified bool
+	var workdirSpecified bool
 	fs.Visit(func(f *flag.Flag) {
-		terminalSpecified = terminalSpecified || f.Name == "t" || f.Name == "tty"
 		workdirSpecified = workdirSpecified || f.Name == "workdir"
 	})
-	if terminalSpecified {
-		return r, errors.New("exec terminal allocation is not supported yet; omit --tty and -t")
-	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
 		return r, errors.New("exec requires exactly one container ID or name before --; flags must precede it")
 	}

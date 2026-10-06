@@ -74,6 +74,9 @@ func Init() int {
 		if cfg.TTY {
 			return fail(errors.New("terminal init does not accept managed exec"))
 		}
+		if err := prepareTerminalMounts(); err != nil {
+			return fail(fmt.Errorf("prepare exec terminals: %w", err))
+		}
 		unix.CloseOnExec(5)
 		err := sendExecNamespaces(5)
 		unix.Close(5)

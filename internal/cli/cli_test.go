@@ -82,7 +82,7 @@ func TestExecOptions(t *testing.T) {
 		t.Fatalf("command changed: %q", r.Exec.Command)
 	}
 	defaults, err := Parse([]string{"exec", "worker", "--", "true"})
-	if err != nil || defaults.Exec.Interactive || defaults.Exec.Workdir != "" || defaults.Exec.Timeout != 0 || defaults.Exec.Env != nil {
+	if err != nil || defaults.Exec.Interactive || defaults.Exec.TTY || defaults.Exec.Workdir != "" || defaults.Exec.Timeout != 0 || defaults.Exec.Env != nil {
 		t.Fatalf("unexpected exec defaults: %+v, %v", defaults, err)
 	}
 	for _, flag := range []string{"-i", "--interactive", "--interactive=false"} {
@@ -115,9 +115,53 @@ func TestExecRejectsInvalidArguments(t *testing.T) {
 			t.Errorf("accepted invalid exec arguments: %q", args)
 		}
 	}
-	for _, flag := range []string{"-t", "--tty", "-it", "-ti", "--tty=false"} {
-		if _, err := Parse([]string{"exec", flag, "worker", "--", "true"}); err == nil || !strings.Contains(err.Error(), "terminal allocation is not supported") {
-			t.Errorf("terminal flag %q did not explain unsupported allocation: %v", flag, err)
+}
+
+func TestExecTerminalOptions(t *testing.T) {
+	for _, tt := range []struct {
+		options     []string
+		interactive bool
+		tty         bool
+	}{
+		{nil, false, false},
+		{[]string{"-i"}, true, false},
+		{[]string{"-t"}, false, true},
+		{[]string{"--tty"}, false, true},
+		{[]string{"-it"}, true, true},
+		{[]string{"-ti"}, true, true},
+		{[]string{"-i", "-t"}, true, true},
+		{[]string{"--interactive", "--tty"}, true, true},
+		{[]string{"--tty=false"}, false, false},
+		{[]string{"-it", "-i=false"}, false, true},
+		{[]string{"-it", "--tty=false"}, true, false},
+	} {
+		args := append([]string{"exec"}, tt.options...)
+		args = append(args, "worker", "--", "sh", "-it", "-ti", "--tty")
+		r, err := Parse(args)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", args, err)
+		}
+		if r.Exec.Interactive != tt.interactive || r.Exec.TTY != tt.tty {
+			t.Errorf("Parse(%q): interactive=%v tty=%v; want %v %v", args, r.Exec.Interactive, r.Exec.TTY, tt.interactive, tt.tty)
+		}
+		if !reflect.DeepEqual(r.Exec.Command, []string{"sh", "-it", "-ti", "--tty"}) {
+			t.Errorf("terminal flags changed command: %q", r.Exec.Command)
+		}
+	}
+	for _, options := range [][]string{{"-it=false"}, {"--tty=invalid"}, {"worker", "-it"}} {
+		args := append([]string{"exec"}, options...)
+		if len(options) < 2 {
+			args = append(args, "worker")
+		}
+		args = append(args, "--", "sh")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid terminal arguments %q", args)
+		}
+	}
+	for _, value := range []string{"-it", "-ti"} {
+		r, err := Parse([]string{"exec", "--env", "VALUE=" + value, "worker", "--", "sh"})
+		if err != nil || r.Exec.TTY || r.Exec.Interactive || !reflect.DeepEqual(r.Exec.Env, []string{"VALUE=" + value}) {
+			t.Errorf("terminal spelling in environment value was expanded: %+v, %v", r, err)
 		}
 	}
 }

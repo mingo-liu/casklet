@@ -32,9 +32,14 @@ type execMessage struct {
 
 // Exec attaches caller-owned streams to an additional command in a live container.
 // Signaling this invocation never targets the container's main process.
-func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, stderr *os.File, signals <-chan os.Signal) (int, error) {
+func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, stderr *os.File, signals <-chan os.Signal) (code int, runErr error) {
 	if err := options.Validate(); err != nil {
 		return 125, err
+	}
+	if options.TTY && options.Interactive {
+		if err := containerruntime.CheckExecTerminal(stdin); err != nil {
+			return 125, err
+		}
 	}
 	store, err := managementStore()
 	if err != nil {
@@ -77,7 +82,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	if err != nil || peer.Uid != 0 || int(peer.Pid) != status.MainPID {
 		return 125, errors.New("container exec endpoint has an unexpected supervisor")
 	}
-	if !options.Interactive {
+	if !options.Interactive && !options.TTY {
 		input, err := os.Open("/dev/null")
 		if err != nil {
 			return 125, err
@@ -91,35 +96,81 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	if err := ipc.Send(conn, execMessage{Version: 1, Kind: "exec", Options: &options}, []*os.File{stdin, stdout, stderr}); err != nil {
 		return 125, err
 	}
-	type result struct {
+	type packet struct {
 		message execMessage
+		files   []*os.File
 		err     error
 	}
-	finished := make(chan result, 1)
+	received := make(chan packet, 1)
+	readerStop, readerDone := make(chan struct{}), make(chan struct{})
 	go func() {
-		data, files, err := ipc.Receive(conn, 0)
-		ipc.CloseFiles(files)
-		var response execMessage
-		if err == nil {
-			err = ipc.Decode(data, &response)
+		defer close(readerDone)
+		for {
+			data, files, err := ipc.Receive(conn, 1)
+			var response execMessage
+			if err == nil {
+				err = ipc.Decode(data, &response)
+			}
+			select {
+			case received <- packet{response, files, err}:
+			case <-readerStop:
+				ipc.CloseFiles(files)
+				return
+			}
+			if err != nil {
+				return
+			}
 		}
-		finished <- result{response, err}
+	}()
+	var terminal containerruntime.ExecTerminalIO
+	var terminalErrors <-chan error
+	defer func() {
+		// Disconnect before draining the PTY so early failures cancel the job.
+		close(readerStop)
+		conn.Close()
+		<-readerDone
+		select {
+		case packet := <-received:
+			ipc.CloseFiles(packet.files)
+		default:
+		}
+		if terminal != nil {
+			runErr = errors.Join(runErr, terminal.Close())
+		}
 	}()
 	done := ctx.Done()
 	for {
 		select {
-		case result := <-finished:
-			if result.err != nil {
-				return 125, fmt.Errorf("container exec interrupted: %w", result.err)
+		case packet := <-received:
+			if packet.err != nil {
+				ipc.CloseFiles(packet.files)
+				return 125, fmt.Errorf("container exec interrupted: %w", packet.err)
 			}
-			response := result.message
-			if response.Version != 1 || response.Kind != "result" || response.Code < 0 || response.Code > 255 || response.Options != nil || response.Signal != 0 {
+			response := packet.message
+			if response.Kind == "terminal" && response.Version == 1 && response.Options == nil && response.Signal == 0 && response.Code == 0 && response.Error == "" && options.TTY && terminal == nil && len(packet.files) == 1 {
+				terminal, err = containerruntime.StartExecTerminal(packet.files[0], stdin, stdout, options.Interactive)
+				if err != nil {
+					ipc.CloseFiles(packet.files)
+					return 125, err
+				}
+				terminalErrors = terminal.Errors()
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := ipc.Send(conn, execMessage{Version: 1, Kind: "ready"}, nil); err != nil {
+					return 125, err
+				}
+				continue
+			}
+			valid := response.Version == 1 && response.Kind == "result" && response.Code >= 0 && response.Code <= 255 && response.Options == nil && response.Signal == 0 && len(packet.files) == 0
+			ipc.CloseFiles(packet.files)
+			if !valid {
 				return 125, errors.New("invalid container exec result")
 			}
 			if response.Error != "" {
 				return response.Code, errors.New(response.Error)
 			}
 			return response.Code, nil
+		case err := <-terminalErrors:
+			return 125, fmt.Errorf("exec terminal: %w", err)
 		case signal, ok := <-signals:
 			if !ok {
 				signals = nil
@@ -264,10 +315,12 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 	ctx, cancel := context.WithCancel(server.ctx)
 	defer cancel()
 	signals := make(chan syscall.Signal, 8)
+	ready := make(chan struct{}, 1)
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
 		defer cancel()
+		readyReceived := false
 		for {
 			data, files, err := ipc.Receive(conn, 0)
 			ipc.CloseFiles(files)
@@ -275,7 +328,15 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 				return
 			}
 			var signal execMessage
-			if ipc.Decode(data, &signal) != nil || signal.Version != 1 || signal.Kind != "signal" || signal.Options != nil || signal.Code != 0 || signal.Error != "" || !allowedExecSignal(syscall.Signal(signal.Signal)) {
+			if ipc.Decode(data, &signal) != nil || signal.Version != 1 || signal.Options != nil || signal.Code != 0 || signal.Error != "" {
+				return
+			}
+			if signal.Kind == "ready" && signal.Signal == 0 && request.Options.TTY && !readyReceived {
+				readyReceived = true
+				ready <- struct{}{}
+				continue
+			}
+			if signal.Kind != "signal" || !allowedExecSignal(syscall.Signal(signal.Signal)) {
 				return
 			}
 			select {
@@ -285,7 +346,24 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 			}
 		}
 	}()
-	code, err := containerruntime.ExecuteInContainer(ctx, server.resources, *request.Options, files[0], files[1], files[2], signals)
+	var terminal containerruntime.ExecTerminal
+	if request.Options.TTY {
+		terminal = func(terminalCtx context.Context, master *os.File) error {
+			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := ipc.Send(conn, execMessage{Version: 1, Kind: "terminal"}, []*os.File{master}); err != nil {
+				return err
+			}
+			select {
+			case <-ready:
+				return nil
+			case <-terminalCtx.Done():
+				return terminalCtx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	code, err := containerruntime.ExecuteInContainer(ctx, server.resources, *request.Options, files[0], files[1], files[2], signals, terminal)
 	cancel()
 	_ = conn.SetReadDeadline(time.Now())
 	<-readerDone

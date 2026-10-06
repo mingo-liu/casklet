@@ -11,7 +11,7 @@ import (
 	"github.com/mingo-liu/mini-docker/internal/config"
 )
 
-func ExecuteInContainer(_ context.Context, _ ExecResources, _ config.Exec, _, _, _ *os.File, _ <-chan syscall.Signal) (int, error) {
+func ExecuteInContainer(_ context.Context, _ ExecResources, _ config.Exec, _, _, _ *os.File, _ <-chan syscall.Signal, _ ExecTerminal) (int, error) {
 	return 125, Check("")
 }
 

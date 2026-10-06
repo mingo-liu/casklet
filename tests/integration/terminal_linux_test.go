@@ -77,6 +77,15 @@ type terminalInvocation struct {
 
 func startTerminal(t *testing.T, options []string, command ...string) *terminalInvocation {
 	t.Helper()
+	args := []string{"run", "--rootfs", template, "-it"}
+	args = append(args, options...)
+	args = append(args, "--")
+	args = append(args, command...)
+	return startTerminalArguments(t, args)
+}
+
+func startTerminalArguments(t *testing.T, cliArguments []string) *terminalInvocation {
+	t.Helper()
 	require(t)
 	pty := openTerminalPTY(t)
 	before, err := unix.IoctlGetTermios(int(pty.slave.Fd()), unix.TCGETS)
@@ -92,10 +101,8 @@ func startTerminal(t *testing.T, options []string, command ...string) *terminalI
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	unit := fmt.Sprintf("mini-docker-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
-	args := []string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary, "run", "--rootfs", template, "-it"}
-	args = append(args, options...)
-	args = append(args, "--")
-	args = append(args, command...)
+	args := []string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary}
+	args = append(args, cliArguments...)
 	cmd := exec.CommandContext(ctx, "systemd-run", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = pty.slave, pty.slave, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}

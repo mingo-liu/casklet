@@ -11,6 +11,7 @@ type Exec struct {
 	Env         []string      `json:"env,omitempty"`
 	Workdir     string        `json:"workdir,omitempty"`
 	Interactive bool          `json:"interactive"`
+	TTY         bool          `json:"tty,omitempty"`
 	Timeout     time.Duration `json:"timeout"`
 }
 
@@ -32,7 +33,7 @@ func (e Exec) Apply(base Config) Config {
 	}
 	base.Timeout = e.Timeout
 	base.Interactive = e.Interactive
-	base.TTY = false
+	base.TTY = e.TTY
 	if base.User != nil {
 		user := *base.User
 		base.User = &user

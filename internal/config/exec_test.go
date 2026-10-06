@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 func TestExecValidation(t *testing.T) {
 	for _, e := range []Exec{
 		{Command: []string{"sh"}},
+		{Command: []string{"sh"}, TTY: true, Interactive: true},
 		{Command: []string{"echo", "", "--tty"}, Env: []string{"KEY=", "KEY=a=b"}, Workdir: "/tmp", Timeout: time.Second},
 	} {
 		if err := e.Validate(); err != nil {
@@ -27,6 +29,64 @@ func TestExecValidation(t *testing.T) {
 		if e.Validate() == nil {
 			t.Errorf("accepted invalid execution %+v", e)
 		}
+	}
+}
+
+func TestExecTerminalEnvironment(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		baseEnv  []string
+		execEnv  []string
+		terminal bool
+		wantTerm string
+	}{
+		{"default terminal", nil, nil, true, "TERM=xterm"},
+		{"inherit explicit TERM", []string{"TERM=vt100"}, nil, true, "TERM=vt100"},
+		{"override inherited TERM", []string{"TERM=vt100"}, []string{"TERM=screen"}, true, "TERM=screen"},
+		{"allow empty TERM", nil, []string{"TERM="}, true, "TERM="},
+		{"nonterminal default", nil, nil, false, ""},
+		{"nonterminal explicit TERM", []string{"TERM=screen"}, nil, false, "TERM=screen"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			request := Exec{Command: []string{"sh"}, TTY: tt.terminal, Env: tt.execEnv}
+			cfg := request.Apply(Config{Env: tt.baseEnv, User: &User{UID: 123, GID: 456}, ReadOnly: true})
+			if cfg.TTY != tt.terminal || cfg.Interactive || !cfg.ReadOnly || cfg.User.UID != 123 || cfg.User.GID != 456 {
+				t.Fatalf("terminal override changed inherited execution settings: %+v", cfg)
+			}
+			term, count := "", 0
+			for _, assignment := range cfg.CommandEnvironment() {
+				if len(assignment) >= 5 && assignment[:5] == "TERM=" {
+					term = assignment
+					count++
+				}
+			}
+			if term != tt.wantTerm || count > 1 {
+				t.Fatalf("TERM = %q (%d assignments); want %q", term, count, tt.wantTerm)
+			}
+		})
+	}
+}
+
+func TestExecTerminalOptionsSurviveJSON(t *testing.T) {
+	want := Exec{Command: []string{"sh"}, Interactive: true, TTY: true}
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Exec
+	if err := json.Unmarshal(data, &got); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("terminal configuration round trip = %+v, %v; want %+v", got, err, want)
+	}
+	data, err = json.Marshal(Exec{Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["tty"]; exists {
+		t.Fatal("nonterminal requests expose the new tty field to older supervisors")
 	}
 }
 
