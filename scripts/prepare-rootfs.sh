@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 022
 
 fail() { printf 'prepare-rootfs: %s\n' "$*" >&2; exit 1; }
 [ "$(uname -s)" = Linux ] || fail 'Linux is required; prepare the rootfs inside the development VM'
@@ -48,6 +49,8 @@ cat > "$staging/.mini-docker-rootfs.json" <<METADATA
   "sha256": "$checksum"
 }
 METADATA
+# Commands using a numeric non-root identity must be able to traverse the root.
+chmod 0755 "$staging"
 mv "$staging" "$rootfs"
 trap - EXIT HUP INT TERM
 printf 'Prepared %s (%s, busybox-static %s, SHA-256 %s)\n' "$rootfs" "$architecture" "$version" "$checksum"
