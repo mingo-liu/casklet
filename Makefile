@@ -21,5 +21,6 @@ test:
 rootfs:
 	./scripts/prepare-rootfs.sh "$(ROOTFS)"
 
-test-integration: build
+test-integration:
+	$(MAKE) build GOOS=linux GOARCH=$$($(GO) env GOHOSTARCH)
 	MINI_DOCKER_ROOTFS="$(abspath $(ROOTFS))" ./scripts/test-linux.sh

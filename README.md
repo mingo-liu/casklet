@@ -20,17 +20,18 @@ limactl start --name mini-docker dev/lima.yaml
 The configuration installs BusyBox, build tools, and checksum-verified Go 1.27.1 from the [official Go downloads](https://go.dev/dl/). [Lima plain mode](https://lima-vm.io/docs/config/plain/) disables host filesystem sharing; transfer a source snapshot into a writable VM-local directory. Run this from the repository root:
 
 ```sh
-git ls-files -z --cached --others --exclude-standard | \
-  COPYFILE_DISABLE=1 tar --no-xattrs --null -T - -czf - | \
-  limactl shell mini-docker sh -c \
-  'mkdir -p ~/mini-docker && tar -xzf - -C ~/mini-docker'
+set -o pipefail
+./scripts/snapshot.sh | limactl shell mini-docker sh -c \
+  'source_dir=$(mktemp -d "$HOME/mini-docker-source.XXXXXXXX") &&
+    tar -xzf - -C "$source_dir" && printf "Source directory: %s\n" "$source_dir"'
 limactl shell mini-docker
-cd ~/mini-docker
+# Replace the suffix with the exact directory printed by the transfer.
+cd ~/mini-docker-source.XXXXXXXX
 make build
 make rootfs
 ```
 
-Repeat the transfer after source changes. The VM keeps build artifacts, rootfs templates, and runtime state on its own filesystem. No host directory is mounted into the VM. On an existing Ubuntu VM, install `busybox-static binutils make` with `apt-get`, and install Go 1.25 or newer before using the commands below.
+Repeat the transfer after source changes and use the new printed directory. The snapshot script includes existing tracked and unignored files using null-delimited filenames. Each transfer uses a fresh directory, so deleted source files cannot survive in subsequent builds. Previous snapshots remain available until explicitly removed. The VM keeps build artifacts, rootfs templates, and runtime state on its own filesystem. No host directory is mounted into the VM. On an existing Ubuntu VM, install `busybox-static binutils make` with `apt-get`, and install Go 1.25 or newer before using the commands below.
 
 ## Run
 
@@ -47,7 +48,7 @@ The launcher uses `sudo systemd-run --scope` and preserves standard input and th
 
 Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited). Memory suffixes `k`, `m`, and `g` use powers of 1024. Each run copies the rootfs template, mounts independent `/proc` and temporary storage, and removes its working filesystem after exit. Networking contains loopback only. The command receives a fixed environment and starts in `/`.
 
-Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124`; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
+Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
 
 ## Build and validation
 
@@ -60,7 +61,7 @@ Normal command exit codes pass through. Signal exits use `128 + signal`; timeout
 | `make test` | Run unprivileged tests; integration tests are skipped |
 | `make test-integration` | Run privileged Linux integration tests in independent delegated scopes |
 
-`make build GOARCH=amd64` cross-compiles for amd64. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
+`make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
 Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Use `./scripts/test-linux.sh -test.run TestExecution` for a focused run. Resource tests use bounded helpers and deadlines.
 
