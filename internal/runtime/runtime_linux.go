@@ -88,6 +88,11 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	if err := cfg.ValidateExecution(); err != nil {
 		return code, err
 	}
+	if cfg.TTY && cfg.Interactive {
+		if _, err := unix.IoctlGetTermios(terminalFD(stdin), unix.TCGETS); err != nil {
+			return code, fmt.Errorf("interactive TTY requires terminal stdin: %w", err)
+		}
+	}
 	if err := Check(cfg.RootFS); err != nil {
 		return code, err
 	}
@@ -98,6 +103,9 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	incomingSignals := make(chan os.Signal, 8)
 	signals := make(chan os.Signal, 8)
 	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM)
+	if cfg.TTY {
+		signal.Notify(incomingSignals, syscall.SIGHUP, syscall.SIGQUIT)
+	}
 	defer signal.Stop(incomingSignals)
 	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), startupLimit)
 	defer cancelPrepare()
@@ -194,13 +202,36 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 	}
 	cmd := exec.Command(exe, "__init")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if !cfg.Interactive || cfg.TTY {
+		input, err := os.Open("/dev/null")
+		if err != nil {
+			return code, err
+		}
+		defer input.Close()
+		cmd.Stdin = input
+	}
 	cmd.Env = baseEnvironment
 	cmd.ExtraFiles = []*os.File{childControl, run.lock}
+	var terminalSocket, childTerminal *os.File
+	if cfg.TTY {
+		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+		if err != nil {
+			return code, err
+		}
+		terminalSocket = os.NewFile(uintptr(fds[0]), "terminal-control")
+		childTerminal = os.NewFile(uintptr(fds[1]), "init-terminal-control")
+		defer terminalSocket.Close()
+		defer childTerminal.Close()
+		cmd.ExtraFiles = append(cmd.ExtraFiles, childTerminal)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start container init: %w", err)
 	}
 	childControl.Close()
+	if childTerminal != nil {
+		childTerminal.Close()
+	}
 	waited := make(chan error, 1)
 	waitConsumed := false
 	go func() { waited <- cmd.Wait() }()
@@ -257,6 +288,7 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 		}
 	}()
 	authorized, started, mainExited, stopping, timedOut := false, false, false, false, false
+	var terminalErrors <-chan error
 	recordStarted := func() error {
 		if started {
 			return nil
@@ -288,6 +320,26 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 			case "ready":
 				if stopping {
 					continue
+				}
+				if cfg.TTY {
+					master, err := receiveTerminal(terminalFD(terminalSocket))
+					if err != nil {
+						return 125, fmt.Errorf("receive container terminal: %w", err)
+					}
+					bridge, err := startTerminalBridge(master, stdin, stdout, cfg.Interactive)
+					if err != nil {
+						master.Close()
+						return 125, err
+					}
+					terminalErrors = bridge.errors
+					defer func() {
+						if err := bridge.close(stdout); err != nil {
+							runErr = errors.Join(runErr, err)
+							if code == 0 {
+								code = 125
+							}
+						}
+					}()
 				}
 				if err := encoder.Encode(message{Kind: "start"}); err != nil {
 					return 125, fmt.Errorf("authorize command: %w", err)
@@ -360,6 +412,8 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 				kill = killTimer.C
 			}
 			_ = cmd.Process.Signal(sig)
+		case err := <-terminalErrors:
+			return 125, fmt.Errorf("terminal I/O: %w", err)
 		case <-timeout:
 			timedOut, stopping, timeout = true, true, nil
 			_ = cmd.Process.Signal(syscall.SIGTERM)

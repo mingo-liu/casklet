@@ -25,19 +25,21 @@ type User struct {
 	GID uint32 `json:"gid"`
 }
 
-// Config contains the validated options for one foreground container.
+// Config contains the validated options for one container execution.
 type Config struct {
-	RootFS    string        `json:"rootfs"`
-	Hostname  string        `json:"hostname"`
-	Memory    int64         `json:"memory"`
-	PidsLimit int64         `json:"pids_limit"`
-	CPUQuota  int64         `json:"cpu_quota"`
-	Timeout   time.Duration `json:"timeout"`
-	Env       []string      `json:"env,omitempty"`
-	Workdir   string        `json:"workdir,omitempty"`
-	User      *User         `json:"user,omitempty"`
-	ReadOnly  bool          `json:"read_only"`
-	Command   []string      `json:"command"`
+	RootFS      string        `json:"rootfs"`
+	Hostname    string        `json:"hostname"`
+	Memory      int64         `json:"memory"`
+	PidsLimit   int64         `json:"pids_limit"`
+	CPUQuota    int64         `json:"cpu_quota"`
+	Timeout     time.Duration `json:"timeout"`
+	Env         []string      `json:"env,omitempty"`
+	Workdir     string        `json:"workdir,omitempty"`
+	User        *User         `json:"user,omitempty"`
+	ReadOnly    bool          `json:"read_only"`
+	Interactive bool          `json:"interactive"`
+	TTY         bool          `json:"tty"`
+	Command     []string      `json:"command"`
 }
 
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -84,6 +86,10 @@ func (c Config) WorkingDirectory() string {
 func (c Config) CommandEnvironment() []string {
 	env := []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 	positions := map[string]int{"PATH": 0, "HOME": 1, "LANG": 2}
+	if c.TTY {
+		positions["TERM"] = len(env)
+		env = append(env, "TERM=xterm")
+	}
 	for _, assignment := range c.Env {
 		key, _, _ := strings.Cut(assignment, "=")
 		if index, exists := positions[key]; exists {

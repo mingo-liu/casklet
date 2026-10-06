@@ -35,6 +35,8 @@ const usage = `Usage:
 
 Run options:
   -d, --detach   Run in the background and print the container ID
+  -i, --interactive  Forward stdin (default for foreground runs without -t)
+  -t, --tty      Allocate a terminal; combine with -i as -it for input
   --name         Unique name for a detached container (1-63 letters,
                  digits, underscores, periods, or hyphens; start alphanumeric)
   --rootfs       BusyBox filesystem template (required)
@@ -55,6 +57,7 @@ containers; --all also includes completed containers. logs defaults to the
 entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
 stop sends SIGTERM, then SIGKILL after the grace period. rm requires a stopped
 container. Detached containers receive no input; stdout and stderr are merged.
+Terminal options require a foreground run. -it requires a terminal on stdin.
 `
 
 type Request struct {
@@ -89,6 +92,10 @@ func Parse(args []string) (Request, error) {
 	if r.Action == "run" {
 		fs.BoolVar(&r.Detach, "detach", false, "run in the background")
 		fs.BoolVar(&r.Detach, "d", false, "run in the background")
+		fs.BoolVar(&r.Config.Interactive, "interactive", false, "forward stdin")
+		fs.BoolVar(&r.Config.Interactive, "i", false, "forward stdin")
+		fs.BoolVar(&r.Config.TTY, "tty", false, "allocate a terminal")
+		fs.BoolVar(&r.Config.TTY, "t", false, "allocate a terminal")
 		fs.StringVar(&r.Name, "name", "", "detached container name")
 		fs.StringVar(&r.Config.Hostname, "hostname", "mini", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
@@ -114,6 +121,9 @@ func Parse(args []string) (Request, error) {
 	if separator >= 0 {
 		r.Config.Command = append([]string(nil), options[separator+1:]...)
 		options = options[:separator]
+	}
+	if r.Action == "run" {
+		options = expandTerminalFlags(fs, options)
 	}
 	if err := fs.Parse(options); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -150,6 +160,16 @@ func Parse(args []string) (Request, error) {
 	if r.Config.Timeout < 0 {
 		return r, errors.New("--timeout cannot be negative")
 	}
+	interactiveSpecified := false
+	fs.Visit(func(f *flag.Flag) {
+		interactiveSpecified = interactiveSpecified || f.Name == "i" || f.Name == "interactive"
+	})
+	if r.Detach && (r.Config.Interactive || r.Config.TTY) {
+		return r, errors.New("--interactive and --tty require a foreground run")
+	}
+	if !interactiveSpecified && !r.Detach && !r.Config.TTY {
+		r.Config.Interactive = true
+	}
 	nameSpecified := false
 	fs.Visit(func(f *flag.Flag) { nameSpecified = nameSpecified || f.Name == "name" })
 	if nameSpecified {
@@ -185,6 +205,38 @@ func Parse(args []string) (Request, error) {
 	}
 	r.Config.Workdir = path.Clean(r.Config.Workdir)
 	return r, nil
+}
+
+// expandTerminalFlags accepts the common -it spelling without changing flag
+// values or positional arguments. Other short flag combinations stay invalid.
+func expandTerminalFlags(fs *flag.FlagSet, options []string) []string {
+	expanded := make([]string, 0, len(options)+1)
+	for i := 0; i < len(options); i++ {
+		arg := options[i]
+		if arg == "-it" || arg == "-ti" {
+			expanded = append(expanded, "-i", "-t")
+			continue
+		}
+		expanded = append(expanded, arg)
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			expanded = append(expanded, options[i+1:]...)
+			break
+		}
+		name, _, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		f := fs.Lookup(name)
+		if f == nil || hasValue {
+			continue
+		}
+		boolean, ok := f.Value.(interface{ IsBoolFlag() bool })
+		if ok && boolean.IsBoolFlag() {
+			continue
+		}
+		if i+1 < len(options) {
+			i++
+			expanded = append(expanded, options[i])
+		}
+	}
+	return expanded
 }
 
 func parseManagement(r Request, args []string) (Request, error) {

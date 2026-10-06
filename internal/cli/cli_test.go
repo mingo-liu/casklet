@@ -101,6 +101,75 @@ func TestDetachedRunOptions(t *testing.T) {
 	}
 }
 
+func TestTerminalRunOptions(t *testing.T) {
+	tests := []struct {
+		name        string
+		options     []string
+		interactive bool
+		tty         bool
+	}{
+		{"legacy stdin", nil, true, false},
+		{"short interactive", []string{"-i"}, true, false},
+		{"long interactive", []string{"--interactive"}, true, false},
+		{"short terminal", []string{"-t"}, false, true},
+		{"long terminal", []string{"--tty"}, false, true},
+		{"combined", []string{"-it"}, true, true},
+		{"reverse combined", []string{"-ti"}, true, true},
+		{"separate", []string{"-i", "-t"}, true, true},
+		{"long combined", []string{"--interactive", "--tty"}, true, true},
+		{"disabled input", []string{"--interactive=false"}, false, false},
+		{"disabled terminal input", []string{"-it", "-i=false"}, false, true},
+		{"disabled terminal", []string{"--tty=false"}, true, false},
+		{"detached", []string{"-d"}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"run", "--rootfs", "/tmp/r"}, tt.options...)
+			args = append(args, "--", "sh", "-it", "-ti", "--tty")
+			r, err := Parse(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Config.Interactive != tt.interactive || r.Config.TTY != tt.tty {
+				t.Fatalf("terminal options = interactive:%v tty:%v; want %v %v", r.Config.Interactive, r.Config.TTY, tt.interactive, tt.tty)
+			}
+			if !reflect.DeepEqual(r.Config.Command, []string{"sh", "-it", "-ti", "--tty"}) {
+				t.Fatalf("command arguments changed: %q", r.Config.Command)
+			}
+		})
+	}
+}
+
+func TestTerminalFlagsPreserveOptionValues(t *testing.T) {
+	for _, value := range []string{"-it", "-ti"} {
+		r, err := Parse([]string{"run", "--rootfs", value, "--env", "VALUE=" + value, "--", "sh"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Config.RootFS != value || r.Config.TTY || !r.Config.Interactive || !reflect.DeepEqual(r.Config.Env, []string{"VALUE=" + value}) {
+			t.Fatalf("flag value was expanded: %+v", r.Config)
+		}
+		r, err = Parse([]string{"run", "--rootfs=" + value, "-it", "--", "sh"})
+		if err != nil || r.Config.RootFS != value || !r.Config.TTY || !r.Config.Interactive {
+			t.Fatalf("inline flag value = %+v, %v", r.Config, err)
+		}
+	}
+}
+
+func TestTerminalOptionsRejectInvalidInput(t *testing.T) {
+	for _, options := range [][]string{
+		{"-d", "-i"}, {"--detach", "--interactive"},
+		{"-d", "-t"}, {"--detach", "--tty"}, {"-d", "-it"},
+		{"-dit"}, {"-it=false"}, {"--interactive=invalid"}, {"--tty=invalid"},
+	} {
+		args := append([]string{"run", "--rootfs", "/tmp/r"}, options...)
+		args = append(args, "--", "sh")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid terminal options: %q", args)
+		}
+	}
+}
+
 func TestManagementCommands(t *testing.T) {
 	for _, args := range [][]string{{"ps", "-a", "--json"}, {"ps", "--all", "--json"}} {
 		r, err := Parse(args)

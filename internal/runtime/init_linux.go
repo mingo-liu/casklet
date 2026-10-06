@@ -57,6 +57,9 @@ func Init() int {
 	}
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGCHLD)
+	if cfg.TTY {
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGQUIT)
+	}
 	defer signal.Stop(signals)
 	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly); err != nil {
 		return fail(err)
@@ -66,6 +69,23 @@ func Init() int {
 	}
 	if err := enableLoopback(); err != nil {
 		return fail(err)
+	}
+	var terminal, terminalMaster *os.File
+	if cfg.TTY {
+		unix.CloseOnExec(5)
+		master, slave, err := prepareTerminal(cfg.User)
+		if err != nil {
+			return fail(fmt.Errorf("prepare terminal: %w", err))
+		}
+		terminal = slave
+		terminalMaster = master
+		defer terminal.Close()
+		defer terminalMaster.Close()
+		err = sendTerminal(5, master)
+		unix.Close(5)
+		if err != nil {
+			return fail(fmt.Errorf("send terminal: %w", err))
+		}
 	}
 	if err := reducePrivileges(cfg.User); err != nil {
 		return fail(err)
@@ -107,11 +127,16 @@ func Init() int {
 	if err != nil {
 		return fail(err)
 	}
-	process, err := os.StartProcess(executable, cfg.Command, &os.ProcAttr{
+	attributes := &os.ProcAttr{
 		Dir: cfg.WorkingDirectory(), Env: commandEnvironment,
 		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Sys:   &syscall.SysProcAttr{Setpgid: true},
-	})
+	}
+	if terminal != nil {
+		attributes.Files = []*os.File{terminal, terminal, terminal}
+		attributes.Sys = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+	}
+	process, err := os.StartProcess(executable, cfg.Command, attributes)
 	if err != nil {
 		return fail(err)
 	}
@@ -182,7 +207,15 @@ func Init() int {
 			if sig == syscall.SIGCHLD {
 				continue
 			}
-			_ = unix.Kill(-process.Pid, sig.(syscall.Signal))
+			group := process.Pid
+			if terminalMaster != nil {
+				// Init is outside the command's session. The master permits
+				// foreground-group lookup without owning its controlling TTY.
+				if foreground, err := unix.IoctlGetInt(terminalFD(terminalMaster), unix.TIOCGPGRP); err == nil && foreground > 0 {
+					group = foreground
+				}
+			}
+			_ = unix.Kill(-group, sig.(syscall.Signal))
 			beginShutdown()
 		case <-orphaned:
 			orphaned = nil

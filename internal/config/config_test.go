@@ -30,6 +30,28 @@ func TestWorkingDirectory(t *testing.T) {
 	}
 }
 
+func TestTerminalEnvironment(t *testing.T) {
+	t.Setenv("TERM", "host-terminal")
+	tests := []struct {
+		name string
+		cfg  Config
+		want []string
+	}{
+		{"default", Config{TTY: true}, []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C", "TERM=xterm"}},
+		{"explicit override", Config{TTY: true, Env: []string{"TERM=vt100"}}, []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C", "TERM=vt100"}},
+		{"explicit empty", Config{TTY: true, Env: []string{"TERM="}}, []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C", "TERM="}},
+		{"repeated override", Config{TTY: true, Env: []string{"TERM=vt100", "TERM=ansi"}}, []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C", "TERM=ansi"}},
+		{"nonterminal", Config{}, []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.CommandEnvironment(); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("environment = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateExecution(t *testing.T) {
 	tests := []struct {
 		name string

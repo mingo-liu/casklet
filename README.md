@@ -2,13 +2,13 @@
 
 A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-Foreground execution and background container management are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
+Foreground execution, interactive terminals, and background container management are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
 
 ## Requirements
 
 Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. Foreground execution uses a delegated systemd scope; detached execution creates its own delegated service. Background management requires `/usr/bin/systemd-run` and `/usr/bin/systemctl`.
 
-Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, rootless execution, or terminal allocation.
+Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, rootless execution, or execution inside an existing container.
 
 ## Development VM on macOS
 
@@ -73,6 +73,24 @@ CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
 
+## Interactive terminals
+
+Run these commands from a terminal inside the Linux VM:
+
+```sh
+./scripts/run-linux.sh run -it --rootfs ./rootfs/busybox -- /bin/sh
+./scripts/run-linux.sh run -it --rootfs ./rootfs/busybox \
+  --user 1000:1000 --read-only --workdir /tmp -- /bin/sh
+```
+
+`-i` / `--interactive` attaches stdin. Ordinary foreground runs continue to forward stdin by default; `--interactive=false` supplies `/dev/null` instead. `-t` / `--tty` allocates a PTY. Combine the options as `-it`, `-ti`, or `--interactive --tty` for an interactive terminal. These options apply to foreground execution; detached runs reject enabled interactive or terminal options.
+
+`-it` requires terminal stdin and returns `125` for redirected or piped input. The supervisor temporarily puts that terminal in raw mode, copies input to the container, and restores the original settings after exit, startup failure, or handled termination. Ctrl+C interrupts the container's current foreground job; an interactive shell can continue afterward. Window dimensions are copied before command startup and updated on SIGWINCH. `TERM=xterm` is supplied unless explicitly overridden with `--env TERM=...`.
+
+Each terminal run mounts a private [devpts instance](https://www.kernel.org/doc/html/latest/filesystems/devpts.html), limited to 64 PTYs, and provides `/dev/pts`, `/dev/ptmx`, and `/dev/tty`. The command starts in its own session with a controlling terminal, supporting shell job control. Numeric users and read-only roots remain supported; terminal mounts are writable independently of the root mount. Host PTY devices are not exposed in the container.
+
+Terminal stdout and stderr are combined on stdout, with terminal line discipline such as CRLF newlines. Runtime diagnostics still use stderr. Output is drained after exit with a bounded wait so a blocked consumer cannot prevent terminal restoration. `-t` without `-i` allocates a terminal without forwarding host input and queues an EOF character for canonical readers; when stdin has no window dimensions, the initial size is 24 rows by 80 columns. Normal command exit codes and timeouts retain their existing behavior.
+
 ## Background containers
 
 ```sh
@@ -116,11 +134,11 @@ Logs retain a prefix up to 16 MiB, including a truncation notice when necessary.
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Use `./scripts/test-linux.sh -test.run TestBackground` for a focused background run. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-Implement interactive terminals and `exec` next. Image storage/import and external networking follow these milestones. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+Implement non-interactive `exec` next, then reuse terminal handling for `exec -it`. Inspection, resource statistics, persistent data, local images, and external networking remain planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 
