@@ -1,12 +1,12 @@
 # mini-docker
 
-A small Go container runtime for Linux arm64 and amd64. Run a foreground command in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
+A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-The foreground MVP is implemented and validated in the dedicated Linux VM. Subsequent additions provide configurable environments, working directories, numeric users, and read-only root filesystems.
+The foreground MVP and background container management are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
 
 ## Requirements
 
-Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. The launcher obtains a delegated systemd scope rather than modifying systemd's top-level cgroups.
+Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. Foreground execution uses a delegated systemd scope; detached execution creates its own delegated service. Background management requires `/usr/bin/systemd-run` and `/usr/bin/systemctl`.
 
 Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, rootless execution, or terminal allocation.
 
@@ -73,6 +73,36 @@ CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
 
+## Background containers
+
+```sh
+./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+  --user 1000 --read-only --workdir /tmp \
+  -- /bin/sh -c 'trap "echo stopped; exit 0" TERM; while :; do echo working; sleep 1; done'
+./scripts/run-linux.sh ps
+./scripts/run-linux.sh logs --tail 5 worker
+./scripts/run-linux.sh stop worker
+./scripts/run-linux.sh ps --all --json
+./scripts/run-linux.sh logs worker
+./scripts/run-linux.sh rm worker
+```
+
+`run -d` (or `--detach`) prints the full container ID after the command starts and returns without waiting for completion. Background stdin is `/dev/null`; stdout and stderr are merged into a private log. All resource and execution options also apply to detached runs. Startup waits at most 95 seconds; failures return `125`, with a retained failed record when allocation succeeded. A command that exits immediately still receives an ID and preserves its exit code.
+
+| Command | Behavior |
+| --- | --- |
+| `run -d --name NAME ...` | Reserve a unique name of 1-63 letters, digits, dots, underscores, or hyphens, starting with a letter or digit. Names cannot be full container IDs. Omit the name for an automatic `mini-...` name. |
+| `ps` | List created, starting, running, and stopping containers. `-a` / `--all` includes exited and failed records; `--json` returns an array for scripts. |
+| `stop ID\|NAME` | Send SIGTERM through the supervisor and wait for cleanup. The runtime uses a five-second grace period; systemd enforces a final whole-service shutdown boundary. Repeated stops of completed containers succeed. |
+| `logs ID\|NAME` | Read retained combined output. `--tail N` selects the last N lines; `-f` / `--follow` streams until completion. Interrupting follow leaves the container running. |
+| `rm ID\|NAME` | Remove an inactive container's metadata, configuration, and logs after verifying resource cleanup. Stop active containers first. Removal releases the name for reuse. |
+
+Use full 32-character IDs or exact names. Flags precede the identifier, such as `logs --tail 10 --follow worker`. Successful management commands return `0`; errors return `125`. The command's own exit status is available through `ps --all`, independently of the startup and stop commands' status.
+
+Each container has an independent transient systemd service, using [cgroup delegation](https://systemd.io/CGROUP_DELEGATION/). Closing the launcher does not stop it. Persistent records and logs live under `/var/lib/mini-docker/containers/` with private root-owned permissions; temporary rootfs data remains under `/var/lib/mini-docker/runs/` and is removed after execution. Container filesystem writes are temporary, even though logs and metadata survive until `rm`.
+
+Logs retain a prefix up to 16 MiB, including a truncation notice when necessary. Further output is drained and discarded so a full log cannot block the workload; JSON records expose `log_truncated`. This version does not rotate logs or restart containers after a host/VM reboot. Management commands reconcile abandoned supervisors using service identity and locks, preserve failed records, and leave the command exit status unknown when an abrupt supervisor loss prevents completion from being recorded.
+
 ## Build and validation
 
 | Command | Purpose |
@@ -82,20 +112,22 @@ Normal command exit codes pass through. Signal exits use `128 + signal`; timeout
 | `make fmt` | Format Go sources |
 | `make vet` | Run Go's static checks |
 | `make test` | Run unprivileged tests; integration tests are skipped |
-| `make test-integration` | Run privileged Linux integration tests in independent delegated scopes |
+| `make test-integration` | Run privileged Linux integration tests in dedicated scopes and services |
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Use `./scripts/test-linux.sh -test.run TestExecution` for a focused run. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Use `./scripts/test-linux.sh -test.run TestBackground` for a focused background run. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-Implement persistent container lifecycle management (`run -d`, `ps`, `stop`, `logs`, `rm`) next, followed by interactive terminals and `exec`. Image storage/import and external networking follow these milestones. Each addition must retain the foreground isolation and cleanup guarantees and pass privileged Linux integration tests.
+Implement interactive terminals and `exec` next. Image storage/import and external networking follow these milestones. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 
 - `cmd/mini-docker/`: executable entry point.
 - `internal/cli/`: argument parsing and environment checks.
+- `internal/config/`: execution configuration and validation.
+- `internal/container/`: persistent records, background supervision, systemd service management, and bounded logs.
 - `internal/runtime/`: supervisor, container init, signals, run state, recovery, and cleanup.
 - `internal/rootfs/`: template validation and filesystem preparation.
 - `internal/cgroup/`: cgroups v2 delegation and limits.
