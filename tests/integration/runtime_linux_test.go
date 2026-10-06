@@ -108,7 +108,7 @@ func start(t *testing.T, input string, args ...string) *invocation {
 	require(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	unit := fmt.Sprintf("mini-docker-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
-	command := append([]string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=memory pids", "--", binary}, args...)
+	command := append([]string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary}, args...)
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-")
 	if err != nil {
 		t.Fatal(err)

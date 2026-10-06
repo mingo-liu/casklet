@@ -3,16 +3,19 @@
 package rootfs
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
 // Setup replaces the current root and mounts the runtime filesystems. Call only
 // inside a new mount namespace; the caller must discard that namespace on error.
-func Setup(path string) error {
+func Setup(path string, readOnly bool) error {
 	root, err := directory(path)
 	if err != nil {
 		return err
@@ -74,5 +77,59 @@ func Setup(path string) error {
 	if err := unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=16m,mode=1777"); err != nil {
 		return fmt.Errorf("mount tmp: %w", err)
 	}
+	if readOnly {
+		mountInfo, err := os.Open("/proc/self/mountinfo")
+		if err != nil {
+			return fmt.Errorf("inspect rootfs mount flags: %w", err)
+		}
+		flags, err := readOnlyRootFlags(mountInfo)
+		mountInfo.Close()
+		if err != nil {
+			return fmt.Errorf("inspect rootfs mount flags: %w", err)
+		}
+		// A bind remount affects only this root mount, keeping the host
+		// filesystem and the separate /proc, /dev, and /tmp mounts writable.
+		if err := unix.Mount("", "/", "", flags, ""); err != nil {
+			return fmt.Errorf("remount rootfs read-only: %w", err)
+		}
+	}
 	return nil
+}
+
+// A bind remount replaces per-mount flags, so retain restrictions and timestamp
+// behavior inherited from the filesystem containing the private rootfs copy.
+func readOnlyRootFlags(mountInfo io.Reader) (uintptr, error) {
+	scanner := bufio.NewScanner(mountInfo)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 6 {
+			return 0, fmt.Errorf("invalid mountinfo entry: %q", scanner.Text())
+		}
+		if decodeMountPath(fields[4]) != "/" {
+			continue
+		}
+		flags := uintptr(unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV)
+		for _, option := range strings.Split(fields[5], ",") {
+			switch option {
+			case "noexec":
+				flags |= unix.MS_NOEXEC
+			case "noatime":
+				flags |= unix.MS_NOATIME
+			case "nodiratime":
+				flags |= unix.MS_NODIRATIME
+			case "relatime":
+				flags |= unix.MS_RELATIME
+			case "strictatime":
+				flags |= unix.MS_STRICTATIME
+			case "nosymfollow":
+				flags |= unix.MS_NOSYMFOLLOW
+			}
+		}
+		return flags, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("root mount not found")
 }

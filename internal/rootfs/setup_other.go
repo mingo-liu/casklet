@@ -4,6 +4,6 @@ package rootfs
 
 import "errors"
 
-func Setup(path string) error {
+func Setup(path string, readOnly bool) error {
 	return errors.New("rootfs setup requires Linux")
 }

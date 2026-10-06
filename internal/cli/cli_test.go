@@ -60,3 +60,80 @@ func TestHelpDoesNotRequireRootFS(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutionOptions(t *testing.T) {
+	r, err := Parse([]string{"run", "--rootfs", "/tmp/r", "--cpus", ".125", "--env", "COLOR=blue", "--env", "COLOR=red", "--env", "EMPTY=", "--workdir", "/work/../tmp/", "--user", "123:456", "--read-only", "--", "sh", "--cpus", "2", "--env", "HOST=value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Config.CPUQuota != 12500 || r.Config.Workdir != "/tmp" || !r.Config.ReadOnly || r.Config.User == nil || r.Config.User.UID != 123 || r.Config.User.GID != 456 {
+		t.Fatalf("unexpected execution options: %+v", r.Config)
+	}
+	if !reflect.DeepEqual(r.Config.Env, []string{"COLOR=blue", "COLOR=red", "EMPTY="}) {
+		t.Fatalf("environment assignments changed: %q", r.Config.Env)
+	}
+	if !reflect.DeepEqual(r.Config.Command, []string{"sh", "--cpus", "2", "--env", "HOST=value"}) {
+		t.Fatalf("command arguments changed: %q", r.Config.Command)
+	}
+	defaults, err := Parse([]string{"run", "--rootfs", "/tmp/r", "--", "sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Config.CPUQuota != 0 || defaults.Config.Env != nil || defaults.Config.Workdir != "/" || defaults.Config.User != nil || defaults.Config.ReadOnly {
+		t.Fatalf("unexpected defaults: %+v", defaults.Config)
+	}
+}
+
+func TestExecutionOptionsRejectInvalidInput(t *testing.T) {
+	for _, option := range [][]string{
+		{"--cpus", "NaN"}, {"--cpus", "-1"}, {"--cpus", "0.001"},
+		{"--env", "KEY"}, {"--env", "BAD-KEY=value"}, {"--env", "KEY=a\x00b"},
+		{"--workdir", "relative"}, {"--workdir", ""}, {"--workdir", "/a\x00b"},
+		{"--user", ""}, {"--user", "root"}, {"--user", "1:2:3"},
+	} {
+		args := append([]string{"run", "--rootfs", "/tmp/r"}, option...)
+		args = append(args, "--", "echo")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted invalid options: %q", args)
+		}
+	}
+	if _, err := Parse([]string{"run", "--rootfs", "/tmp/r", "--", "echo", "a\x00b"}); err == nil {
+		t.Error("accepted NUL in command argument")
+	}
+}
+
+func TestCPUBoundaries(t *testing.T) {
+	for input, want := range map[string]int64{
+		"0": 0, "0.000": 0, "0.01": 1000, ".5": 50000, "1": 100000, "2.125": 212500, "1000": 100000000,
+	} {
+		got, err := ParseCPUs(input)
+		if err != nil || got != want {
+			t.Errorf("ParseCPUs(%q) = %d, %v; want %d", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"", "NaN", "Inf", "1e2", "-1", "+1", " 1", "1 ", "1.", ".", "0.001", "1.0001", "1000.001", "1001", "9223372036854775808"} {
+		if _, err := ParseCPUs(input); err == nil {
+			t.Errorf("accepted invalid CPU count %q", input)
+		}
+	}
+}
+
+func TestUserBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		uid   uint32
+		gid   uint32
+	}{
+		{"0", 0, 0}, {"123", 123, 123}, {"123:456", 123, 456}, {"4294967294:0", 4294967294, 0},
+	} {
+		got, err := ParseUser(tt.input)
+		if err != nil || got.UID != tt.uid || got.GID != tt.gid {
+			t.Errorf("ParseUser(%q) = %+v, %v", tt.input, got, err)
+		}
+	}
+	for _, input := range []string{"", "root", "-1", "+1", ":1", "1:", "1:2:3", "1:group", "4294967295", "0:4294967295", "4294967296", " 1"} {
+		if _, err := ParseUser(input); err == nil {
+			t.Errorf("accepted invalid identity %q", input)
+		}
+	}
+}

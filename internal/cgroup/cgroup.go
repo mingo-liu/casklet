@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mingo-liu/mini-docker/internal/config"
 )
 
 // Group is a workload leaf. The supervisor must empty it before Close.
@@ -101,16 +103,53 @@ func writeControl(filename, value string) error {
 	return nil
 }
 
-func configureLimits(dir string, memory, pids int64, write func(string, string) error) error {
+func validateLimits(memory, pids, cpuQuota int64) error {
 	if memory <= 0 || pids <= 0 {
 		return errors.New("cgroup memory and PID limits must be positive")
 	}
-	for _, setting := range []struct{ name, value string }{
+	// Bound quota independently of CLI parsing, including multiplication inside
+	// the kernel. The project supports up to 1000 CPUs at a fixed 100ms period.
+	if cpuQuota != 0 && (cpuQuota < config.MinCPUQuota || cpuQuota > config.MaxCPUQuota) {
+		return errors.New("cgroup CPU quota must be zero or between 1000 and 100000000 microseconds")
+	}
+	return nil
+}
+
+func requiredControllers(cpuQuota int64) []string {
+	controllers := []string{"memory", "pids"}
+	if cpuQuota > 0 {
+		controllers = append(controllers, "cpu")
+	}
+	return controllers
+}
+
+func checkControllers(data string, cpuQuota int64) error {
+	available := make(map[string]bool)
+	for _, controller := range strings.Fields(data) {
+		available[controller] = true
+	}
+	for _, controller := range requiredControllers(cpuQuota) {
+		if !available[controller] {
+			return fmt.Errorf("delegated cgroup requires the %s controller", controller)
+		}
+	}
+	return nil
+}
+
+func configureLimits(dir string, memory, pids, cpuQuota int64, write func(string, string) error) error {
+	if err := validateLimits(memory, pids, cpuQuota); err != nil {
+		return err
+	}
+	settings := []struct{ name, value string }{
 		{"memory.max", strconv.FormatInt(memory, 10)},
 		{"memory.swap.max", "0"},
 		{"memory.oom.group", "1"},
 		{"pids.max", strconv.FormatInt(pids, 10)},
-	} {
+	}
+	if cpuQuota > 0 {
+		settings = append(settings, struct{ name, value string }{"cpu.max", fmt.Sprintf("%d %d", cpuQuota, config.CPUPeriod)})
+	}
+	for _, setting := range settings {
 		if err := write(filepath.Join(dir, setting.name), setting.value); err != nil {
 			return err
 		}

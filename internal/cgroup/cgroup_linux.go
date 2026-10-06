@@ -23,11 +23,11 @@ var creationMu sync.Mutex
 // Check validates a writable, exclusively owned systemd delegation without
 // modifying it. Launch the CLI through the delegated Linux scope script.
 func Check() error {
-	_, err := delegation()
+	_, err := delegation(0)
 	return err
 }
 
-func delegation() (string, error) {
+func delegation(cpuQuota int64) (string, error) {
 	if os.Geteuid() != 0 {
 		return "", errors.New("cgroup management requires root")
 	}
@@ -65,12 +65,8 @@ func delegation() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	available := make(map[string]bool)
-	for _, controller := range strings.Fields(string(controllers)) {
-		available[controller] = true
-	}
-	if !available["memory"] || !available["pids"] {
-		return "", errors.New("delegated cgroup requires memory and pids controllers")
+	if err := checkControllers(string(controllers), cpuQuota); err != nil {
+		return "", err
 	}
 	kind, err := os.ReadFile(filepath.Join(dir, "cgroup.type"))
 	if err != nil {
@@ -95,7 +91,11 @@ func delegation() (string, error) {
 			return "", errors.New("delegated scope must be fresh and contain no child cgroups")
 		}
 	}
-	for _, name := range []string{".", "cgroup.procs", "cgroup.subtree_control", "cgroup.kill", "memory.max", "memory.swap.max", "memory.oom.group", "pids.max"} {
+	controls := []string{".", "cgroup.procs", "cgroup.subtree_control", "cgroup.kill", "memory.max", "memory.swap.max", "memory.oom.group", "pids.max"}
+	if cpuQuota > 0 {
+		controls = append(controls, "cpu.max")
+	}
+	for _, name := range controls {
 		control := filepath.Join(dir, name)
 		if err := unix.Access(control, unix.W_OK); err != nil {
 			return "", fmt.Errorf("required cgroup control is unavailable or not writable: %s: %w", control, err)
@@ -106,13 +106,13 @@ func delegation() (string, error) {
 
 // Create moves the supervisor to a manager leaf and creates one limited
 // workload leaf. Use a new delegated scope for every invocation.
-func Create(memory, pids int64) (*Group, error) {
+func Create(memory, pids, cpuQuota int64) (*Group, error) {
 	creationMu.Lock()
 	defer creationMu.Unlock()
-	if memory <= 0 || pids <= 0 {
-		return nil, errors.New("cgroup memory and PID limits must be positive")
+	if err := validateLimits(memory, pids, cpuQuota); err != nil {
+		return nil, err
 	}
-	dir, err := delegation()
+	dir, err := delegation(cpuQuota)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,8 @@ func Create(memory, pids int64) (*Group, error) {
 	if len(strings.Fields(string(procs))) != 0 {
 		return nil, errors.New("delegated cgroup still contains processes after supervisor migration")
 	}
-	if err := writeControl(filepath.Join(dir, "cgroup.subtree_control"), "+memory +pids"); err != nil {
+	controllers := requiredControllers(cpuQuota)
+	if err := writeControl(filepath.Join(dir, "cgroup.subtree_control"), "+"+strings.Join(controllers, " +")); err != nil {
 		return nil, err
 	}
 	var id [12]byte
@@ -143,7 +144,7 @@ func Create(memory, pids int64) (*Group, error) {
 	if err := os.Mkdir(g.path, 0700); err != nil {
 		return nil, fmt.Errorf("create workload cgroup: %w", err)
 	}
-	if err := configureLimits(g.path, memory, pids, writeControl); err != nil {
+	if err := configureLimits(g.path, memory, pids, cpuQuota, writeControl); err != nil {
 		return nil, errors.Join(err, g.Close())
 	}
 	if err := unix.Access(filepath.Join(g.path, "cgroup.kill"), unix.W_OK); err != nil {

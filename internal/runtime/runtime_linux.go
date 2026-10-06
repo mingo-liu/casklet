@@ -79,6 +79,9 @@ func Probe() int {
 
 func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr error) {
 	code = 125
+	if err := cfg.ValidateExecution(); err != nil {
+		return code, err
+	}
 	if err := Check(cfg.RootFS); err != nil {
 		return code, err
 	}
@@ -135,7 +138,7 @@ func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr er
 		return 128 + int(sig.(syscall.Signal)), nil
 	default:
 	}
-	group, err := cgroup.Create(cfg.Memory, cfg.PidsLimit)
+	group, err := cgroup.Create(cfg.Memory, cfg.PidsLimit, cfg.CPUQuota)
 	if err != nil {
 		return code, err
 	}

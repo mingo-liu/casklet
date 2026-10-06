@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -13,6 +14,29 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "cpu":
+		runtime.GOMAXPROCS(1)
+		var before, after syscall.Rusage
+		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &before); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("cpu workload ready")
+		start := time.Now()
+		deadline := start.Add(4 * time.Second)
+		var checksum uint64 = 1
+		for time.Now().Before(deadline) {
+			for i := 0; i < 65536; i++ {
+				checksum = checksum*1664525 + 1013904223
+			}
+		}
+		elapsed := time.Since(start)
+		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &after); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		cpuNS := after.Utime.Nano() + after.Stime.Nano() - before.Utime.Nano() - before.Stime.Nano()
+		fmt.Printf("elapsed_us=%d cpu_us=%d checksum=%d\n", elapsed.Microseconds(), cpuNS/1000, checksum)
 	case "memory":
 		fmt.Println("allocating")
 		blocks := make([][]byte, 0, 64)

@@ -11,6 +11,6 @@ case "$binary" in /*) ;; *) binary=$PWD/$binary ;; esac
 [ -x "$binary" ] || fail "build the runtime first: $binary"
 if [ "$(id -u)" -ne 0 ]; then
     command -v sudo >/dev/null 2>&1 || fail 'sudo is required'
-    exec sudo systemd-run --scope --quiet --property='Delegate=memory pids' -- "$binary" "$@"
+    exec sudo systemd-run --scope --quiet --property='Delegate=memory pids cpu' -- "$binary" "$@"
 fi
-exec systemd-run --scope --quiet --property='Delegate=memory pids' -- "$binary" "$@"
+exec systemd-run --scope --quiet --property='Delegate=memory pids cpu' -- "$binary" "$@"

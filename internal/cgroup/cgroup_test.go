@@ -3,9 +3,12 @@ package cgroup
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,7 +71,7 @@ func TestConfigureLimits(t *testing.T) {
 	for _, name := range []string{"memory.max", "memory.swap.max", "memory.oom.group", "pids.max"} {
 		putControl(t, dir, name, "max")
 	}
-	if err := configureLimits(dir, 67108864, 32, writeControl); err != nil {
+	if err := configureLimits(dir, 67108864, 32, 0, writeControl); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{"memory.max": "67108864", "memory.swap.max": "0", "memory.oom.group": "1", "pids.max": "32"} {
@@ -82,15 +85,94 @@ func TestConfigureLimits(t *testing.T) {
 func TestConfigureLimitsRejectsMissingController(t *testing.T) {
 	dir := t.TempDir()
 	putControl(t, dir, "memory.max", "max")
-	if err := configureLimits(dir, 1024, 4, writeControl); err == nil {
+	if err := configureLimits(dir, 1024, 4, 0, writeControl); err == nil {
 		t.Fatal("missing swap controller accepted")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "memory.swap.max")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing kernel control was created: %v", err)
 	}
 	called := false
-	if err := configureLimits(dir, 0, 4, func(string, string) error { called = true; return nil }); err == nil || called {
+	if err := configureLimits(dir, 0, 4, 0, func(string, string) error { called = true; return nil }); err == nil || called {
 		t.Fatal("invalid limits attempted a write")
+	}
+}
+
+func TestConfigureCPUQuota(t *testing.T) {
+	for _, quota := range []int64{1000, 25000, 100000, 150000, 100000000} {
+		t.Run(fmt.Sprintf("quota_%d", quota), func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range []string{"memory.max", "memory.swap.max", "memory.oom.group", "pids.max", "cpu.max"} {
+				putControl(t, dir, name, "max")
+			}
+			if err := configureLimits(dir, 1<<20, 16, quota, writeControl); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "cpu.max"))
+			if want := fmt.Sprintf("%d 100000", quota); err != nil || string(data) != want {
+				t.Fatalf("CPU bandwidth: got %q, %v; want %q", data, err, want)
+			}
+		})
+	}
+}
+
+func TestCPUQuotaZeroPreservesDefault(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"memory.max", "memory.swap.max", "memory.oom.group", "pids.max", "cpu.max"} {
+		putControl(t, dir, name, "max 100000")
+	}
+	if err := configureLimits(dir, 1<<20, 16, 0, writeControl); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cpu.max"))
+	if err != nil || string(data) != "max 100000" {
+		t.Fatalf("unlimited CPU was changed: %q, %v", data, err)
+	}
+}
+
+func TestInvalidCPUQuotaNeverWrites(t *testing.T) {
+	for _, quota := range []int64{-1, math.MinInt64, 1, 999, 100000001, math.MaxInt64} {
+		called := false
+		err := configureLimits("unused", 1<<20, 16, quota, func(string, string) error { called = true; return nil })
+		if err == nil || called {
+			t.Fatalf("invalid CPU quota %d: error=%v, writes=%v", quota, err, called)
+		}
+	}
+}
+
+func TestMissingCPUControlNeverCreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"memory.max", "memory.swap.max", "memory.oom.group", "pids.max"} {
+		putControl(t, dir, name, "max")
+	}
+	if err := configureLimits(dir, 1<<20, 16, 25000, writeControl); err == nil || !strings.Contains(err.Error(), "cpu.max") {
+		t.Fatalf("missing CPU control was not diagnosed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cpu.max")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing CPU control was created: %v", err)
+	}
+}
+
+func TestOptionalCPUController(t *testing.T) {
+	for _, tc := range []struct {
+		controllers string
+		quota       int64
+		missing     string
+	}{
+		{"memory pids", 0, ""},
+		{"cpu memory pids", 25000, ""},
+		{"pids\nmemory\ncpu\n", 25000, ""},
+		{"memory pids", 25000, "cpu"},
+		{"cpu pids", 0, "memory"},
+		{"cpu memory", 25000, "pids"},
+	} {
+		err := checkControllers(tc.controllers, tc.quota)
+		if tc.missing == "" {
+			if err != nil {
+				t.Fatalf("unexpected controller error: %v", err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), tc.missing) {
+			t.Fatalf("missing %s was not diagnosed: %v", tc.missing, err)
+		}
 	}
 }
 

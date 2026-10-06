@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/mingo-liu/mini-docker/internal/config"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
@@ -51,10 +52,13 @@ func Init() int {
 		return fail(errors.New("invalid init configuration"))
 	}
 	cfg := prepare.Config
+	if err := cfg.ValidateExecution(); err != nil {
+		return fail(err)
+	}
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGCHLD)
 	defer signal.Stop(signals)
-	if err := rootfs.Setup(cfg.RootFS); err != nil {
+	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly); err != nil {
 		return fail(err)
 	}
 	if err := unix.Sethostname([]byte(cfg.Hostname)); err != nil {
@@ -63,7 +67,7 @@ func Init() int {
 	if err := enableLoopback(); err != nil {
 		return fail(err)
 	}
-	if err := reducePrivileges(); err != nil {
+	if err := reducePrivileges(cfg.User); err != nil {
 		return fail(err)
 	}
 	if err := encoder.Encode(message{Kind: "ready"}); err != nil {
@@ -85,12 +89,26 @@ func Init() int {
 	if err := control.SetDeadline(time.Time{}); err != nil {
 		return fail(err)
 	}
+	if err := os.Chdir(cfg.WorkingDirectory()); err != nil {
+		return fail(fmt.Errorf("enter working directory %s: %w", cfg.WorkingDirectory(), err))
+	}
+	commandEnvironment := cfg.CommandEnvironment()
+	// LookPath uses the init process's PATH. Resolve inside the container using
+	// the same explicitly configured PATH that the command receives.
+	for _, assignment := range commandEnvironment {
+		if value, ok := strings.CutPrefix(assignment, "PATH="); ok {
+			if err := os.Setenv("PATH", value); err != nil {
+				return fail(err)
+			}
+			break
+		}
+	}
 	executable, err := exec.LookPath(cfg.Command[0])
 	if err != nil {
 		return fail(err)
 	}
 	process, err := os.StartProcess(executable, cfg.Command, &os.ProcAttr{
-		Dir: "/", Env: baseEnvironment,
+		Dir: cfg.WorkingDirectory(), Env: commandEnvironment,
 		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Sys:   &syscall.SysProcAttr{Setpgid: true},
 	})
@@ -199,7 +217,7 @@ func enableLoopback() error {
 
 // Apply restrictions to every Go thread so fork/exec cannot select an
 // unrestricted thread. The runtime is built with CGO_ENABLED=0.
-func reducePrivileges() error {
+func reducePrivileges(user *config.User) error {
 	data, err := os.ReadFile("/proc/sys/kernel/cap_last_cap")
 	if err != nil {
 		return err
@@ -224,6 +242,21 @@ func reducePrivileges() error {
 	for capability := 0; capability <= last; capability++ {
 		if err := prctl(unix.PR_CAPBSET_DROP, uintptr(capability)); err != nil {
 			return fmt.Errorf("drop capability %d: %w", capability, err)
+		}
+	}
+	// Change the init identity as well as its children. This lets init discard
+	// SETUID/SETGID completely before exec while still signaling its workload.
+	// The syscall package applies these changes to every Go thread when built
+	// without cgo. Clear inherited supplementary groups even for UID 0.
+	if err := syscall.Setgroups(nil); err != nil {
+		return fmt.Errorf("clear supplementary groups: %w", err)
+	}
+	if user != nil {
+		if err := syscall.Setresgid(int(user.GID), int(user.GID), int(user.GID)); err != nil {
+			return fmt.Errorf("set container group: %w", err)
+		}
+		if err := syscall.Setresuid(int(user.UID), int(user.UID), int(user.UID)); err != nil {
+			return fmt.Errorf("set container user: %w", err)
 		}
 	}
 	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
