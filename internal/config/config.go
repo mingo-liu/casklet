@@ -27,6 +27,7 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	Mounts      []BindMount   `json:"mounts,omitempty"`
 	RootFS      string        `json:"rootfs"`
 	Hostname    string        `json:"hostname"`
 	Memory      int64         `json:"memory"`
@@ -70,7 +71,7 @@ func (c Config) ValidateExecution() error {
 	if c.User != nil && (c.User.UID == math.MaxUint32 || c.User.GID == math.MaxUint32) {
 		return errors.New("user and group IDs must be between 0 and 4294967294")
 	}
-	return nil
+	return ValidateMounts(c.Mounts, c.RootFS)
 }
 
 // WorkingDirectory supplies the default and normalizes a container path.

@@ -50,6 +50,8 @@ Run options:
   --env          Set KEY=VALUE; repeat to add variables (no host inheritance)
   --workdir      Existing absolute working directory (default: /)
   --user         Numeric UID[:GID]; GID defaults to UID (default: 0:0)
+  --mount        Bind a directory: type=bind,source=/HOST,target=/PATH[,readonly]
+                 Repeat for multiple directories (maximum: 32)
   --read-only    Mount the container root filesystem read-only
   --timeout      Command duration limit; 0 disables it (default: 0)
 
@@ -125,6 +127,14 @@ func Parse(args []string) (Request, error) {
 		fs.StringVar(&cpus, "cpus", "0", "CPU cores")
 		fs.Func("env", "environment assignment", func(value string) error {
 			r.Config.Env = append(r.Config.Env, value)
+			return nil
+		})
+		fs.Func("mount", "directory bind mount", func(value string) error {
+			mount, err := config.ParseMount(value)
+			if err != nil {
+				return err
+			}
+			r.Config.Mounts = append(r.Config.Mounts, mount)
 			return nil
 		})
 		fs.StringVar(&r.Config.Workdir, "workdir", "/", "working directory")

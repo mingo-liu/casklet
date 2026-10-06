@@ -28,16 +28,17 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
-	RootFS           string      `json:"rootfs"`
-	Hostname         string      `json:"hostname"`
-	Command          []string    `json:"command"`
-	EnvironmentNames []string    `json:"environment_names"`
-	Workdir          string      `json:"workdir"`
-	User             config.User `json:"user"`
-	ReadOnly         bool        `json:"read_only"`
-	Interactive      bool        `json:"interactive"`
-	TTY              bool        `json:"tty"`
-	Timeout          string      `json:"timeout"`
+	Mounts           []config.BindMount `json:"mounts"`
+	RootFS           string             `json:"rootfs"`
+	Hostname         string             `json:"hostname"`
+	Command          []string           `json:"command"`
+	EnvironmentNames []string           `json:"environment_names"`
+	Workdir          string             `json:"workdir"`
+	User             config.User        `json:"user"`
+	ReadOnly         bool               `json:"read_only"`
+	Interactive      bool               `json:"interactive"`
+	TTY              bool               `json:"tty"`
+	Timeout          string             `json:"timeout"`
 }
 
 type ResourceLimits struct {
@@ -61,7 +62,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	return Inspection{
 		ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{RootFS: cfg.RootFS, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: cfg.RootFS, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

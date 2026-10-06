@@ -41,6 +41,9 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
+	if err := rootfs.ValidateMountSources(cfg.Mounts, cfg.RootFS); err != nil {
+		return Record{}, err
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return Record{}, err

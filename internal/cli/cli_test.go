@@ -478,3 +478,23 @@ func TestWriteStatsUnavailableAndZero(t *testing.T) {
 		t.Fatalf("zero: %s, %v", out.String(), err)
 	}
 }
+
+func TestRunMountOptions(t *testing.T) {
+	request, err := Parse([]string{"run", "--rootfs", "/template", "--mount", "type=bind,source=/srv/a,target=/data", "--mount", "type=bind,source=/srv/b,target=/config,readonly", "--", "sh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Config.Mounts) != 2 || request.Config.Mounts[0].Source != "/srv/a" || request.Config.Mounts[0].ReadOnly || !request.Config.Mounts[1].ReadOnly {
+		t.Fatalf("mounts=%+v", request.Config.Mounts)
+	}
+	for _, args := range [][]string{
+		{"run", "--rootfs", "/template", "--mount", "type=bind,source=/srv/a,target=/data", "--mount", "type=bind,source=/srv/b,target=/data/child", "--", "sh"},
+		{"run", "--rootfs", "/template", "--mount", "type=bind,source=/srv/a,target=/proc", "--", "sh"},
+		{"doctor", "--rootfs", "/template", "--mount", "type=bind,source=/srv/a,target=/data"},
+		{"exec", "--mount", "type=bind,source=/srv/a,target=/data", "worker", "--", "sh"},
+	} {
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted %v", args)
+		}
+	}
+}

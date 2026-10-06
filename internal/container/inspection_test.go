@@ -11,7 +11,7 @@ import (
 )
 
 func TestInspectionPublicConfiguration(t *testing.T) {
-	cfg := config.Config{RootFS: "/template", Hostname: "worker", Command: []string{"/bin/sleep", "30"},
+	cfg := config.Config{Mounts: []config.BindMount{{Source: "/srv/data", Target: "/data", ReadOnly: true}}, RootFS: "/template", Hostname: "worker", Command: []string{"/bin/sleep", "30"},
 		Env: []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="}, Memory: 64 << 20, PidsLimit: 32,
 		CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
 	record := Record{ID: "id", Name: "worker", State: StateFailed, CreatedAt: time.Now(),
@@ -20,6 +20,13 @@ func TestInspectionPublicConfiguration(t *testing.T) {
 	if got.Config.Workdir != "/" || got.Config.User.UID != 1000 || got.Config.Timeout != "30s" ||
 		got.Limits.CPUs != 0.25 || got.Limits.MemoryBytes != 64<<20 || got.Limits.CPUPeriodUsec != 100000 {
 		t.Fatalf("incorrect public configuration: %+v", got)
+	}
+	if len(got.Config.Mounts) != 1 || got.Config.Mounts[0] != cfg.Mounts[0] {
+		t.Fatalf("inspection mounts=%+v", got.Config.Mounts)
+	}
+	got.Config.Mounts[0].Source = "/changed"
+	if cfg.Mounts[0].Source != "/srv/data" {
+		t.Fatal("inspection aliases persisted mount configuration")
 	}
 	data, err := json.Marshal(got)
 	if err != nil {

@@ -38,3 +38,16 @@ func TestReadOnlyRootFlagsRejectMissingOrMalformedRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestBindRemountFlagsPreserveSourceRestrictions(t *testing.T) {
+	info := "28 1 0:20 / / rw,relatime - ext4 /dev/vda rw\n" +
+		"29 28 0:21 /source /data\\040dir ro,noexec,nosymfollow,noatime - ext4 /dev/vda rw\n"
+	flags, err := bindRemountFlags(strings.NewReader(info), "/data dir", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := uintptr(unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC | unix.MS_NOSYMFOLLOW | unix.MS_NOATIME)
+	if flags != want {
+		t.Fatalf("bind flags=%#x want=%#x", flags, want)
+	}
+}

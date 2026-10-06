@@ -61,7 +61,7 @@ func Init() int {
 		signal.Notify(signals, syscall.SIGHUP, syscall.SIGQUIT)
 	}
 	defer signal.Stop(signals)
-	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly); err != nil {
+	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly, cfg.Mounts...); err != nil {
 		return fail(err)
 	}
 	if err := unix.Sethostname([]byte(cfg.Hostname)); err != nil {

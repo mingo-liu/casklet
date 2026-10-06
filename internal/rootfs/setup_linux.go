@@ -10,12 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mingo-liu/mini-docker/internal/config"
 	"golang.org/x/sys/unix"
 )
 
 // Setup replaces the current root and mounts the runtime filesystems. Call only
 // inside a new mount namespace; the caller must discard that namespace on error.
-func Setup(path string, readOnly bool) error {
+func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	root, err := directory(path)
 	if err != nil {
 		return err
@@ -28,6 +29,11 @@ func Setup(path string, readOnly bool) error {
 			return err
 		}
 	}
+	sources, err := openMountSources(mounts, root)
+	if err != nil {
+		return err
+	}
+	defer closeMountSources(sources)
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("make mounts private: %w", err)
 	}
@@ -45,12 +51,6 @@ func Setup(path string, readOnly bool) error {
 		return err
 	}
 	oldRoot = "/" + filepath.Base(oldRoot)
-	if err := unix.Unmount(oldRoot, unix.MNT_DETACH); err != nil {
-		return fmt.Errorf("unmount old root: %w", err)
-	}
-	if err := os.Remove(oldRoot); err != nil {
-		return fmt.Errorf("remove old root entry: %w", err)
-	}
 	if err := unix.Mount("proc", "/proc", "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("mount proc: %w", err)
 	}
@@ -77,6 +77,17 @@ func Setup(path string, readOnly bool) error {
 	if err := unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=16m,mode=1777"); err != nil {
 		return fmt.Errorf("mount tmp: %w", err)
 	}
+	if err := mountDirectories(mounts, sources); err != nil {
+		return err
+	}
+	// Keep the old root attached until source descriptors have been bound.
+	// Linux rejects legacy bind mounts from detached source mounts.
+	if err := unix.Unmount(oldRoot, unix.MNT_DETACH); err != nil {
+		return fmt.Errorf("unmount old root: %w", err)
+	}
+	if err := os.Remove(oldRoot); err != nil {
+		return fmt.Errorf("remove old root entry: %w", err)
+	}
 	if readOnly {
 		mountInfo, err := os.Open("/proc/self/mountinfo")
 		if err != nil {
@@ -99,6 +110,10 @@ func Setup(path string, readOnly bool) error {
 // A bind remount replaces per-mount flags, so retain restrictions and timestamp
 // behavior inherited from the filesystem containing the private rootfs copy.
 func readOnlyRootFlags(mountInfo io.Reader) (uintptr, error) {
+	return bindRemountFlags(mountInfo, "/", true)
+}
+
+func bindRemountFlags(mountInfo io.Reader, target string, readOnly bool) (uintptr, error) {
 	scanner := bufio.NewScanner(mountInfo)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {
@@ -106,12 +121,17 @@ func readOnlyRootFlags(mountInfo io.Reader) (uintptr, error) {
 		if len(fields) < 6 {
 			return 0, fmt.Errorf("invalid mountinfo entry: %q", scanner.Text())
 		}
-		if decodeMountPath(fields[4]) != "/" {
+		if decodeMountPath(fields[4]) != target {
 			continue
 		}
-		flags := uintptr(unix.MS_REMOUNT | unix.MS_BIND | unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV)
+		flags := uintptr(unix.MS_REMOUNT | unix.MS_BIND | unix.MS_NOSUID | unix.MS_NODEV)
+		if readOnly {
+			flags |= unix.MS_RDONLY
+		}
 		for _, option := range strings.Split(fields[5], ",") {
 			switch option {
+			case "ro":
+				flags |= unix.MS_RDONLY
 			case "noexec":
 				flags |= unix.MS_NOEXEC
 			case "noatime":
@@ -131,5 +151,5 @@ func readOnlyRootFlags(mountInfo io.Reader) (uintptr, error) {
 	if err := scanner.Err(); err != nil {
 		return 0, err
 	}
-	return 0, fmt.Errorf("root mount not found")
+	return 0, fmt.Errorf("mount target %s not found", target)
 }

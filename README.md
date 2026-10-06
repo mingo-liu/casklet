@@ -2,13 +2,13 @@
 
 A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-Foreground execution, interactive terminals, background container management, interactive container execution, inspection, and resource statistics are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
+Foreground execution, interactive terminals, background container management, interactive container execution, inspection, resource statistics, and directory bind mounts are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
 
 ## Requirements
 
 Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. Foreground execution uses a delegated systemd scope; detached execution creates its own delegated service. Background management requires `/usr/bin/systemd-run` and `/usr/bin/systemctl`.
 
-Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, persistent volumes, external container networking, or rootless execution.
+Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, managed volumes, external container networking, or rootless execution.
 
 ## Development VM on macOS
 
@@ -48,7 +48,7 @@ printf 'hello\n' | ./scripts/run-linux.sh run \
 
 The launcher uses `sudo systemd-run --scope` and preserves standard input and the command's exit status. Override `MINI_DOCKER_BINARY` to use another executable. Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax.
 
-Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited). Memory suffixes `k`, `m`, and `g` use powers of 1024. Each run copies the rootfs template, mounts independent `/proc` and temporary storage, and removes its working filesystem after exit. Networking contains loopback only. By default, the command receives a fixed environment and starts in `/`.
+Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited). Memory suffixes `k`, `m`, and `g` use powers of 1024. Each run copies the rootfs template, mounts independent `/proc` and temporary storage, and removes its working filesystem after exit. Explicit directory bind mounts preserve data in their host sources. Networking contains loopback only. By default, the command receives a fixed environment and starts in `/`.
 
 ### Resource and execution options
 
@@ -65,13 +65,38 @@ Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0`
 | `--env KEY=VALUE` | Repeat to add variables; the last assignment wins. Accept empty values and `=` in values. Names use letters, digits, and underscores and cannot start with a digit. Override the fixed `PATH=/bin:/usr/bin`, `HOME=/`, and `LANG=C` defaults without inheriting host variables. |
 | `--workdir /PATH` | Use an existing directory inside the container; default `/`. Missing or inaccessible directories fail startup. Command lookup uses the configured `PATH` and working directory inside the container. |
 | `--user UID[:GID]` | Use numeric IDs from `0` through `4294967294`; GID defaults to UID. Clear supplementary groups and all capability sets before starting the command. The container init uses the same identity to supervise descendants. |
-| `--read-only` | Mount the copied root read-only. `/tmp` remains a writable, size-limited tmpfs; minimal `/dev` remains usable. The default root is writable and temporary. |
+| `--read-only` | Mount the copied root read-only. `/tmp` remains a writable, size-limited tmpfs; minimal `/dev` remains usable. Bind mounts retain their own read-only setting. The default root is writable and temporary. |
+| `--mount type=bind,source=/HOST,target=/PATH[,readonly]` | Bind an existing host directory into the container. Repeat for up to 32 independent targets; add `readonly` to prevent container writes. |
 
 Numeric users are not user-namespace mappings and do not enable rootless execution. Copied files remain owned by root; custom rootfs templates must grant the selected user access to its working directory and executables. `make rootfs` now generates a traversable root directory; regenerate an older template if its root mode is `0700`.
 
 CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu). The supervisor stays outside the workload quota; init, command processes, and their threads share the limit.
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
+
+## Persistent data
+
+Create a directory on the Linux host (inside the VM when using Lima):
+
+```sh
+mkdir -p "$HOME/mini-docker-data"
+./scripts/run-linux.sh run --rootfs ./rootfs/busybox --read-only \
+  --mount "type=bind,source=$HOME/mini-docker-data,target=/data" \
+  --workdir /data -- /bin/sh -c 'echo persistent >> result; cat result'
+./scripts/run-linux.sh run --rootfs ./rootfs/busybox \
+  --mount "type=bind,source=$HOME/mini-docker-data,target=/data,readonly" \
+  -- /bin/cat /data/result
+```
+
+`--mount` is repeatable, accepts exactly `type=bind`, `source`, `target`, and the optional bare `readonly` flag, and defaults to writable. Option order is flexible; unknown or duplicate options fail. Paths must be clean absolute paths without `.` or `..` components, trailing slashes, NUL, or newlines; this comma-separated syntax cannot represent paths containing commas. Only existing real source directories are supported, with no symlinks in any path component. Sources are never created automatically. The host root, `/proc`, `/sys`, `/dev`, runtime storage at `/var/lib/mini-docker`, and sources overlapping the rootfs template are rejected, including ancestors of protected paths.
+
+Targets cannot be `/`, `/tmp`, or overlap `/proc`, `/dev`, or `/sys`. `/tmp/data` is allowed and is mounted after the runtime's temporary filesystem. Missing target directories are created in the private filesystem with mode `0755` (subject to the runtime umask). Existing target directories are covered for this run; files and symlinks in any target component fail startup. Duplicate or nested targets are rejected regardless of option order. Mounting a directory hides the target's previous contents without copying or deleting them.
+
+Bind mounts are nonrecursive: mounted descendants of a source are excluded, and their underlying directories are visible instead. Sources are pinned by directory descriptors during init setup, so later renames do not redirect an installed mount. Mount propagation is private to the container. Every bind enforces `nosuid` and `nodev`, preserves source restrictions such as `noexec` and an existing read-only flag, and applies `readonly` only to the container mount. A writable bind remains writable with `--read-only`; a read-only bind remains read-only with a writable root. The workload cannot remount it after capabilities are dropped.
+
+Host file ownership and permissions are preserved; `--user` uses those numeric host IDs directly. Grant that user access to the source before running, and avoid mounting sensitive host directories. Writable binds intentionally let the workload modify or delete source data. The runtime never changes source ownership, deletes source directories, or removes their contents during exit, timeout, startup rollback, supervisor recovery, or `rm`. Filesystem writes outside binds remain temporary. Concurrent containers can share a source; ordinary filesystem concurrency rules apply.
+
+The same options work with detached containers. `exec` inherits existing mounts and cannot add new ones. `inspect` includes `config.mounts`, an array of `source`, `target`, and `read_only` objects (empty when no mounts are configured); these explicitly configured host paths remain visible after exit.
 
 ## Interactive terminals
 
@@ -119,7 +144,7 @@ Terminal stdout and stderr are combined on stdout, with terminal line discipline
 
 Use full 32-character IDs or exact names. Flags precede the identifier, such as `logs --tail 10 --follow worker`. Successful management commands return `0`; errors return `125`. The command's own exit status is available through `ps --all`, independently of the startup and stop commands' status.
 
-Each container has an independent transient systemd service, using [cgroup delegation](https://systemd.io/CGROUP_DELEGATION/). Closing the launcher does not stop it. Persistent records and logs live under `/var/lib/mini-docker/containers/` with private root-owned permissions; temporary rootfs data remains under `/var/lib/mini-docker/runs/` and is removed after execution. Container filesystem writes are temporary, even though logs and metadata survive until `rm`.
+Each container has an independent transient systemd service, using [cgroup delegation](https://systemd.io/CGROUP_DELEGATION/). Closing the launcher does not stop it. Persistent records and logs live under `/var/lib/mini-docker/containers/` with private root-owned permissions; temporary rootfs data remains under `/var/lib/mini-docker/runs/` and is removed after execution. Container filesystem writes outside explicit bind mounts are temporary, even though logs and metadata survive until `rm`.
 
 Logs retain a prefix up to 16 MiB, including a truncation notice when necessary. Further output is drained and discarded so a full log cannot block the workload; JSON records expose `log_truncated`. This version does not rotate logs or restart containers after a host/VM reboot. Management commands reconcile abandoned supervisors using service identity and locks, preserve failed records, and leave the command exit status unknown when an abrupt supervisor loss prevents completion from being recorded.
 
@@ -137,7 +162,7 @@ Logs retain a prefix up to 16 MiB, including a truncation notice when necessary.
 ./scripts/run-linux.sh rm worker
 ```
 
-These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, and timeout as a duration string. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
+These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, directory bind mounts, and timeout as a duration string. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
 
 `created_at`, `started_at`, and `finished_at` use UTC RFC3339 timestamps. Times that have not occurred and unknown exit codes are JSON `null`. `limits` contains configured `memory_bytes`, `pids`, `cpu_quota_usec`, `cpu_period_usec`, and `cpus`; zero CPU quota and zero `cpus` mean unlimited. Limits and configuration remain inspectable after resource cleanup.
 
@@ -202,11 +227,11 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-Add persistent data next. Local images and external networking remain planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+Local image management is the next milestone; external networking remains planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 

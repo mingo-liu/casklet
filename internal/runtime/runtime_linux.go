@@ -107,6 +107,9 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err != nil {
 		return code, err
 	}
+	if err := rootfs.ValidateMountSources(cfg.Mounts, template); err != nil {
+		return code, err
+	}
 	incomingSignals := make(chan os.Signal, 8)
 	signals := make(chan os.Signal, 8)
 	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM)

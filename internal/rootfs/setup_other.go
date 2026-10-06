@@ -2,8 +2,12 @@
 
 package rootfs
 
-import "errors"
+import (
+	"errors"
 
-func Setup(path string, readOnly bool) error {
+	"github.com/mingo-liu/mini-docker/internal/config"
+)
+
+func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	return errors.New("rootfs setup requires Linux")
 }
