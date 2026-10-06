@@ -18,7 +18,13 @@ type unitStatus struct {
 	MainPID, ExitCode, ExitStatus  int
 }
 
-func unitName(id string) string { return "mini-docker-" + id + ".service" }
+func unitName(id string, generation ...uint64) string {
+	suffix := ""
+	if len(generation) != 0 && generation[0] != 0 {
+		suffix = "-g" + strconv.FormatUint(generation[0], 10)
+	}
+	return "mini-docker-" + id + suffix + ".service"
+}
 
 func (status unitStatus) live() bool {
 	return status.MainPID != 0 || (status.ActiveState != "inactive" && status.ActiveState != "failed")
@@ -56,13 +62,13 @@ func systemdCommand(ctx context.Context, tool string, args ...string) ([]byte, e
 	return output, nil
 }
 
-func inspectUnit(ctx context.Context, id string) (unitStatus, error) {
+func inspectUnit(ctx context.Context, id string, generation ...uint64) (unitStatus, error) {
 	if err := validateID(id); err != nil {
 		return unitStatus{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	output, err := systemdCommand(ctx, "systemctl", "show", "--property=LoadState,ActiveState,Result,ExecMainCode,ExecMainStatus,MainPID", unitName(id))
+	output, err := systemdCommand(ctx, "systemctl", "show", "--property=LoadState,ActiveState,Result,ExecMainCode,ExecMainStatus,MainPID", unitName(id, generation...))
 	if err != nil {
 		return unitStatus{}, err
 	}
@@ -103,14 +109,14 @@ func parseUnitStatus(output string) (unitStatus, error) {
 	return status, nil
 }
 
-func stopUnit(ctx context.Context, id string) error {
-	status, err := inspectUnit(ctx, id)
+func stopUnit(ctx context.Context, id string, generation ...uint64) error {
+	status, err := inspectUnit(ctx, id, generation...)
 	if err != nil {
 		return err
 	}
 	if status.LoadState == "not-found" {
 		return nil
 	}
-	_, err = systemdCommand(ctx, "systemctl", "stop", unitName(id))
+	_, err = systemdCommand(ctx, "systemctl", "stop", unitName(id, generation...))
 	return err
 }

@@ -85,7 +85,7 @@ func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics,
 	}
 	// Refuse unrelated cgroups even if private metadata has been corrupted.
 	if filepath.Clean(record.Cgroup) != record.Cgroup || !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") ||
-		filepath.Base(filepath.Dir(record.Cgroup)) != unitName(record.ID) ||
+		filepath.Base(filepath.Dir(record.Cgroup)) != unitName(record.ID, record.Generation) ||
 		!workloadName.MatchString(filepath.Base(record.Cgroup)) {
 		return unavailable("invalid workload cgroup identity")
 	}
@@ -110,7 +110,7 @@ func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics,
 	}
 	result.State, result.SampledAt = latest.State, second.At.UTC()
 	result.Interval = second.At.Sub(first.At).String()
-	if latest.Terminal() {
+	if latest.Terminal() || latest.Generation != record.Generation {
 		return unavailable("container is completed; live metrics are not retained")
 	}
 	result.MemoryBytes, result.CPUUsageUsec = second.MemoryBytes, second.CPUUsageUsec

@@ -512,3 +512,20 @@ func TestImageCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestLifecycleOptions(t *testing.T) {
+	for _, args := range [][]string{{"wait", "worker"}, {"start", "worker"}, {"restart", "worker"}, {"stop", "--timeout", "0s", "worker"}, {"restart", "--timeout", "1m", "worker"}, {"run", "--rootfs", "/template", "--stop-timeout", "20ms", "--", "sh"}} {
+		if _, err := Parse(args); err != nil {
+			t.Fatalf("parse %v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{{"wait"}, {"wait", "a", "b"}, {"start", "../worker"}, {"stop", "--timeout", "-1s", "worker"}, {"restart", "--timeout", "61s", "worker"}, {"stop", "worker", "--timeout", "1s"}, {"run", "--rootfs", "/template", "--stop-timeout", "61s", "--", "sh"}} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+	request, err := Parse([]string{"stop", "--timeout", "0s", "worker"})
+	if err != nil || request.StopTimeout == nil || *request.StopTimeout != 0 {
+		t.Fatal("zero stop timeout was treated as default")
+	}
+}

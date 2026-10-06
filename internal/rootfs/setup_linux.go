@@ -44,13 +44,14 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = unix.Unmount(oldRoot, unix.MNT_DETACH); _ = os.Remove(oldRoot) }()
 	if err := unix.PivotRoot(root, oldRoot); err != nil {
 		return fmt.Errorf("pivot rootfs: %w", err)
 	}
+	oldRoot = "/" + filepath.Base(oldRoot)
 	if err := os.Chdir("/"); err != nil {
 		return err
 	}
-	oldRoot = "/" + filepath.Base(oldRoot)
 	if err := unix.Mount("proc", "/proc", "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
 		return fmt.Errorf("mount proc: %w", err)
 	}

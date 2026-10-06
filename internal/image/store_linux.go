@@ -247,7 +247,7 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 	}
 	file.Close()
 	// Flush the full tree and metadata before atomically publishing the identity.
-	if err := syncTree(ctx, stage); err != nil {
+	if err := rootfs.SyncTree(ctx, stage); err != nil {
 		return Record{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -260,26 +260,6 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 		return Record{}, err
 	}
 	return record, nil
-}
-
-func syncTree(ctx context.Context, path string) error {
-	return filepath.WalkDir(path, func(name string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		file, err := os.Open(name)
-		if err != nil {
-			return err
-		}
-		err = file.Sync()
-		return errors.Join(err, file.Close())
-	})
 }
 
 // Staging entries are private and never referenced. The exclusive lock ensures

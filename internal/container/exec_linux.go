@@ -57,7 +57,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	if record.State != StateRunning {
 		return 125, errors.New("exec requires a running container")
 	}
-	status, err := inspectUnit(startup, record.ID)
+	status, err := inspectUnit(startup, record.ID, record.Generation)
 	if err != nil {
 		return 125, err
 	}

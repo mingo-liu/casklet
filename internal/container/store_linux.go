@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -182,11 +183,11 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 			os.RemoveAll(path)
 		}
 	}()
-	record := Record{Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
+	record := Record{RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
 	if err := store.writeJSON(path, "config.json", cfg, maxConfigBytes); err != nil {
 		return Record{}, err
 	}
-	for _, filename := range []string{".lease", "container.log"} {
+	for _, filename := range []string{".lease", ".operation", "container.log"} {
 		file, err := store.openFile(filepath.Join(path, filename), unix.O_RDWR|unix.O_EXCL, true)
 		if err != nil {
 			return Record{}, err
@@ -469,6 +470,9 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return ErrBusy
 		}
+		return err
+	}
+	if err := rootfs.CheckUnmounted(filepath.Join(store.root, id)); err != nil {
 		return err
 	}
 	// Hide the record before deleting its contents so a crash cannot leave a

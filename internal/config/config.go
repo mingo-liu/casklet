@@ -27,21 +27,22 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
-	Image       string        `json:"image,omitempty"`
-	Mounts      []BindMount   `json:"mounts,omitempty"`
-	RootFS      string        `json:"rootfs"`
-	Hostname    string        `json:"hostname"`
-	Memory      int64         `json:"memory"`
-	PidsLimit   int64         `json:"pids_limit"`
-	CPUQuota    int64         `json:"cpu_quota"`
-	Timeout     time.Duration `json:"timeout"`
-	Env         []string      `json:"env,omitempty"`
-	Workdir     string        `json:"workdir,omitempty"`
-	User        *User         `json:"user,omitempty"`
-	ReadOnly    bool          `json:"read_only"`
-	Interactive bool          `json:"interactive"`
-	TTY         bool          `json:"tty"`
-	Command     []string      `json:"command"`
+	StopTimeout *time.Duration `json:"stop_timeout,omitempty"`
+	Image       string         `json:"image,omitempty"`
+	Mounts      []BindMount    `json:"mounts,omitempty"`
+	RootFS      string         `json:"rootfs"`
+	Hostname    string         `json:"hostname"`
+	Memory      int64          `json:"memory"`
+	PidsLimit   int64          `json:"pids_limit"`
+	CPUQuota    int64          `json:"cpu_quota"`
+	Timeout     time.Duration  `json:"timeout"`
+	Env         []string       `json:"env,omitempty"`
+	Workdir     string         `json:"workdir,omitempty"`
+	User        *User          `json:"user,omitempty"`
+	ReadOnly    bool           `json:"read_only"`
+	Interactive bool           `json:"interactive"`
+	TTY         bool           `json:"tty"`
+	Command     []string       `json:"command"`
 }
 
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -49,6 +50,11 @@ var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if c.StopTimeout != nil {
+		if err := ValidateStopTimeout(*c.StopTimeout); err != nil {
+			return err
+		}
+	}
 	if c.Image != "" {
 		if err := ValidateImageID(c.Image); err != nil {
 			return err
@@ -117,4 +123,19 @@ func ValidateImageID(id string) error {
 		return errors.New("image ID must be sha256: followed by 64 lowercase hexadecimal digits")
 	}
 	return nil
+}
+
+// ValidateStopTimeout bounds graceful shutdown, including immediate termination.
+func ValidateStopTimeout(timeout time.Duration) error {
+	if timeout < 0 || timeout > time.Minute {
+		return errors.New("stop timeout must be between 0s and 1m")
+	}
+	return nil
+}
+
+func (c Config) StoppingTimeout() time.Duration {
+	if c.StopTimeout == nil {
+		return 5 * time.Second
+	}
+	return *c.StopTimeout
 }

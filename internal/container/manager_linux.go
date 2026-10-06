@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
@@ -60,10 +61,6 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err := rootfs.ValidateMountSources(cfg.Mounts, cfg.RootFS); err != nil {
 		return Record{}, err
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return Record{}, err
-	}
 	ctx, cancel := context.WithTimeout(ctx, detachedStartupLimit)
 	defer cancel()
 	record, err := store.Create(ctx, cfg, name)
@@ -71,28 +68,47 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 		return Record{}, err
 	}
 	id := record.ID
+	operation, err := store.AcquireOperation(ctx, id)
+	if err != nil {
+		return record, rollbackStart(store, id, record.Generation, err)
+	}
+	defer operation.Close()
 	if err := store.Update(ctx, id, func(record *Record) error {
 		record.State = StateStarting
 		return nil
 	}); err != nil {
-		return record, rollbackStart(store, id, err)
+		return record, rollbackStart(store, id, record.Generation, err)
 	}
-	args := []string{"--quiet", "--service-type=exec", "--unit=" + unitName(id),
-		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=15s",
+	record.State = StateStarting
+	return launchExecution(ctx, store, record)
+}
+
+func launchExecution(ctx context.Context, store *Store, record Record) (Record, error) {
+	id := record.ID
+	generation := record.Generation
+	exe, err := os.Executable()
+	if err != nil {
+		return record, rollbackStart(store, id, generation, err)
+	}
+	args := []string{"--quiet", "--service-type=exec", "--unit=" + unitName(id, record.Generation),
+		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=75s",
 		"--property=Restart=no", "--property=StandardInput=null", "--property=StandardOutput=null",
-		"--property=StandardError=null", "--working-directory=/", "--", exe, "__supervise", id}
+		"--property=StandardError=null", "--working-directory=/", "--", exe, "__supervise", id, strconv.FormatUint(record.Generation, 10)}
 	if _, err := systemdCommand(ctx, "systemd-run", args...); err != nil {
-		return record, rollbackStart(store, id, err)
+		return record, rollbackStart(store, id, generation, err)
 	}
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		record, err = store.Get(ctx, id)
+		if err == nil && record.Generation != generation {
+			return record, errors.New("container execution changed during startup")
+		}
 		if err == nil {
 			record, err = refreshRecord(ctx, store, record, true)
 		}
 		if err != nil {
-			return record, rollbackStart(store, id, err)
+			return record, rollbackStart(store, id, generation, err)
 		}
 		if record.StartedAt != nil {
 			return record, nil
@@ -102,21 +118,24 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 		}
 		select {
 		case <-ctx.Done():
-			return record, rollbackStart(store, id, ctx.Err())
+			return record, rollbackStart(store, id, generation, ctx.Err())
 		case <-ticker.C:
 		}
 	}
 }
 
-func rollbackStart(store *Store, id string, cause error) error {
+func rollbackStart(store *Store, id string, generation uint64, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), managementStopLimit)
 	defer cancel()
-	if err := stopUnit(ctx, id); err != nil {
+	if err := stopUnit(ctx, id, generation); err != nil {
 		return errors.Join(cause, fmt.Errorf("stop failed startup %s: %w", id, err))
 	}
 	record, err := store.Get(ctx, id)
 	if err != nil {
 		return errors.Join(cause, err)
+	}
+	if record.Generation != generation {
+		return cause
 	}
 	if err := containerruntime.RecoverAbandoned(ctx, os.Stderr); err != nil {
 		return errors.Join(cause, err)
@@ -126,12 +145,11 @@ func rollbackStart(store *Store, id string, cause error) error {
 			return errors.Join(cause, err)
 		}
 	}
-	return errors.Join(cause, store.Update(ctx, id, func(record *Record) error {
+	return errors.Join(cause, store.Complete(ctx, id, generation, func(record *Record) {
 		if !record.Terminal() {
 			finished := time.Now().UTC()
 			record.State, record.FinishedAt, record.Error = StateFailed, &finished, cause.Error()
 		}
-		return nil
 	}))
 }
 
@@ -141,7 +159,7 @@ func refreshRecord(ctx context.Context, store *Store, record Record, launched bo
 	if record.Terminal() {
 		return record, nil
 	}
-	status, err := inspectUnit(ctx, record.ID)
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
 	if err != nil || status.live() {
 		return record, err
 	}
@@ -160,12 +178,13 @@ func refreshRecord(ctx context.Context, store *Store, record Record, launched bo
 		return record, err
 	}
 	defer lease.Close()
+	expectedGeneration := record.Generation
 	record, err = store.Get(ctx, record.ID)
-	if err != nil || record.Terminal() {
+	if err != nil || record.Terminal() || record.Generation != expectedGeneration {
 		return record, err
 	}
 	// Stopping the immutable unit also handles any remaining delegated children.
-	if err := stopUnit(ctx, record.ID); err != nil {
+	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
 		return record, err
 	}
 	// Scan safely locked working directories as well, covering interruption
@@ -178,13 +197,12 @@ func refreshRecord(ctx context.Context, store *Store, record Record, launched bo
 			return record, fmt.Errorf("preserve container %s: %w", record.ID, err)
 		}
 	}
-	err = store.Update(ctx, record.ID, func(record *Record) error {
+	err = store.Complete(ctx, record.ID, record.Generation, func(record *Record) {
 		finished := time.Now().UTC()
 		record.State, record.FinishedAt = StateFailed, &finished
 		record.Error = "supervisor exited without recording completion"
 		// systemd's status belongs to the supervisor, not the user command.
 		// Leave the command exit code unknown after an abrupt supervisor loss.
-		return nil
 	})
 	if err != nil {
 		return record, err
@@ -210,7 +228,11 @@ func schedulingPendingAt(record Record, status unitStatus, bootID string, now ti
 	if record.BootID != "" && record.BootID != bootID {
 		return false
 	}
-	age := now.Sub(record.CreatedAt)
+	launchedAt := record.CreatedAt
+	if record.LaunchAt != nil {
+		launchedAt = *record.LaunchAt
+	}
+	age := now.Sub(launchedAt)
 	// A previous boot or a backwards wall-clock jump must not make an absent
 	// supervisor look like an in-progress launch indefinitely.
 	return age >= 0 && age < detachedStartupLimit
@@ -243,18 +265,18 @@ func List(ctx context.Context, all bool) ([]Record, error) {
 
 // Stop lets the runtime forward SIGTERM and clean up; systemd enforces a final
 // whole-service kill boundary if the supervisor cannot complete its shutdown.
-func Stop(ctx context.Context, ref string) (Record, error) {
-	store, err := managementStore()
-	if err != nil {
-		return Record{}, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, managementStopLimit)
-	defer cancel()
-	record, err := store.Get(ctx, ref)
+func stopLocked(ctx context.Context, store *Store, record Record, override *time.Duration) (Record, error) {
+	cfg, err := store.Config(ctx, record.ID)
 	if err != nil {
 		return record, err
 	}
-	status, err := inspectUnit(ctx, record.ID)
+	grace := cfg.StoppingTimeout()
+	if override != nil {
+		grace = *override
+	}
+	ctx, cancel := context.WithTimeout(ctx, grace+managementStopLimit)
+	defer cancel()
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
 	if err != nil {
 		return record, err
 	}
@@ -271,13 +293,17 @@ func Stop(ctx context.Context, ref string) (Record, error) {
 		if err := store.Update(ctx, record.ID, func(record *Record) error {
 			if !record.Terminal() {
 				record.State = StateStopping
+				record.StopTimeout = &grace
 			}
 			return nil
 		}); err != nil {
 			return record, err
 		}
 	}
-	if err := stopUnit(ctx, record.ID); err != nil {
+	// systemd cannot change TimeoutStopSec on an existing service. Its fixed
+	// boundary allows the maximum configurable grace plus cleanup; the runtime
+	// enforces the selected per-operation timeout itself.
+	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
 		return record, err
 	}
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -306,22 +332,16 @@ func Stop(ctx context.Context, ref string) (Record, error) {
 	}
 }
 
-func Remove(ctx context.Context, ref string) error {
-	store, err := managementStore()
-	if err != nil {
-		return err
-	}
-	record, err := store.Get(ctx, ref)
-	if err == nil {
-		record, err = refreshRecord(ctx, store, record, false)
-	}
+func removeLocked(ctx context.Context, store *Store, record Record) error {
+	var err error
+	record, err = refreshRecord(ctx, store, record, false)
 	if err != nil {
 		return err
 	}
 	if !record.Terminal() {
 		return ErrNotTerminal
 	}
-	status, err := inspectUnit(ctx, record.ID)
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
 	if err != nil {
 		return err
 	}
@@ -334,7 +354,7 @@ func Remove(ctx context.Context, ref string) error {
 		}
 	}
 	if status.LoadState != "not-found" && status.ActiveState == "failed" {
-		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID)); err != nil {
+		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID, record.Generation)); err != nil {
 			return err
 		}
 	}
@@ -353,6 +373,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 	if err != nil {
 		return err
 	}
+	generation := record.Generation
 	file, err := store.OpenLog(ctx, record.ID, false)
 	if err != nil {
 		return err
@@ -393,7 +414,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 		if err != nil {
 			return err
 		}
-		if record.Terminal() {
+		if record.Terminal() || record.Generation != generation {
 			_, err := io.Copy(out, file) // Completion is written after the log closes.
 			return err
 		}

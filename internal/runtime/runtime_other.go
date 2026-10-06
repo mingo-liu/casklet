@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
 )
@@ -37,3 +38,7 @@ func Init() int {
 }
 
 func Probe() int { return Init() }
+
+func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, error) {
+	return Run(cfg, stdin, stdout, stderr)
+}

@@ -35,6 +35,7 @@ type message struct {
 	Config      *config.Config `json:"config,omitempty"`
 	Error       string         `json:"error,omitempty"`
 	ExitCode    int            `json:"exit_code,omitempty"`
+	StopTimeout time.Duration  `json:"stop_timeout,omitempty"`
 	ExecEnabled bool           `json:"exec_enabled,omitempty"`
 }
 
@@ -91,7 +92,16 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 }
 
 // RunWithExec publishes pinned resources for managed container execution.
-func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor) (code int, runErr error) {
+func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor) (int, error) {
+	return runWithExec(cfg, stdin, stdout, stderr, observer, executor, "", nil)
+}
+
+// RunManaged retains the private rootfs while isolating transient run resources.
+func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, error) {
+	return runWithExec(cfg, stdin, stdout, stderr, observer, executor, retainedRoot, stoppingTimeout)
+}
+
+func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (code int, runErr error) {
 	code = 125
 	if err := cfg.ValidateExecution(); err != nil {
 		return code, err
@@ -129,7 +139,23 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			}
 		}
 	}()
-	if cfg.Image != "" {
+	retainedReady := false
+	if retainedRoot != "" {
+		info, err := os.Lstat(retainedRoot)
+		if err == nil {
+			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return code, errors.New("retained rootfs must be a real directory")
+			}
+			if err := rootfs.CheckUnmounted(retainedRoot); err != nil {
+				return code, err
+			}
+			retainedReady = true
+			cfg.RootFS = retainedRoot
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return code, err
+		}
+	}
+	if cfg.Image != "" && !retainedReady {
 		images, err := image.OpenStore()
 		if err != nil {
 			return preparationError(err, signals)
@@ -171,12 +197,41 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("record container preparation: %w", err)
 		}
 	}
-	cfg.RootFS = filepath.Join(run.path, "rootfs")
-	if err := os.Mkdir(cfg.RootFS, 0700); err != nil {
-		return code, err
-	}
-	if err := rootfs.Copy(prepareCtx, template, cfg.RootFS); err != nil {
-		return preparationError(fmt.Errorf("prepare rootfs: %w", err), signals)
+	if retainedRoot == "" {
+		cfg.RootFS = filepath.Join(run.path, "rootfs")
+		if err := os.Mkdir(cfg.RootFS, 0700); err != nil {
+			return code, err
+		}
+		if err := rootfs.Copy(prepareCtx, template, cfg.RootFS); err != nil {
+			return preparationError(fmt.Errorf("prepare rootfs: %w", err), signals)
+		}
+	} else {
+		cfg.RootFS = retainedRoot
+		if !retainedReady {
+			stage, err := os.MkdirTemp(filepath.Dir(retainedRoot), ".rootfs-")
+			if err != nil {
+				return code, err
+			}
+			defer os.RemoveAll(stage)
+			if err := rootfs.Copy(prepareCtx, template, stage); err != nil {
+				return preparationError(fmt.Errorf("prepare retained rootfs: %w", err), signals)
+			}
+			if err := rootfs.SyncTree(prepareCtx, stage); err != nil {
+				return preparationError(err, signals)
+			}
+			if err := os.Rename(stage, retainedRoot); err != nil {
+				return code, err
+			}
+			parent, err := os.Open(filepath.Dir(retainedRoot))
+			if err != nil {
+				return code, err
+			}
+			err = parent.Sync()
+			parent.Close()
+			if err != nil {
+				return code, err
+			}
+		}
 	}
 	select {
 	case sig := <-signals:
@@ -419,7 +474,7 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 					stopping = true
 					// Give init time to kill and reap remaining descendants before
 					// enforcing the supervisor's final shutdown boundary.
-					killTimer = time.NewTimer(stopGrace + time.Second)
+					killTimer = time.NewTimer(cfg.StoppingTimeout() + time.Second)
 					kill = killTimer.C
 				}
 			case "error":
@@ -463,19 +518,30 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 				// promptly rather than leaving init blocked on its start message.
 				return 128 + int(sig.(syscall.Signal)), nil
 			}
+			grace := cfg.StoppingTimeout()
+			if sig == syscall.SIGTERM && stoppingTimeout != nil {
+				grace = stoppingTimeout()
+			}
 			if !stopping {
 				stopping = true
 				stopTimeout()
-				killTimer = time.NewTimer(stopGrace)
+				killTimer = time.NewTimer(grace)
 				kill = killTimer.C
 			}
-			_ = cmd.Process.Signal(sig)
+			if sig == syscall.SIGTERM && stoppingTimeout != nil {
+				_ = control.SetWriteDeadline(time.Now().Add(time.Second))
+				if err := encoder.Encode(message{Kind: "stop", StopTimeout: grace}); err != nil {
+					_ = cmd.Process.Signal(sig)
+				}
+			} else {
+				_ = cmd.Process.Signal(sig)
+			}
 		case err := <-terminalErrors:
 			return 125, fmt.Errorf("terminal I/O: %w", err)
 		case <-timeout:
 			timedOut, stopping, timeout = true, true, nil
 			_ = cmd.Process.Signal(syscall.SIGTERM)
-			killTimer = time.NewTimer(stopGrace)
+			killTimer = time.NewTimer(cfg.StoppingTimeout())
 			kill = killTimer.C
 		case <-kill:
 			kill = nil

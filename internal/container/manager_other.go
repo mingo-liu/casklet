@@ -22,7 +22,7 @@ func Remove(context.Context, string) error                     { return errUnsup
 func Exec(context.Context, string, config.Exec, *os.File, *os.File, *os.File, <-chan os.Signal) (int, error) {
 	return 125, errUnsupportedStore
 }
-func Supervisor(string) int {
+func Supervisor(string, ...uint64) int {
 	fmt.Fprintln(os.Stderr, "mini-docker:", errUnsupportedStore)
 	return 125
 }
@@ -31,3 +31,12 @@ func Inspect(context.Context, string) (Inspection, error) { return Inspection{},
 func Stats(context.Context, string, time.Duration) (Statistics, error) {
 	return Statistics{}, errUnsupportedStore
 }
+
+func StopWithTimeout(context.Context, string, *time.Duration) (Record, error) {
+	return Record{}, errUnsupportedStore
+}
+func StartExisting(context.Context, string) (Record, error) { return Record{}, errUnsupportedStore }
+func Restart(context.Context, string, *time.Duration) (Record, error) {
+	return Record{}, errUnsupportedStore
+}
+func Wait(context.Context, string) (int, error) { return 125, errUnsupportedStore }

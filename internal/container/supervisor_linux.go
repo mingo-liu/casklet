@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,12 +16,16 @@ import (
 )
 
 // Supervisor is an internal entry point launched only by an immutable unit.
-func Supervisor(id string) int {
+func Supervisor(id string, generations ...uint64) int {
+	generation := uint64(0)
+	if len(generations) != 0 {
+		generation = generations[0]
+	}
 	if err := validateID(id); err != nil {
 		fmt.Fprintln(os.Stderr, "mini-docker:", err)
 		return 125
 	}
-	if err := checkSupervisorUnit(id); err != nil {
+	if err := checkSupervisorUnit(id, generation); err != nil {
 		fmt.Fprintln(os.Stderr, "mini-docker:", err)
 		return 125
 	}
@@ -40,13 +45,13 @@ func Supervisor(id string) int {
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	record, err := store.Get(ctx, id)
 	cancel()
-	if err != nil || record.Terminal() {
+	if err != nil || record.Terminal() || record.Generation != generation {
 		return 125
 	}
-	code, runErr, truncated := supervise(store, id)
+	code, runErr, truncated := supervise(store, id, generation)
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := store.Update(ctx, id, func(record *Record) error {
+	if err := store.Complete(ctx, id, generation, func(record *Record) {
 		finished := time.Now().UTC()
 		record.FinishedAt, record.ExitCode, record.LogTruncated = &finished, &code, truncated
 		record.State = StateFailed
@@ -58,7 +63,6 @@ func Supervisor(id string) int {
 		} else if record.State == StateFailed {
 			record.Error = fmt.Sprintf("startup stopped before the command began (exit %d)", code)
 		}
-		return nil
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "mini-docker: record completion:", err)
 		return 125
@@ -66,7 +70,7 @@ func Supervisor(id string) int {
 	return code
 }
 
-func supervise(store *Store, id string) (int, error, bool) {
+func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	cfg, err := store.Config(ctx, id)
 	if err != nil {
@@ -79,6 +83,23 @@ func supervise(store *Store, id string) (int, error, bool) {
 		return 125, err, false
 	}
 	defer log.Close()
+	root, err := store.RootFS(context.Background(), id)
+	if err != nil {
+		return 125, err, false
+	}
+	if err := store.cleanupRootFSStages(id); err != nil {
+		return 125, err, false
+	}
+	stat, err := log.Stat()
+	if err != nil {
+		return 125, err, false
+	}
+	record, err := store.Get(context.Background(), id)
+	if err != nil {
+		return 125, err, false
+	}
+	previouslyTruncated := record.LogTruncated
+
 	input, err := os.Open("/dev/null")
 	if err != nil {
 		return 125, err, false
@@ -95,14 +116,21 @@ func supervise(store *Store, id string) (int, error, bool) {
 	}
 	completed := make(chan captureResult, 1)
 	go func() {
-		truncated, err := captureLog(reader, log, MaxLogBytes)
+		truncated := previouslyTruncated
+		var err error
+		if previouslyTruncated || MaxLogBytes-stat.Size() < int64(len(logLimitMessage)) {
+			_, err = io.Copy(io.Discard, reader)
+			truncated = true
+		} else {
+			truncated, err = captureLog(reader, log, MaxLogBytes-stat.Size())
+		}
 		completed <- captureResult{truncated, errors.Join(err, log.Sync())}
 	}()
 	observer := func(event containerruntime.Event) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return store.Update(ctx, id, func(record *Record) error {
-			if record.Terminal() {
+			if record.Terminal() || record.Generation != generation {
 				return errors.New("container was finalized before startup")
 			}
 			record.RunPath = event.RunPath
@@ -121,7 +149,15 @@ func supervise(store *Store, id string) (int, error, bool) {
 			return nil
 		})
 	}
-	code, runErr := containerruntime.RunWithExec(cfg, input, writer, writer, observer, newExecServer(store, id))
+	code, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, newExecServer(store, id), root, func() time.Duration {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		record, err := store.Get(ctx, id)
+		if err == nil && record.Generation == generation && record.StopTimeout != nil {
+			return *record.StopTimeout
+		}
+		return cfg.StoppingTimeout()
+	})
 	if runErr != nil {
 		fmt.Fprintln(writer, "mini-docker:", runErr)
 	}
@@ -135,13 +171,13 @@ func supervise(store *Store, id string) (int, error, bool) {
 	}
 }
 
-func checkSupervisorUnit(id string) error {
+func checkSupervisorUnit(id string, generation ...uint64) error {
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok && filepath.Base(path) == unitName(id) {
+		if path, ok := strings.CutPrefix(line, "0::"); ok && filepath.Base(path) == unitName(id, generation...) {
 			return nil
 		}
 	}

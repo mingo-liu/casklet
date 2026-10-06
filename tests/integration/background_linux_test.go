@@ -19,6 +19,7 @@ import (
 
 type backgroundRecord struct {
 	ID           string     `json:"id"`
+	Generation   uint64     `json:"generation"`
 	Name         string     `json:"name"`
 	State        string     `json:"state"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -575,9 +576,14 @@ func TestBackgroundPreviousBootReconciliation(t *testing.T) {
 	assertBackgroundExit(t, waitBackground(t, id, "exited"), 0)
 	assertBackgroundUnitStopped(t, id)
 
-	// Rewrite only this test's stopped record to model an interrupted startup
+	// Rewrite only this test's stopped state to model an interrupted startup
 	// from a previous boot. A recent timestamp must not grant it scheduling grace.
 	dir := filepath.Join("/var/lib/mini-docker/containers", id)
+	// An interrupted execution has no receipt. Keeping the real completed
+	// execution's receipt would correctly recover its known exit status instead.
+	if err := os.Remove(filepath.Join(dir, "exit-0.json")); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -688,7 +694,11 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 			if err := json.Unmarshal(data, &record); err != nil || record.Name != name || record.RunPath == "" {
 				continue
 			}
-			copied := filepath.Join(record.RunPath, "rootfs", "startup-payload")
+			stages, err := filepath.Glob(filepath.Join("/var/lib/mini-docker/containers", record.ID, ".rootfs-*"))
+			if err != nil || len(stages) != 1 {
+				continue
+			}
+			copied := filepath.Join(stages[0], "startup-payload")
 			if _, err := os.Stat(filepath.Join(copied, "payload-00000")); err != nil {
 				continue
 			}

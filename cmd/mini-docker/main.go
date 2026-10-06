@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/mingo-liu/mini-docker/internal/cli"
 	"github.com/mingo-liu/mini-docker/internal/container"
@@ -14,6 +15,13 @@ func main() {
 	}
 	if len(os.Args) == 2 && os.Args[1] == "__exec" {
 		os.Exit(containerruntime.ExecInit())
+	}
+	if len(os.Args) == 4 && os.Args[1] == "__supervise" {
+		generation, err := strconv.ParseUint(os.Args[3], 10, 64)
+		if err != nil {
+			os.Exit(125)
+		}
+		os.Exit(container.Supervisor(os.Args[2], generation))
 	}
 	if len(os.Args) == 3 && os.Args[1] == "__supervise" {
 		os.Exit(container.Supervisor(os.Args[2]))

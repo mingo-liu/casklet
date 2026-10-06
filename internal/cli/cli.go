@@ -34,7 +34,10 @@ const usage = `Usage:
   mini-docker ps [-a|--all] [--json]
   mini-docker inspect ID|NAME
   mini-docker stats [--json] [--interval DURATION] ID|NAME
-  mini-docker stop ID|NAME
+  mini-docker wait ID|NAME
+  mini-docker start ID|NAME
+  mini-docker restart [--timeout DURATION] ID|NAME
+  mini-docker stop [--timeout DURATION] ID|NAME
   mini-docker logs [--tail N] [-f|--follow] ID|NAME
   mini-docker rm ID|NAME
   mini-docker doctor --rootfs DIRECTORY
@@ -58,6 +61,7 @@ Run options:
   --mount        Bind a directory: type=bind,source=/HOST,target=/PATH[,readonly]
                  Repeat for multiple directories (maximum: 32)
   --read-only    Mount the container root filesystem read-only
+  --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
   --timeout      Command duration limit; 0 disables it (default: 0)
 
 Exec options:
@@ -72,7 +76,7 @@ Use scripts/run-linux.sh to launch the CLI in a delegated scope.
 Management flags must precede the container identifier. ps lists active
 containers; --all also includes completed containers. logs defaults to the
 entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
-stop sends SIGTERM, then SIGKILL after the grace period. rm requires a stopped
+stop sends SIGTERM, then SIGKILL after the configured grace period. rm requires a stopped
 container. Detached containers receive no input; stdout and stderr are merged.
 run terminal options require a foreground run. -it requires a terminal on stdin.
 exec inherits the container user, isolation, and resource limits. Its output
@@ -84,17 +88,18 @@ one fully used core. Missing live metrics are N/A (JSON null).
 `
 
 type Request struct {
-	Action    string
-	Config    config.Config
-	Exec      config.Exec
-	Detach    bool
-	Name      string
-	All       bool
-	JSON      bool
-	Reference string
-	Tail      int
-	Follow    bool
-	Interval  time.Duration
+	Action      string
+	Config      config.Config
+	Exec        config.Exec
+	Detach      bool
+	Name        string
+	All         bool
+	JSON        bool
+	Reference   string
+	Tail        int
+	Follow      bool
+	StopTimeout *time.Duration
+	Interval    time.Duration
 }
 
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
@@ -110,7 +115,7 @@ func Parse(args []string) (Request, error) {
 	if r.Action == "exec" {
 		return parseExec(r, args[1:])
 	}
-	if r.Action == "ps" || r.Action == "stop" || r.Action == "logs" || r.Action == "rm" || r.Action == "inspect" || r.Action == "stats" {
+	if r.Action == "wait" || r.Action == "start" || r.Action == "restart" || r.Action == "ps" || r.Action == "stop" || r.Action == "logs" || r.Action == "rm" || r.Action == "inspect" || r.Action == "stats" {
 		return parseManagement(r, args[1:])
 	}
 	if r.Action != "run" && r.Action != "doctor" {
@@ -132,6 +137,17 @@ func Parse(args []string) (Request, error) {
 		fs.StringVar(&r.Config.Hostname, "hostname", "mini", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
+		fs.Func("stop-timeout", "graceful shutdown duration", func(value string) error {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			if err := config.ValidateStopTimeout(duration); err != nil {
+				return err
+			}
+			r.Config.StopTimeout = &duration
+			return nil
+		})
 		fs.DurationVar(&r.Config.Timeout, "timeout", 0, "command timeout")
 		fs.StringVar(&cpus, "cpus", "0", "CPU cores")
 		fs.Func("env", "environment assignment", func(value string) error {
@@ -293,6 +309,18 @@ func parseManagement(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	switch r.Action {
+	case "stop", "restart":
+		fs.Func("timeout", "graceful shutdown override", func(value string) error {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			if err := config.ValidateStopTimeout(duration); err != nil {
+				return err
+			}
+			r.StopTimeout = &duration
+			return nil
+		})
 	case "ps":
 		fs.BoolVar(&r.All, "all", false, "include completed containers")
 		fs.BoolVar(&r.All, "a", false, "include completed containers")
@@ -493,7 +521,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
-	case "image-import", "image-ls", "image-rm", "ps", "stop", "logs", "rm", "inspect", "stats":
+	case "image-import", "image-ls", "image-rm", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)
@@ -531,6 +559,7 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		defer cancel()
 	}
 	var err error
+	returnCode := 0
 	switch r.Action {
 	case "image-import", "image-ls", "image-rm":
 		var store *image.Store
@@ -582,9 +611,24 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		if err == nil {
 			err = writeStats(stdout, stats, r.JSON)
 		}
+	case "wait":
+		returnCode, err = container.Wait(operationCtx, r.Reference)
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, returnCode)
+		}
+	case "start", "restart":
+		var record container.Record
+		if r.Action == "start" {
+			record, err = container.StartExisting(operationCtx, r.Reference)
+		} else {
+			record, err = container.Restart(operationCtx, r.Reference, r.StopTimeout)
+		}
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, record.ID)
+		}
 	case "stop":
 		var record container.Record
-		record, err = container.Stop(operationCtx, r.Reference)
+		record, err = container.StopWithTimeout(operationCtx, r.Reference, r.StopTimeout)
 		if err == nil {
 			_, err = fmt.Fprintln(stdout, record.ID)
 		}
@@ -608,7 +652,7 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "mini-docker: %v\n", err)
 		return 125
 	}
-	return 0
+	return returnCode
 }
 
 func writeRecords(out io.Writer, records []container.Record, asJSON bool) error {

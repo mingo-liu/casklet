@@ -160,10 +160,22 @@ func Init() int {
 		return 125
 	}
 	orphaned := make(chan struct{})
+	stopRequests := make(chan time.Duration, 1)
 	go func() {
-		var unexpected message
-		_ = decoder.Decode(&unexpected)
-		close(orphaned)
+		defer close(orphaned)
+		for {
+			var request message
+			if err := decoder.Decode(&request); err != nil {
+				return
+			}
+			if request.Kind != "stop" || request.Config != nil || config.ValidateStopTimeout(request.StopTimeout) != nil {
+				return
+			}
+			select {
+			case stopRequests <- request.StopTimeout:
+			default:
+			}
+		}
 	}()
 	mainExited, stopping := false, false
 	exitCode := 125
@@ -174,10 +186,11 @@ func Init() int {
 			shutdownTimer.Stop()
 		}
 	}()
+	grace := cfg.StoppingTimeout()
 	beginShutdown := func() {
 		if !stopping {
 			stopping = true
-			shutdownTimer = time.NewTimer(stopGrace)
+			shutdownTimer = time.NewTimer(grace)
 			shutdown = shutdownTimer.C
 		}
 	}
@@ -230,6 +243,12 @@ func Init() int {
 				}
 			}
 			_ = unix.Kill(-group, sig.(syscall.Signal))
+			beginShutdown()
+		case requested := <-stopRequests:
+			if !stopping {
+				grace = requested
+			}
+			_ = unix.Kill(-process.Pid, unix.SIGTERM)
 			beginShutdown()
 		case <-orphaned:
 			orphaned = nil

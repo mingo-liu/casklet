@@ -4,6 +4,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestCommandEnvironment(t *testing.T) {
@@ -87,6 +88,25 @@ func TestValidateExecution(t *testing.T) {
 	for _, cfg := range valid {
 		if err := cfg.ValidateExecution(); err != nil {
 			t.Fatalf("rejected valid execution options %+v: %v", cfg, err)
+		}
+	}
+}
+
+func TestStoppingTimeout(t *testing.T) {
+	cfg := Config{Command: []string{"sh"}}
+	if cfg.StoppingTimeout() != 5*time.Second {
+		t.Fatal("legacy default changed")
+	}
+	for _, timeout := range []time.Duration{0, time.Millisecond, time.Minute} {
+		cfg.StopTimeout = &timeout
+		if err := cfg.ValidateExecution(); err != nil || cfg.StoppingTimeout() != timeout {
+			t.Fatalf("timeout %v: %v", timeout, err)
+		}
+	}
+	for _, timeout := range []time.Duration{-1, time.Minute + 1} {
+		cfg.StopTimeout = &timeout
+		if err := cfg.ValidateExecution(); err == nil {
+			t.Fatalf("accepted timeout %v", timeout)
 		}
 	}
 }

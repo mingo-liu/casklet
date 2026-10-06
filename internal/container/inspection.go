@@ -15,19 +15,23 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
-	ID           string           `json:"id"`
-	Name         string           `json:"name"`
-	State        string           `json:"state"`
-	CreatedAt    time.Time        `json:"created_at"`
-	StartedAt    *time.Time       `json:"started_at"`
-	FinishedAt   *time.Time       `json:"finished_at"`
-	ExitCode     *int             `json:"exit_code"`
-	LogTruncated bool             `json:"log_truncated"`
-	Config       InspectionConfig `json:"config"`
-	Limits       ResourceLimits   `json:"limits"`
+	Generation         uint64           `json:"generation"`
+	PreviousExit       *ExecutionResult `json:"previous_exit"`
+	FilesystemRetained bool             `json:"filesystem_retained"`
+	ID                 string           `json:"id"`
+	Name               string           `json:"name"`
+	State              string           `json:"state"`
+	CreatedAt          time.Time        `json:"created_at"`
+	StartedAt          *time.Time       `json:"started_at"`
+	FinishedAt         *time.Time       `json:"finished_at"`
+	ExitCode           *int             `json:"exit_code"`
+	LogTruncated       bool             `json:"log_truncated"`
+	Config             InspectionConfig `json:"config"`
+	Limits             ResourceLimits   `json:"limits"`
 }
 
 type InspectionConfig struct {
+	StopTimeout      string             `json:"stop_timeout"`
 	Image            string             `json:"image,omitempty"`
 	Mounts           []config.BindMount `json:"mounts"`
 	RootFS           string             `json:"rootfs"`
@@ -65,9 +69,9 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		rootfs = ""
 	}
 	return Inspection{
-		ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
+		Generation: record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{StopTimeout: cfg.StoppingTimeout().String(), Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

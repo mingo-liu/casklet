@@ -31,20 +31,25 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
-	Version      int        `json:"version"`
-	ID           string     `json:"id"`
-	BootID       string     `json:"boot_id,omitempty"`
-	Name         string     `json:"name"`
-	State        string     `json:"state"`
-	CreatedAt    time.Time  `json:"created_at"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	ExitCode     *int       `json:"exit_code,omitempty"`
-	Error        string     `json:"error,omitempty"`
-	RunPath      string     `json:"run_path,omitempty"`
-	Cgroup       string     `json:"cgroup,omitempty"`
-	LogTruncated bool       `json:"log_truncated,omitempty"`
-	Command      []string   `json:"command"`
+	Generation   uint64           `json:"generation"`
+	LaunchAt     *time.Time       `json:"launch_at,omitempty"`
+	PreviousExit *ExecutionResult `json:"previous_exit,omitempty"`
+	StopTimeout  *time.Duration   `json:"stop_timeout,omitempty"`
+	RetainRootFS bool             `json:"retain_rootfs"`
+	Version      int              `json:"version"`
+	ID           string           `json:"id"`
+	BootID       string           `json:"boot_id,omitempty"`
+	Name         string           `json:"name"`
+	State        string           `json:"state"`
+	CreatedAt    time.Time        `json:"created_at"`
+	StartedAt    *time.Time       `json:"started_at,omitempty"`
+	FinishedAt   *time.Time       `json:"finished_at,omitempty"`
+	ExitCode     *int             `json:"exit_code,omitempty"`
+	Error        string           `json:"error,omitempty"`
+	RunPath      string           `json:"run_path,omitempty"`
+	Cgroup       string           `json:"cgroup,omitempty"`
+	LogTruncated bool             `json:"log_truncated,omitempty"`
+	Command      []string         `json:"command"`
 }
 
 // Terminal reports whether a supervisor has finished the container.
@@ -78,6 +83,9 @@ func validateRecord(record Record, id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
+	if record.StopTimeout != nil && (*record.StopTimeout < 0 || *record.StopTimeout > time.Minute) {
+		return errors.New("invalid recorded stop timeout")
+	}
 	if record.Version != 1 || record.ID != id {
 		return errors.New("invalid container record version or identity")
 	}
@@ -99,4 +107,16 @@ func validateRecord(record Record, id string) error {
 		return errors.New("invalid container exit code")
 	}
 	return nil
+}
+
+// ExecutionResult is a retained completion receipt for one container execution.
+type ExecutionResult struct {
+	Generation uint64     `json:"generation"`
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	ExitCode   *int       `json:"exit_code"`
+}
+
+func executionResult(record Record) ExecutionResult {
+	return ExecutionResult{Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
 }
