@@ -2,7 +2,7 @@
 
 A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-Foreground execution, interactive terminals, background container management, and interactive container execution are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
+Foreground execution, interactive terminals, background container management, interactive container execution, inspection, and resource statistics are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
 
 ## Requirements
 
@@ -111,6 +111,8 @@ Terminal stdout and stderr are combined on stdout, with terminal line discipline
 | --- | --- |
 | `run -d --name NAME ...` | Reserve a unique name of 1-63 letters, digits, dots, underscores, or hyphens, starting with a letter or digit. Names cannot be full container IDs. Omit the name for an automatic `mini-...` name. |
 | `ps` | List created, starting, running, and stopping containers. `-a` / `--all` includes exited and failed records; `--json` returns an array for scripts. |
+| `inspect ID\|NAME` | Print public configuration, lifecycle state, timestamps, exit status, and resource limits as a JSON object. |
+| `stats ID\|NAME` | Print one live memory and CPU sample; `--json` returns an object and `--interval DURATION` sets the CPU sampling window. |
 | `stop ID\|NAME` | Send SIGTERM through the supervisor and wait for cleanup. The runtime uses a five-second grace period; systemd enforces a final whole-service shutdown boundary. Repeated stops of completed containers succeed. |
 | `logs ID\|NAME` | Read retained combined output. `--tail N` selects the last N lines; `-f` / `--follow` streams until completion. Interrupting follow leaves the container running. |
 | `rm ID\|NAME` | Remove an inactive container's metadata, configuration, and logs after verifying resource cleanup. Stop active containers first. Removal releases the name for reuse. |
@@ -120,6 +122,30 @@ Use full 32-character IDs or exact names. Flags precede the identifier, such as 
 Each container has an independent transient systemd service, using [cgroup delegation](https://systemd.io/CGROUP_DELEGATION/). Closing the launcher does not stop it. Persistent records and logs live under `/var/lib/mini-docker/containers/` with private root-owned permissions; temporary rootfs data remains under `/var/lib/mini-docker/runs/` and is removed after execution. Container filesystem writes are temporary, even though logs and metadata survive until `rm`.
 
 Logs retain a prefix up to 16 MiB, including a truncation notice when necessary. Further output is drained and discarded so a full log cannot block the workload; JSON records expose `log_truncated`. This version does not rotate logs or restart containers after a host/VM reboot. Management commands reconcile abandoned supervisors using service identity and locks, preserve failed records, and leave the command exit status unknown when an abrupt supervisor loss prevents completion from being recorded.
+
+## Inspection and resource statistics
+
+```sh
+./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+  --memory 64m --cpus 0.5 --env MODE=demo -- /bin/sleep 300
+./scripts/run-linux.sh inspect worker
+./scripts/run-linux.sh stats worker
+./scripts/run-linux.sh stats --json --interval 500ms worker
+./scripts/run-linux.sh stop worker
+./scripts/run-linux.sh inspect worker
+./scripts/run-linux.sh stats --json worker
+./scripts/run-linux.sh rm worker
+```
+
+These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, and timeout as a duration string. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
+
+`created_at`, `started_at`, and `finished_at` use UTC RFC3339 timestamps. Times that have not occurred and unknown exit codes are JSON `null`. `limits` contains configured `memory_bytes`, `pids`, `cpu_quota_usec`, `cpu_period_usec`, and `cpus`; zero CPU quota and zero `cpus` mean unlimited. Limits and configuration remain inspectable after resource cleanup.
+
+`stats` returns a single sample and exits. It samples the workload's cgroups v2 [`memory.current` and `cpu.stat`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html), including exec descendants and excluding the supervisor. Memory usage includes accounted page cache and kernel memory, rather than only process RSS. CPU utilization is the difference in `usage_usec` divided by the actual elapsed monotonic time between two reads. One fully used core is `100%`; multiple cores can exceed `100%`. The result is not normalized by the host CPU count or the configured quota. The default sampling interval is one second; `--interval` accepts `10ms` through `1m`. Short intervals can be noisy under CPU throttling.
+
+The table shows memory usage and the configured limit in bytes, plus CPU percent. JSON contains `memory_bytes`, `memory_limit_bytes`, `cpu_percent`, cumulative `cpu_usage_usec`, UTC `sampled_at`, and the actual `interval` as a duration string. Missing or invalid counters are independent: available metrics remain visible, unavailable metrics are `null` in JSON and `N/A` in the table, with JSON `memory_unavailable` / `cpu_unavailable` explanations. An idle workload can report a valid `0%`; unavailable metrics never become zero usage. Completed containers have no live metrics or retained historical usage and return immediately with `interval: "0s"`.
+
+State and configuration are read together under a shared storage lock. Sampling pins one cgroup directory without following symlinks and does not hold the storage lock while waiting. If the container completes during sampling, live metrics are returned as unavailable. Concurrent removal either leaves a complete snapshot or returns `125` with `container not found`; a reused name cannot redirect an in-progress request to another container. Interrupting a statistics request returns the signal's exit status without stopping the workload.
 
 ## Execute commands in running containers
 
@@ -176,11 +202,11 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-Add structured inspection and resource statistics next. Persistent data, local images, and external networking remain planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+Add persistent data next. Local images and external networking remain planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 

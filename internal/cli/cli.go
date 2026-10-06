@@ -28,6 +28,8 @@ const usage = `Usage:
   mini-docker run --rootfs DIRECTORY [OPTIONS] -- COMMAND [ARGS...]
   mini-docker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
   mini-docker ps [-a|--all] [--json]
+  mini-docker inspect ID|NAME
+  mini-docker stats [--json] [--interval DURATION] ID|NAME
   mini-docker stop ID|NAME
   mini-docker logs [--tail N] [-f|--follow] ID|NAME
   mini-docker rm ID|NAME
@@ -69,6 +71,9 @@ run terminal options require a foreground run. -it requires a terminal on stdin.
 exec inherits the container user, isolation, and resource limits. Its output
 goes to the invoking terminal rather than the retained container log.
 exec terminal output merges stdout and stderr. Flags must precede ID|NAME.
+inspect prints JSON; environment names are shown without values.
+stats prints one sample; --interval is 10ms-1m (default: 1s). CPU 100% means
+one fully used core. Missing live metrics are N/A (JSON null).
 `
 
 type Request struct {
@@ -82,6 +87,7 @@ type Request struct {
 	Reference string
 	Tail      int
 	Follow    bool
+	Interval  time.Duration
 }
 
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
@@ -94,7 +100,7 @@ func Parse(args []string) (Request, error) {
 	if r.Action == "exec" {
 		return parseExec(r, args[1:])
 	}
-	if r.Action == "ps" || r.Action == "stop" || r.Action == "logs" || r.Action == "rm" {
+	if r.Action == "ps" || r.Action == "stop" || r.Action == "logs" || r.Action == "rm" || r.Action == "inspect" || r.Action == "stats" {
 		return parseManagement(r, args[1:])
 	}
 	if r.Action != "run" && r.Action != "doctor" {
@@ -262,6 +268,9 @@ func parseManagement(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.All, "all", false, "include completed containers")
 		fs.BoolVar(&r.All, "a", false, "include completed containers")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
+	case "stats":
+		fs.BoolVar(&r.JSON, "json", false, "print JSON statistics")
+		fs.DurationVar(&r.Interval, "interval", time.Second, "CPU sampling interval")
 	case "logs":
 		r.Tail = -1
 		fs.IntVar(&r.Tail, "tail", -1, "maximum number of trailing lines")
@@ -282,6 +291,11 @@ func parseManagement(r Request, args []string) (Request, error) {
 	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
 		return r, fmt.Errorf("%s requires exactly one container ID or name; flags must precede it", r.Action)
+	}
+	if r.Action == "stats" {
+		if err := container.ValidateStatsInterval(r.Interval); err != nil {
+			return r, err
+		}
 	}
 	r.Reference = fs.Arg(0)
 	if strings.ContainsAny(r.Reference, "/\\\x00") || r.Reference == "." || r.Reference == ".." {
@@ -450,7 +464,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
-	case "ps", "stop", "logs", "rm":
+	case "ps", "stop", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)
@@ -500,6 +514,20 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		records, err = container.List(operationCtx, r.All)
 		if err == nil {
 			err = writeRecords(stdout, records, r.JSON)
+		}
+	case "inspect":
+		var inspection container.Inspection
+		inspection, err = container.Inspect(operationCtx, r.Reference)
+		if err == nil {
+			encoder := json.NewEncoder(stdout)
+			encoder.SetIndent("", "  ")
+			err = encoder.Encode(inspection)
+		}
+	case "stats":
+		var stats container.Statistics
+		stats, err = container.Stats(operationCtx, r.Reference, r.Interval)
+		if err == nil {
+			err = writeStats(stdout, stats, r.JSON)
 		}
 	case "stop":
 		var record container.Record
@@ -563,4 +591,25 @@ func displayCommand(command []string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+func writeStats(out io.Writer, stats container.Statistics, asJSON bool) error {
+	if asJSON {
+		return json.NewEncoder(out).Encode(stats)
+	}
+	memory, cpu := "N/A", "N/A"
+	if stats.MemoryBytes != nil {
+		memory = strconv.FormatUint(*stats.MemoryBytes, 10)
+	}
+	if stats.CPUPercent != nil {
+		cpu = fmt.Sprintf("%.2f%%", *stats.CPUPercent)
+	}
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tMEMORY (BYTES)\tLIMIT (BYTES)\tCPU"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", stats.ID, stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
+		return err
+	}
+	return w.Flush()
 }

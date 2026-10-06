@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
 )
@@ -24,4 +25,9 @@ func Exec(context.Context, string, config.Exec, *os.File, *os.File, *os.File, <-
 func Supervisor(string) int {
 	fmt.Fprintln(os.Stderr, "mini-docker:", errUnsupportedStore)
 	return 125
+}
+
+func Inspect(context.Context, string) (Inspection, error) { return Inspection{}, errUnsupportedStore }
+func Stats(context.Context, string, time.Duration) (Statistics, error) {
+	return Statistics{}, errUnsupportedStore
 }

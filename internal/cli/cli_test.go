@@ -440,3 +440,41 @@ func TestUserBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectionAndStatsParsing(t *testing.T) {
+	for _, args := range [][]string{{"inspect", "worker"}, {"stats", "worker"}, {"stats", "--json", "--interval", "250ms", "worker"}} {
+		got, err := Parse(args)
+		if err != nil || got.Reference != "worker" {
+			t.Fatalf("parse %v: %+v, %v", args, got, err)
+		}
+		if got.Action == "stats" && (got.Interval < 10*time.Millisecond || got.Interval > time.Minute) {
+			t.Fatalf("interval: %v", got.Interval)
+		}
+	}
+	for _, args := range [][]string{{"inspect"}, {"inspect", "worker", "extra"}, {"inspect", "--env", "worker"}, {"inspect", "../worker"}, {"stats"}, {"stats", "worker", "--json"}, {"stats", "--interval", "0", "worker"}, {"stats", "--interval", "-1s", "worker"}, {"stats", "--interval", "1ms", "worker"}, {"stats", "--interval", "2m", "worker"}, {"stats", "--interval", "bad", "worker"}} {
+		if got, err := Parse(args); err == nil {
+			t.Fatalf("accepted %v: %+v", args, got)
+		}
+	}
+}
+
+func TestWriteStatsUnavailableAndZero(t *testing.T) {
+	var out bytes.Buffer
+	stats := container.Statistics{ID: "id", Name: "worker", State: "exited", MemoryLimitBytes: 1024}
+	if err := writeStats(&out, stats, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"memory_bytes":null`) || !strings.Contains(out.String(), `"cpu_percent":null`) {
+		t.Fatalf("JSON: %s", out.String())
+	}
+	out.Reset()
+	if err := writeStats(&out, stats, false); err != nil || strings.Count(out.String(), "N/A") != 2 {
+		t.Fatalf("unavailable: %s, %v", out.String(), err)
+	}
+	memory, cpu := uint64(0), float64(0)
+	stats.MemoryBytes, stats.CPUPercent = &memory, &cpu
+	out.Reset()
+	if err := writeStats(&out, stats, false); err != nil || strings.Contains(out.String(), "N/A") || !strings.Contains(out.String(), "0.00%") {
+		t.Fatalf("zero: %s, %v", out.String(), err)
+	}
+}
