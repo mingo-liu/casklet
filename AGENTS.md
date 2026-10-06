@@ -54,7 +54,7 @@ Use Conventional Commits for this project. These rules are adapted from [vela's 
 ### Examples
 
 ```text
-docs: define the mini-docker MVP implementation plan
+docs: describe the mini-docker runtime architecture
 feat(runtime): add PID and mount namespace isolation
 fix(rootfs): clean up temporary files after startup failure
 test(cgroup): verify memory and process limits
