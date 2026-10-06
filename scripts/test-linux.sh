@@ -8,7 +8,7 @@ command -v systemd-run >/dev/null 2>&1 || fail 'systemd-run is required'
 command -v readelf >/dev/null 2>&1 || fail 'readelf is required (install binutils)'
 project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
-binary=${MINI_DOCKER_BINARY:-$project/bin/mini-docker}
+binary=${MINI_DOCKER_BINARY:-$project/bin/mdocker}
 rootfs=${MINI_DOCKER_ROOTFS:-$project/rootfs/busybox}
 canonical_binary=$(realpath -e -- "$binary" 2>/dev/null) || fail "runtime binary not found: $binary (run make build first)"
 canonical_rootfs=$(realpath -e -- "$rootfs" 2>/dev/null) || fail "rootfs not found: $rootfs (run make rootfs first)"

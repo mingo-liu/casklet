@@ -32,7 +32,7 @@ func (status unitStatus) live() bool {
 
 func checkSystemd() error {
 	if os.Geteuid() != 0 {
-		return errors.New("container management requires root; use scripts/run-linux.sh")
+		return errors.New("container management requires root; run mdocker as root")
 	}
 	if _, err := os.Stat("/run/systemd/system"); err != nil {
 		return errors.New("background containers require a running systemd system instance")

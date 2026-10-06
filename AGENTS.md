@@ -8,7 +8,7 @@
 
 ## Build, Test, and Development Commands
 
-Use `make build` to compile the static Linux binary, `make rootfs` to generate a BusyBox template, and `make test` / `make vet` for unit tests and static checks. Run `make test-integration` inside the dedicated Linux VM to verify real isolation and resource limits. Launch commands with `scripts/run-linux.sh` to obtain a delegated systemd scope. See `README.md` for VM setup and examples.
+Use `make build` to compile the static Linux binary, `make rootfs` to generate a BusyBox template, and `make test` / `make vet` for unit tests and static checks. Run `make test-integration` inside the dedicated Linux VM to verify real isolation and resource limits. Use `mdocker` after `make build` and `sudo make install`; it automatically obtains privileges and a delegated systemd scope when needed. `scripts/run-linux.sh` remains a compatibility entry point. See `README.md` for VM setup and examples.
 
 ## Coding Style & Naming Conventions
 

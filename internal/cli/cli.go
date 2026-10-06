@@ -26,22 +26,22 @@ import (
 )
 
 const usage = `Usage:
-  mini-docker run (--rootfs DIRECTORY | --image ID) [OPTIONS] -- COMMAND [ARGS...]
-  mini-docker image import DIRECTORY
-  mini-docker image ls [--json]
-  mini-docker image rm ID
-  mini-docker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
-  mini-docker ps [-a|--all] [--json]
-  mini-docker inspect ID|NAME
-  mini-docker stats [--json] [--interval DURATION] ID|NAME
-  mini-docker wait ID|NAME
-  mini-docker start ID|NAME
-  mini-docker restart [--timeout DURATION] ID|NAME
-  mini-docker stop [--timeout DURATION] ID|NAME
-  mini-docker logs [--tail N] [-f|--follow] ID|NAME
-  mini-docker rm ID|NAME
-  mini-docker doctor --rootfs DIRECTORY
-  mini-docker help
+  mdocker run (--rootfs DIRECTORY | --image ID) [OPTIONS] -- COMMAND [ARGS...]
+  mdocker image import DIRECTORY
+  mdocker image ls [--json]
+  mdocker image rm ID
+  mdocker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
+  mdocker ps [-a|--all] [--json]
+  mdocker inspect ID|NAME
+  mdocker stats [--json] [--interval DURATION] ID|NAME
+  mdocker wait ID|NAME
+  mdocker start ID|NAME
+  mdocker restart [--timeout DURATION] ID|NAME
+  mdocker stop [--timeout DURATION] ID|NAME
+  mdocker logs [--tail N] [-f|--follow] ID|NAME
+  mdocker rm ID|NAME
+  mdocker doctor --rootfs DIRECTORY
+  mdocker help
 
 Run options:
   -d, --detach   Run in the background and print the container ID
@@ -72,7 +72,8 @@ Exec options:
   --timeout      Command duration limit; 0 disables it (default: 0)
 
 Containers require Linux, root privileges, and a delegated cgroups v2 scope.
-Use scripts/run-linux.sh to launch the CLI in a delegated scope.
+mdocker automatically uses sudo when needed and creates a delegated scope
+for foreground runs. Help and invalid arguments do not require privileges.
 Management flags must precede the container identifier. ps lists active
 containers; --all also includes completed containers. logs defaults to the
 entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
@@ -507,7 +508,11 @@ func ParseUser(value string) (*config.User, error) {
 func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	r, err := Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		return 125
+	}
+	if err := prepareLaunch(args, r); err != nil {
+		fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		return 125
 	}
 	switch r.Action {
@@ -516,7 +521,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return 0
 	case "doctor":
 		if err := containerruntime.Check(r.Config.RootFS); err != nil {
-			fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+			fmt.Fprintf(stderr, "mdocker: %v\n", err)
 			return 125
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
@@ -529,7 +534,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		defer signal.Stop(signals)
 		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
 		if err != nil {
-			fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+			fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		}
 		return code
 	default:
@@ -538,7 +543,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		code, err := containerruntime.Run(r.Config, stdin, stdout, stderr)
 		if err != nil {
-			fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+			fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		}
 		return code
 	}
@@ -649,7 +654,7 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		return 130
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "mini-docker: %v\n", err)
+		fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		return 125
 	}
 	return returnCode

@@ -31,6 +31,7 @@ limactl shell mini-docker
 cd ~/mini-docker-source.XXXXXXXX
 make build
 make rootfs
+sudo make install
 ```
 
 Repeat the transfer after source changes and use the new printed directory. The snapshot script includes existing tracked and unignored files using null-delimited filenames. Each transfer uses a fresh directory, so deleted source files cannot survive in subsequent builds. Previous snapshots remain available until explicitly removed. The VM keeps build artifacts, rootfs templates, and runtime state on its own filesystem. No host directory is mounted into the VM. On an existing Ubuntu VM, install `busybox-static binutils make` with `apt-get`, and install Go 1.25 or newer before using the commands below.
@@ -38,22 +39,26 @@ Repeat the transfer after source changes and use the new printed directory. The 
 ## Run
 
 ```sh
-./scripts/run-linux.sh doctor --rootfs ./rootfs/busybox
-./scripts/run-linux.sh run --rootfs ./rootfs/busybox \
+mdocker doctor --rootfs ./rootfs/busybox
+mdocker run --rootfs ./rootfs/busybox \
   --hostname mini --memory 128m --pids-limit 64 --timeout 30s \
   -- /bin/sh -c 'hostname; ps; echo hello'
-printf 'hello\n' | ./scripts/run-linux.sh run \
+printf 'hello\n' | mdocker run \
   --rootfs ./rootfs/busybox -- /bin/cat
 ```
 
-The launcher uses `sudo systemd-run --scope` and preserves standard input and the command's exit status. Override `MINI_DOCKER_BINARY` to use another executable. Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax.
+`make build` produces `bin/mdocker`; after building, `sudo make install` installs it as `/usr/local/bin/mdocker` inside the Linux VM. Run `mdocker` from any directory on that host, or use `./bin/mdocker` directly without installing. `make install PREFIX=/your/prefix` selects another installation prefix; ensure its `bin` directory is on `PATH`.
+
+The CLI automatically uses `sudo` when root privileges are needed. Foreground runs and `doctor` create a delegated `systemd-run --scope` when the current process is not already in a suitable scope. Detached runs create their own delegated services; management and image commands do not create foreground scopes. Standard input, terminal handling, and command exit status pass through. Help and argument errors do not invoke `sudo`. This is a Linux CLI; on macOS, enter the VM with `limactl shell mini-docker` first.
+
+Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax. The old `scripts/run-linux.sh` remains a compatibility launcher using `sudo systemd-run --scope` and accepts `MINI_DOCKER_BINARY` to select another executable; `bin/mini-docker` is a compatibility symlink to `mdocker`.
 
 Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited), shutdown grace `5s`. Memory suffixes `k`, `m`, and `g` use powers of 1024. Each new container copies the rootfs template and mounts independent `/proc` and temporary storage. Foreground execution removes its working filesystem after exit; detached containers retain their private copy until `rm`. Explicit directory bind mounts preserve data in their host sources. Networking contains loopback only. By default, the command receives a fixed environment and starts in `/`.
 
 ### Resource and execution options
 
 ```sh
-./scripts/run-linux.sh run --rootfs ./rootfs/busybox \
+mdocker run --rootfs ./rootfs/busybox \
   --cpus 0.5 --env MODE=demo --env EMPTY= --workdir /tmp \
   --user 1000:1000 --read-only \
   -- /bin/sh -c 'id; pwd; echo "$MODE"; echo hello > result; cat result'
@@ -77,19 +82,19 @@ Normal command exit codes pass through. Signal exits use `128 + signal`; timeout
 
 ## Local images
 
-Import a prepared BusyBox directory on the Linux host, then run its stored copy:
+Registry downloads (`mdocker pull`) are not implemented yet. Import a prepared BusyBox directory on the Linux host, then run its stored copy:
 
 ```sh
-image_id=$(./scripts/run-linux.sh image import ./rootfs/busybox)
-./scripts/run-linux.sh image ls
-./scripts/run-linux.sh image ls --json
-./scripts/run-linux.sh run --image "$image_id" -- /bin/sh -c 'echo image-run; hostname'
-./scripts/run-linux.sh run -d --name image-worker --image "$image_id" -- /bin/sleep 300
-./scripts/run-linux.sh inspect image-worker
-./scripts/run-linux.sh exec image-worker -- /bin/echo shared-image
-./scripts/run-linux.sh stop image-worker
-./scripts/run-linux.sh rm image-worker
-./scripts/run-linux.sh image rm "$image_id"
+image_id=$(mdocker image import ./rootfs/busybox)
+mdocker image ls
+mdocker image ls --json
+mdocker run --image "$image_id" -- /bin/sh -c 'echo image-run; hostname'
+mdocker run -d --name image-worker --image "$image_id" -- /bin/sleep 300
+mdocker inspect image-worker
+mdocker exec image-worker -- /bin/echo shared-image
+mdocker stop image-worker
+mdocker rm image-worker
+mdocker image rm "$image_id"
 ```
 
 | Command | Behavior |
@@ -115,10 +120,10 @@ Create a directory on the Linux host (inside the VM when using Lima):
 
 ```sh
 mkdir -p "$HOME/mini-docker-data"
-./scripts/run-linux.sh run --rootfs ./rootfs/busybox --read-only \
+mdocker run --rootfs ./rootfs/busybox --read-only \
   --mount "type=bind,source=$HOME/mini-docker-data,target=/data" \
   --workdir /data -- /bin/sh -c 'echo persistent >> result; cat result'
-./scripts/run-linux.sh run --rootfs ./rootfs/busybox \
+mdocker run --rootfs ./rootfs/busybox \
   --mount "type=bind,source=$HOME/mini-docker-data,target=/data,readonly" \
   -- /bin/cat /data/result
 ```
@@ -138,8 +143,8 @@ The same options work with detached containers. `exec` inherits existing mounts 
 Run these commands from a terminal inside the Linux VM:
 
 ```sh
-./scripts/run-linux.sh run -it --rootfs ./rootfs/busybox -- /bin/sh
-./scripts/run-linux.sh run -it --rootfs ./rootfs/busybox \
+mdocker run -it --rootfs ./rootfs/busybox -- /bin/sh
+mdocker run -it --rootfs ./rootfs/busybox \
   --user 1000:1000 --read-only --workdir /tmp -- /bin/sh
 ```
 
@@ -154,19 +159,19 @@ Terminal stdout and stderr are combined on stdout, with terminal line discipline
 ## Background containers
 
 ```sh
-./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+mdocker run -d --name worker --rootfs ./rootfs/busybox \
   --user 1000 --read-only --workdir /tmp \
   -- /bin/sh -c 'trap "echo stopped; exit 0" TERM; while :; do echo working; sleep 1; done'
-./scripts/run-linux.sh ps
-./scripts/run-linux.sh logs --tail 5 worker
-./scripts/run-linux.sh stop --timeout 2s worker
-./scripts/run-linux.sh wait worker
-./scripts/run-linux.sh start worker
-./scripts/run-linux.sh restart --timeout 2s worker
-./scripts/run-linux.sh stop worker
-./scripts/run-linux.sh ps --all --json
-./scripts/run-linux.sh logs worker
-./scripts/run-linux.sh rm worker
+mdocker ps
+mdocker logs --tail 5 worker
+mdocker stop --timeout 2s worker
+mdocker wait worker
+mdocker start worker
+mdocker restart --timeout 2s worker
+mdocker stop worker
+mdocker ps --all --json
+mdocker logs worker
+mdocker rm worker
 ```
 
 `run -d` (or `--detach`) prints the full container ID after the command starts and returns without waiting for completion. Background stdin is `/dev/null`; stdout and stderr are merged into a private log. All resource and execution options also apply to detached runs. Startup waits at most 95 seconds; failures return `125`, with a retained failed record when allocation succeeded. A command that exits immediately still receives an ID and preserves its exit code.
@@ -199,15 +204,15 @@ Logs append across executions and retain a combined prefix up to 16 MiB, includi
 ## Inspection and resource statistics
 
 ```sh
-./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+mdocker run -d --name worker --rootfs ./rootfs/busybox \
   --memory 64m --cpus 0.5 --env MODE=demo -- /bin/sleep 300
-./scripts/run-linux.sh inspect worker
-./scripts/run-linux.sh stats worker
-./scripts/run-linux.sh stats --json --interval 500ms worker
-./scripts/run-linux.sh stop worker
-./scripts/run-linux.sh inspect worker
-./scripts/run-linux.sh stats --json worker
-./scripts/run-linux.sh rm worker
+mdocker inspect worker
+mdocker stats worker
+mdocker stats --json --interval 500ms worker
+mdocker stop worker
+mdocker inspect worker
+mdocker stats --json worker
+mdocker rm worker
 ```
 
 These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path or stored image ID, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, directory bind mounts, and execution and stop timeouts as duration strings. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
@@ -223,14 +228,14 @@ State and configuration are read together under a shared storage lock. Sampling 
 ## Execute commands in running containers
 
 ```sh
-./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+mdocker run -d --name worker --rootfs ./rootfs/busybox \
   --env MODE=base --workdir /tmp -- /bin/sleep 300
-./scripts/run-linux.sh exec worker -- /bin/sh -c 'hostname; pwd; echo "$MODE"'
-./scripts/run-linux.sh exec --env MODE=check --workdir / --timeout 10s \
+mdocker exec worker -- /bin/sh -c 'hostname; pwd; echo "$MODE"'
+mdocker exec --env MODE=check --workdir / --timeout 10s \
   worker -- /bin/sh -c 'pwd; echo "$MODE"'
-printf 'hello\n' | ./scripts/run-linux.sh exec -i worker -- /bin/cat
-./scripts/run-linux.sh stop worker
-./scripts/run-linux.sh rm worker
+printf 'hello\n' | mdocker exec -i worker -- /bin/cat
+mdocker stop worker
+mdocker rm worker
 ```
 
 `exec ID|NAME -- COMMAND [ARGS...]` requires a running detached container, root privileges, and kernel support for `clone3` with `CLONE_INTO_CGROUP`. Use the full ID or exact name, and place options before the identifier. Foreground runs and inactive or stopping containers cannot accept execution requests.
@@ -246,12 +251,12 @@ All commands share the container's aggregate memory, process/thread, and CPU lim
 From a terminal inside the Linux VM, start a background container and open a shell:
 
 ```sh
-./scripts/run-linux.sh run -d --name worker --rootfs ./rootfs/busybox \
+mdocker run -d --name worker --rootfs ./rootfs/busybox \
   --user 1000:1000 --read-only --workdir /tmp -- /bin/sleep 300
-./scripts/run-linux.sh exec -it worker -- /bin/sh
+mdocker exec -it worker -- /bin/sh
 # Exit the shell with exit or Ctrl+D; worker keeps running.
-./scripts/run-linux.sh stop worker
-./scripts/run-linux.sh rm worker
+mdocker stop worker
+mdocker rm worker
 ```
 
 `-t` / `--tty` allocates a terminal; combine it with `-i` as `-it`, `-ti`, or `--interactive --tty` to attach input. Interactive terminal execution requires terminal stdin and rejects pipes with `125` before creating a session. `-t` alone forwards no input and queues EOF for canonical readers; its initial dimensions default to 24 rows by 80 columns when caller stdin has no terminal size.
@@ -266,7 +271,8 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 | Command | Purpose |
 | --- | --- |
-| `make build` | Build a static Linux binary at `bin/mini-docker` |
+| `make build` | Build a static Linux binary at `bin/mdocker` (with a `bin/mini-docker` compatibility symlink) |
+| `sudo make install` | Install the built Linux CLI at `/usr/local/bin/mdocker` |
 | `make rootfs` | Generate `rootfs/busybox` from installed static BusyBox |
 | `make fmt` | Format Go sources |
 | `make vet` | Run Go's static checks |
@@ -275,7 +281,7 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Image tests cover import identity and deduplication, source independence, isolated private copies, bind mounts and numeric users, retained references and supervisor recovery, foreground leases, concurrent creation/removal, unsafe sources, special files, mounted subtrees, and partial import cleanup. Image store unit tests also verify cancellation, corrupted content and metadata, concurrent imports/readers, and staging recovery. Use `./scripts/test-linux.sh -test.run TestImage` for image checks. Lifecycle tests cover wait status and cancellation, retained rootfs and bind data, fresh temporary storage, execution receipts across restart, failed-start retry, stop overrides and deadlines, concurrent starts, unsafe retained mounts, and cumulative log limits. Use `./scripts/test-linux.sh -test.run TestLifecycle` for these checks. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Image tests cover import identity and deduplication, source independence, isolated private copies, bind mounts and numeric users, retained references and supervisor recovery, foreground leases, concurrent creation/removal, unsafe sources, special files, mounted subtrees, and partial import cleanup. Image store unit tests also verify cancellation, corrupted content and metadata, concurrent imports/readers, and staging recovery. Use `./scripts/test-linux.sh -test.run TestImage` for image checks. Launcher tests cover automatic scope creation, piped input, argument preservation, exit codes, timeout, capability checks, and failed-delegation recursion prevention. Use `./scripts/test-linux.sh -test.run TestLaunch` for these checks. Lifecycle tests cover wait status and cancellation, retained rootfs and bind data, fresh temporary storage, execution receipts across restart, failed-start retry, stop overrides and deadlines, concurrent starts, unsafe retained mounts, and cumulative log limits. Use `./scripts/test-linux.sh -test.run TestLifecycle` for these checks. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 

@@ -21,7 +21,7 @@ const mountRoot = "/sys/fs/cgroup"
 var creationMu sync.Mutex
 
 // Check validates a writable, exclusively owned systemd delegation without
-// modifying it. Launch the CLI through the delegated Linux scope script.
+// modifying it. The CLI automatically creates a scope when needed.
 func Check() error {
 	_, err := delegation(0)
 	return err
@@ -54,7 +54,7 @@ func delegation(cpuQuota int64) (string, error) {
 	marker := make([]byte, 32)
 	n, err := unix.Getxattr(dir, "user.delegate", marker)
 	if err != nil || string(marker[:n]) != "1" {
-		return "", fmt.Errorf("cgroup %s is not marked user.delegate=1; use the delegated Linux launcher", dir)
+		return "", fmt.Errorf("cgroup %s is not marked user.delegate=1; run mdocker to create a delegated scope", dir)
 	}
 	for _, name := range []string{"cgroup.controllers", "cgroup.type", "cgroup.procs"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {

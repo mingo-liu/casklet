@@ -6,7 +6,7 @@ fail() { printf 'run-linux: %s\n' "$*" >&2; exit 125; }
 command -v systemd-run >/dev/null 2>&1 || fail 'systemd-run is required'
 [ -d /run/systemd/system ] || fail 'a running systemd system instance is required'
 project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-binary=${MINI_DOCKER_BINARY:-$project/bin/mini-docker}
+binary=${MINI_DOCKER_BINARY:-$project/bin/mdocker}
 case "$binary" in /*) ;; *) binary=$PWD/$binary ;; esac
 [ -x "$binary" ] || fail "build the runtime first: $binary"
 if [ "$(id -u)" -ne 0 ]; then

@@ -41,7 +41,7 @@ type message struct {
 
 func Check(template string) error {
 	if os.Geteuid() != 0 {
-		return errors.New("container execution requires root; use scripts/run-linux.sh")
+		return errors.New("container execution requires root; run mdocker as root")
 	}
 	if _, err := rootfs.Validate(template); err != nil {
 		return err
