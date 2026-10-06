@@ -2,7 +2,7 @@
 
 A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-Foreground execution, interactive terminals, background container management, interactive container execution, inspection, resource statistics, and directory bind mounts are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, and read-only root filesystems.
+Foreground execution, interactive terminals, background container management, interactive container execution, inspection, resource statistics, directory bind mounts, and local images are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, read-only root filesystems, and content-addressed local images.
 
 ## Requirements
 
@@ -73,6 +73,40 @@ Numeric users are not user-namespace mappings and do not enable rootless executi
 CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu). The supervisor stays outside the workload quota; init, command processes, and their threads share the limit.
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
+
+## Local images
+
+Import a prepared BusyBox directory on the Linux host, then run its stored copy:
+
+```sh
+image_id=$(./scripts/run-linux.sh image import ./rootfs/busybox)
+./scripts/run-linux.sh image ls
+./scripts/run-linux.sh image ls --json
+./scripts/run-linux.sh run --image "$image_id" -- /bin/sh -c 'echo image-run; hostname'
+./scripts/run-linux.sh run -d --name image-worker --image "$image_id" -- /bin/sleep 300
+./scripts/run-linux.sh inspect image-worker
+./scripts/run-linux.sh exec image-worker -- /bin/echo shared-image
+./scripts/run-linux.sh stop image-worker
+./scripts/run-linux.sh rm image-worker
+./scripts/run-linux.sh image rm "$image_id"
+```
+
+| Command | Behavior |
+| --- | --- |
+| `image import DIRECTORY` | Copy a stable BusyBox filesystem into the local image store and print its full content ID. Accept a relative or absolute directory path; reject symlinks in the resolved path components, protected host directories, special files, and mounted descendants. |
+| `image ls [--json]` | List images sorted by ID, with architecture, logical regular-file bytes, and UTC creation time. JSON returns an array, including `[]` for an empty store. |
+| `image rm ID` | Delete an unreferenced image and print its ID. Refuse deletion while a foreground run holds its lease or any detached container record references it. Missing images return `125`. |
+| `run --image ID ... -- COMMAND` | Create a private rootfs copy from a stored image. Use exactly one of `--image` and `--rootfs`; existing resource, user, environment, terminal, mount, timeout, and detach options apply. |
+
+Image IDs use `sha256:` followed by all 64 lowercase hexadecimal digits. IDs include the architecture, sorted paths, copied permission modes, regular file contents, and symlink targets. Timestamps and ownership are excluded. Import strips setuid/setgid bits and assigns files to the importer, just as rootfs preparation does. Importing identical copied content returns the existing ID and creation time. Changing content, modes, links, or architecture changes the ID. This version supports local directory imports for the runtime's native arm64 or amd64 architecture; it has no tags, shortened IDs, tar/archive import, Docker/OCI layers, registry access, or automatic garbage collection.
+
+Keep the source tree unchanged until import completes. Top-level source directories are pinned, and source file access is confined through `os.Root`; file symlinks are preserved rather than traversed, including absolute container links such as `/bin/busybox`. Invalid BusyBox executables and symlinked runtime mount targets fail import. The host root, `/proc`, `/sys`, `/dev`, runtime storage, and their ancestors are rejected. Publication is atomic; failed or canceled imports leave no visible image. Interrupted import/removal staging directories are reclaimed by the next import or successful removal without following symlinks or crossing mount points.
+
+Images live under private, root-owned `/var/lib/mini-docker/images/`. Every container gets a separate working copy, so modifying a container or the original import source does not modify the image or other containers. The import source can be deleted afterward. Stored content is checked against its ID before container creation; damaged images fail startup. Do not edit image storage directly. Raw `--rootfs` paths into image storage are rejected to preserve reference tracking. Directory bind mounts provide persistent writable data alongside an image.
+
+Image operations require Linux and root privileges; import/list do not require a delegated cgroup or systemd. Store publication and deletion use an exclusive lock, while running containers share independent image leases. Concurrent imports deduplicate, and creation racing deletion either retains a protected image or fails with `image not found`. Foreground leases last until runtime cleanup; abrupt supervisor loss releases them because the workload uses an independent rootfs copy. Detached records retain their reference after exit, startup failure, or supervisor recovery, so stop and `rm` all referencing containers before deleting the image. There is no force-delete option.
+
+For image-backed containers, `inspect.config.image` contains the immutable ID and `inspect.config.rootfs` is empty, keeping internal image storage paths private. Directory-backed containers continue to expose their configured rootfs path and omit `image`.
 
 ## Persistent data
 
@@ -162,7 +196,7 @@ Logs retain a prefix up to 16 MiB, including a truncation notice when necessary.
 ./scripts/run-linux.sh rm worker
 ```
 
-These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, directory bind mounts, and timeout as a duration string. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
+These commands accept a full ID or exact name for a detached container, including completed and failed containers. They require Linux and root privileges. `inspect` always prints a JSON object. Its `config` contains the rootfs template path or stored image ID, hostname, command arguments, effective working directory and numeric user, read-only and terminal settings, directory bind mounts, and timeout as a duration string. `environment_names` lists the effective variable names, including defaults, without their values. Environment values, raw runtime errors, boot identity, temporary filesystem paths, and cgroup paths are excluded from inspection. Command arguments and the configured rootfs path are intentionally visible, as command arguments already are in `ps`.
 
 `created_at`, `started_at`, and `finished_at` use UTC RFC3339 timestamps. Times that have not occurred and unknown exit codes are JSON `null`. `limits` contains configured `memory_bytes`, `pids`, `cpu_quota_usec`, `cpu_period_usec`, and `cpus`; zero CPU quota and zero `cpus` mean unlimited. Limits and configuration remain inspectable after resource cleanup.
 
@@ -227,11 +261,11 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Image tests cover import identity and deduplication, source independence, isolated private copies, bind mounts and numeric users, retained references and supervisor recovery, foreground leases, concurrent creation/removal, unsafe sources, special files, mounted subtrees, and partial import cleanup. Image store unit tests also verify cancellation, corrupted content and metadata, concurrent imports/readers, and staging recovery. Use `./scripts/test-linux.sh -test.run TestImage` for image checks. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-Local image management is the next milestone; external networking remains planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+External networking is the next milestone. Lifecycle extensions and security capabilities remain planned. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 
@@ -240,7 +274,8 @@ Local image management is the next milestone; external networking remains planne
 - `internal/config/`: execution configuration and validation.
 - `internal/container/`: persistent records, background supervision, systemd service management, and bounded logs.
 - `internal/runtime/`: supervisor, container init, signals, run state, recovery, and cleanup.
-- `internal/rootfs/`: template validation and filesystem preparation.
+- `internal/rootfs/`: template validation and confined filesystem preparation.
+- `internal/image/`: content-addressed local images, import publication, integrity checks, and deletion leases.
 - `internal/cgroup/`: cgroups v2 delegation and limits.
 - `internal/ipc/`: bounded local messages and close-on-exec descriptor transfer.
 - `scripts/`, `dev/`: Linux launchers and development VM configuration.

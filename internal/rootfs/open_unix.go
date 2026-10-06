@@ -16,3 +16,7 @@ func openSource(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(fd), path), nil
 }
+
+func openRootSource(root *os.Root, name string) (*os.File, error) {
+	return root.OpenFile(name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+}

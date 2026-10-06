@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/image"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
 )
@@ -37,9 +38,24 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
+	if cfg.Image != "" {
+		images, err := image.OpenStore()
+		if err != nil {
+			return Record{}, err
+		}
+		_, tree, lease, err := images.Acquire(ctx, cfg.Image)
+		if err != nil {
+			return Record{}, err
+		}
+		defer lease.Close()
+		cfg.RootFS = tree
+	}
 	cfg.RootFS, err = rootfs.Validate(cfg.RootFS)
 	if err != nil {
 		return Record{}, err
+	}
+	if cfg.Image == "" && image.IsStorePath(cfg.RootFS) {
+		return Record{}, errors.New("stored image filesystems require --image")
 	}
 	if err := rootfs.ValidateMountSources(cfg.Mounts, cfg.RootFS); err != nil {
 		return Record{}, err

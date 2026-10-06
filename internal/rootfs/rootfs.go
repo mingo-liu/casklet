@@ -113,6 +113,25 @@ func Copy(ctx context.Context, source, destination string) error {
 	if source == string(filepath.Separator) {
 		return errors.New("the host root cannot be copied as a rootfs")
 	}
+	root, err := os.OpenRoot(source)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return CopyFromRoot(ctx, root, source, destination)
+}
+
+// CopyFromRoot confines source access to an already pinned directory. sourcePath
+// is its canonical host path, used to reject overlap and mounted descendants.
+// The source must remain stable until copying finishes.
+func CopyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	source := sourcePath
+	if !filepath.IsAbs(source) || filepath.Clean(source) != source || source == "/" {
+		return errors.New("invalid pinned rootfs source path")
+	}
 	if destination == "" {
 		return errors.New("rootfs copy destination is required")
 	}
@@ -122,7 +141,7 @@ func Copy(ctx context.Context, source, destination string) error {
 	if err := realDirectory(destination); err != nil {
 		return fmt.Errorf("copy destination: %w", err)
 	}
-	destination, err = directory(destination)
+	destination, err := directory(destination)
 	if err != nil {
 		return err
 	}
@@ -145,19 +164,16 @@ func Copy(ctx context.Context, source, destination string) error {
 	}
 	var directories []copiedDirectory
 	buffer := make([]byte, 32*1024)
-	err = filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
+		rel := name
 		target := filepath.Join(destination, rel)
-		info, err := entry.Info()
+		info, err := root.Lstat(name)
 		if err != nil {
 			return err
 		}
@@ -171,11 +187,11 @@ func Copy(ctx context.Context, source, destination string) error {
 			}
 			directories = append(directories, copiedDirectory{target, mode})
 		case mode.IsRegular():
-			if err := copyFile(ctx, path, target, mode, buffer); err != nil {
+			if err := copyFileFromRoot(ctx, root, name, target, mode, buffer); err != nil {
 				return fmt.Errorf("copy %s: %w", rel, err)
 			}
 		case mode&os.ModeSymlink != 0:
-			link, err := os.Readlink(path)
+			link, err := root.Readlink(name)
 			if err != nil {
 				return err
 			}
@@ -218,6 +234,19 @@ func copyFile(ctx context.Context, source, destination string, mode fs.FileMode,
 		return err
 	}
 	defer in.Close()
+	return copyOpenedFile(ctx, in, destination, mode, buffer)
+}
+
+func copyFileFromRoot(ctx context.Context, root *os.Root, name, destination string, mode fs.FileMode, buffer []byte) error {
+	in, err := openRootSource(root, name)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	return copyOpenedFile(ctx, in, destination, mode, buffer)
+}
+
+func copyOpenedFile(ctx context.Context, in *os.File, destination string, mode fs.FileMode, buffer []byte) error {
 	info, err := in.Stat()
 	if err != nil {
 		return err

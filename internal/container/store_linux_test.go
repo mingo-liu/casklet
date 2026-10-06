@@ -434,3 +434,29 @@ func TestListingsIgnoreUnpublishedAndRemovedDirectories(t *testing.T) {
 		t.Fatalf("incomplete transaction artifact affected listing: %+v, %v", records, err)
 	}
 }
+
+func TestImageReferencesRemainUntilRecordRemoval(t *testing.T) {
+	store := testStore(t)
+	cfg := testConfig()
+	cfg.Image = "sha256:" + strings.Repeat("a", 64)
+	record, err := store.Create(context.Background(), cfg, "image-reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{StateCreated, StateStarting, StateRunning, StateStopping, StateExited, StateFailed} {
+		if err := store.Update(context.Background(), record.ID, func(record *Record) error { record.State = state; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		referenced, err := store.imageReferenced(context.Background(), cfg.Image)
+		if err != nil || !referenced {
+			t.Fatalf("state %s lost reference: %v", state, err)
+		}
+	}
+	if err := store.Remove(context.Background(), record.ID); err != nil {
+		t.Fatal(err)
+	}
+	referenced, err := store.imageReferenced(context.Background(), cfg.Image)
+	if err != nil || referenced {
+		t.Fatalf("removed record retained reference: %v", err)
+	}
+}

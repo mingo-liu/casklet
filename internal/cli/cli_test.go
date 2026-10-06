@@ -498,3 +498,17 @@ func TestRunMountOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestImageCommands(t *testing.T) {
+	id := "sha256:" + strings.Repeat("a", 64)
+	for _, args := range [][]string{{"image", "import", "/template"}, {"image", "ls"}, {"image", "ls", "--json"}, {"image", "rm", id}, {"run", "--image", id, "--", "sh"}} {
+		if _, err := Parse(args); err != nil {
+			t.Fatalf("parse %v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{{"image"}, {"image", "other"}, {"image", "import"}, {"image", "ls", "extra"}, {"image", "rm", "../outside"}, {"image", "rm", id, "extra"}, {"run", "--rootfs", "/template", "--image", id, "--", "sh"}, {"run", "--image", "", "--", "sh"}, {"run", "--rootfs", "", "--image", id, "--", "sh"}, {"run", "--image", "sha256:abc", "--", "sh"}, {"doctor", "--image", id}} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+}

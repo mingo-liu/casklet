@@ -31,3 +31,19 @@ func TestCopyFileDoesNotFollowSymlinks(t *testing.T) {
 		t.Fatal("copyFile followed a source symlink")
 	}
 }
+
+func TestPinnedSourceRejectsEscapingAncestor(t *testing.T) {
+	source := t.TempDir()
+	outside := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(source, "directory"), 0755))
+	must(t, os.WriteFile(filepath.Join(outside, "file"), []byte("host-secret"), 0600))
+	root, err := os.OpenRoot(source)
+	must(t, err)
+	defer root.Close()
+	must(t, os.Remove(filepath.Join(source, "directory")))
+	must(t, os.Symlink(outside, filepath.Join(source, "directory")))
+	if file, err := openRootSource(root, "directory/file"); err == nil {
+		file.Close()
+		t.Fatal("pinned source read outside its root through a replaced ancestor")
+	}
+}

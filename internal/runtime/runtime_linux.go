@@ -16,6 +16,7 @@ import (
 
 	"github.com/mingo-liu/mini-docker/internal/cgroup"
 	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/image"
 	"github.com/mingo-liu/mini-docker/internal/ipc"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
@@ -100,16 +101,6 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("interactive TTY requires terminal stdin: %w", err)
 		}
 	}
-	if err := Check(cfg.RootFS); err != nil {
-		return code, err
-	}
-	template, err := rootfs.Validate(cfg.RootFS)
-	if err != nil {
-		return code, err
-	}
-	if err := rootfs.ValidateMountSources(cfg.Mounts, template); err != nil {
-		return code, err
-	}
 	incomingSignals := make(chan os.Signal, 8)
 	signals := make(chan os.Signal, 8)
 	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM)
@@ -138,6 +129,31 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			}
 		}
 	}()
+	if cfg.Image != "" {
+		images, err := image.OpenStore()
+		if err != nil {
+			return preparationError(err, signals)
+		}
+		_, tree, lease, err := images.Acquire(prepareCtx, cfg.Image)
+		if err != nil {
+			return preparationError(err, signals)
+		}
+		defer lease.Close()
+		cfg.RootFS = tree
+	}
+	if err := Check(cfg.RootFS); err != nil {
+		return code, err
+	}
+	template, err := rootfs.Validate(cfg.RootFS)
+	if err != nil {
+		return code, err
+	}
+	if cfg.Image == "" && image.IsStorePath(template) {
+		return code, errors.New("stored image filesystems require --image")
+	}
+	if err := rootfs.ValidateMountSources(cfg.Mounts, template); err != nil {
+		return code, err
+	}
 	if err := recoverRuns(prepareCtx, stderr); err != nil {
 		return preparationError(err, signals)
 	}

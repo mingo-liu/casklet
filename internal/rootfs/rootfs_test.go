@@ -258,3 +258,22 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestPinnedCopySurvivesSourceRename(t *testing.T) {
+	source := template(t)
+	pinned, err := os.OpenRoot(source)
+	must(t, err)
+	defer pinned.Close()
+	must(t, os.Rename(source, source+"-original"))
+	defer os.RemoveAll(source + "-original")
+	must(t, os.Mkdir(source, 0700))
+	must(t, os.WriteFile(filepath.Join(source, "replacement"), []byte("replacement"), 0600))
+	destination := t.TempDir()
+	must(t, CopyFromRoot(context.Background(), pinned, source, destination))
+	if _, err := os.Stat(filepath.Join(destination, "replacement")); !os.IsNotExist(err) {
+		t.Fatal("pinned copy followed replacement")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "bin", "busybox")); err != nil {
+		t.Fatal("pinned copy lost original tree:", err)
+	}
+}

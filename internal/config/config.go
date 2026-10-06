@@ -27,6 +27,7 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	Image       string        `json:"image,omitempty"`
 	Mounts      []BindMount   `json:"mounts,omitempty"`
 	RootFS      string        `json:"rootfs"`
 	Hostname    string        `json:"hostname"`
@@ -48,6 +49,11 @@ var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if c.Image != "" {
+		if err := ValidateImageID(c.Image); err != nil {
+			return err
+		}
+	}
 	if len(c.Command) == 0 || c.Command[0] == "" {
 		return errors.New("a nonempty command is required")
 	}
@@ -101,4 +107,14 @@ func (c Config) CommandEnvironment() []string {
 		}
 	}
 	return env
+}
+
+var imageID = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// ValidateImageID requires a full content identity; paths and prefixes are invalid.
+func ValidateImageID(id string) error {
+	if !imageID.MatchString(id) {
+		return errors.New("image ID must be sha256: followed by 64 lowercase hexadecimal digits")
+	}
+	return nil
 }

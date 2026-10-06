@@ -21,11 +21,15 @@ import (
 
 	"github.com/mingo-liu/mini-docker/internal/config"
 	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/mini-docker/internal/image"
 	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
 )
 
 const usage = `Usage:
-  mini-docker run --rootfs DIRECTORY [OPTIONS] -- COMMAND [ARGS...]
+  mini-docker run (--rootfs DIRECTORY | --image ID) [OPTIONS] -- COMMAND [ARGS...]
+  mini-docker image import DIRECTORY
+  mini-docker image ls [--json]
+  mini-docker image rm ID
   mini-docker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
   mini-docker ps [-a|--all] [--json]
   mini-docker inspect ID|NAME
@@ -42,7 +46,8 @@ Run options:
   -t, --tty      Allocate a terminal; combine with -i as -it for input
   --name         Unique name for a detached container (1-63 letters,
                  digits, underscores, periods, or hyphens; start alphanumeric)
-  --rootfs       BusyBox filesystem template (required)
+  --rootfs       BusyBox filesystem template (exclusive with --image)
+  --image        Full sha256: image ID from the local image store
   --hostname     Container hostname (default: mini)
   --memory       Memory limit in bytes or k/m/g units (default: 128m)
   --pids-limit   Maximum number of processes and threads (default: 64)
@@ -99,6 +104,9 @@ func Parse(args []string) (Request, error) {
 		return Request{Action: "help"}, nil
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "image" {
+		return parseImage(r, args[1:])
+	}
 	if r.Action == "exec" {
 		return parseExec(r, args[1:])
 	}
@@ -113,6 +121,7 @@ func Parse(args []string) (Request, error) {
 	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
 	if r.Action == "run" {
+		fs.StringVar(&r.Config.Image, "image", "", "local image ID")
 		fs.BoolVar(&r.Detach, "detach", false, "run in the background")
 		fs.BoolVar(&r.Detach, "d", false, "run in the background")
 		fs.BoolVar(&r.Config.Interactive, "interactive", false, "forward stdin")
@@ -165,8 +174,18 @@ func Parse(args []string) (Request, error) {
 	if fs.NArg() != 0 {
 		return r, errors.New("unexpected positional argument before --")
 	}
-	if r.Config.RootFS == "" {
+	if r.Action == "doctor" && r.Config.RootFS == "" {
 		return r, errors.New("--rootfs is required")
+	}
+	if r.Action == "run" {
+		rootSpecified, imageSpecified := false, false
+		fs.Visit(func(f *flag.Flag) {
+			rootSpecified = rootSpecified || f.Name == "rootfs"
+			imageSpecified = imageSpecified || f.Name == "image"
+		})
+		if rootSpecified == imageSpecified || (rootSpecified && r.Config.RootFS == "") || (imageSpecified && r.Config.Image == "") {
+			return r, errors.New("run requires exactly one of --rootfs DIRECTORY or --image ID")
+		}
 	}
 	if r.Action == "doctor" {
 		if separator >= 0 {
@@ -474,7 +493,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
-	case "ps", "stop", "logs", "rm", "inspect", "stats":
+	case "image-import", "image-ls", "image-rm", "ps", "stop", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)
@@ -513,6 +532,30 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 	}
 	var err error
 	switch r.Action {
+	case "image-import", "image-ls", "image-rm":
+		var store *image.Store
+		store, err = image.OpenStore()
+		if err == nil {
+			switch r.Action {
+			case "image-import":
+				var record image.Record
+				record, err = store.Import(operationCtx, r.Reference)
+				if err == nil {
+					_, err = fmt.Fprintln(stdout, record.ID)
+				}
+			case "image-ls":
+				var records []image.Record
+				records, err = store.List(operationCtx)
+				if err == nil {
+					err = writeImages(stdout, records, r.JSON)
+				}
+			case "image-rm":
+				err = store.Remove(operationCtx, r.Reference, container.ImageReferenced)
+				if err == nil {
+					_, err = fmt.Fprintln(stdout, r.Reference)
+				}
+			}
+		}
 	case "run":
 		var record container.Record
 		record, err = container.Start(operationCtx, r.Config, r.Name)
@@ -620,6 +663,63 @@ func writeStats(out io.Writer, stats container.Statistics, asJSON bool) error {
 	}
 	if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", stats.ID, stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
 		return err
+	}
+	return w.Flush()
+}
+
+func parseImage(r Request, args []string) (Request, error) {
+	if len(args) == 0 {
+		return r, errors.New("image requires import, ls, or rm")
+	}
+	r.Action = "image-" + args[0]
+	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	switch args[0] {
+	case "ls":
+		fs.BoolVar(&r.JSON, "json", false, "print JSON images")
+	case "import", "rm":
+	default:
+		return r, fmt.Errorf("unknown image command %q", args[0])
+	}
+	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return Request{Action: "help"}, nil
+		}
+		return r, err
+	}
+	if args[0] == "ls" {
+		if fs.NArg() != 0 {
+			return r, errors.New("image ls does not accept positional arguments")
+		}
+		return r, nil
+	}
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		return r, errors.New("image import and rm require exactly one argument")
+	}
+	r.Reference = fs.Arg(0)
+	if args[0] == "rm" {
+		if err := image.ValidateID(r.Reference); err != nil {
+			return r, err
+		}
+	}
+	return r, nil
+}
+
+func writeImages(out io.Writer, records []image.Record, asJSON bool) error {
+	if asJSON {
+		if records == nil {
+			records = []image.Record{}
+		}
+		return json.NewEncoder(out).Encode(records)
+	}
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "ID\tARCHITECTURE\tSIZE (BYTES)\tCREATED"); err != nil {
+		return err
+	}
+	for _, record := range records {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", record.ID, record.Architecture, record.SizeBytes, record.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
 	}
 	return w.Flush()
 }

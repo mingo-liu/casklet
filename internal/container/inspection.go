@@ -28,6 +28,7 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
+	Image            string             `json:"image,omitempty"`
 	Mounts           []config.BindMount `json:"mounts"`
 	RootFS           string             `json:"rootfs"`
 	Hostname         string             `json:"hostname"`
@@ -59,10 +60,14 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	if cfg.User != nil {
 		user = *cfg.User
 	}
+	rootfs := cfg.RootFS
+	if cfg.Image != "" {
+		rootfs = ""
+	}
 	return Inspection{
 		ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: cfg.RootFS, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

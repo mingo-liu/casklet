@@ -9,7 +9,12 @@ import (
 	"strings"
 )
 
-func checkMounts(source string) error {
+func checkMounts(source string) error { return rejectMounts(source, false) }
+
+// CheckUnmounted refuses mounted storage before recursive deletion.
+func CheckUnmounted(source string) error { return rejectMounts(source, true) }
+
+func rejectMounts(source string, includeRoot bool) error {
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		return fmt.Errorf("inspect rootfs mount points: %w", err)
@@ -23,7 +28,7 @@ func checkMounts(source string) error {
 			return fmt.Errorf("invalid mountinfo entry: %q", scanner.Text())
 		}
 		mount := decodeMountPath(fields[4])
-		if mount != source && within(source, mount) {
+		if (includeRoot || mount != source) && within(source, mount) {
 			return fmt.Errorf("rootfs contains a mounted subtree: %s", mount)
 		}
 	}
