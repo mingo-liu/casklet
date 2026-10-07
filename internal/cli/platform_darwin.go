@@ -17,12 +17,25 @@ func platformArguments(args []string) []string {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor") {
 		return args
 	}
-	for _, arg := range args[1:] {
-		if arg == "--" {
+	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true}
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if len(arg) < 2 || arg[0] != '-' || arg == "--" {
 			break
 		}
-		if arg == "--rootfs" || strings.HasPrefix(arg, "--rootfs=") || arg == "--image" || strings.HasPrefix(arg, "--image=") {
+		name := arg[1:]
+		if name[0] == '-' {
+			name = name[1:]
+		}
+		if name == "" || name[0] == '-' {
+			break
+		}
+		name, _, inline := strings.Cut(name, "=")
+		if name == "rootfs" || name == "image" {
 			return args
+		}
+		if !inline && !booleans[name] {
+			i++
 		}
 	}
 	return append([]string{args[0], "--rootfs", machine.BuiltinRootFS}, args[1:]...)
