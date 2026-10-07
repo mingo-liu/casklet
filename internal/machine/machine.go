@@ -251,31 +251,28 @@ printf '%s\n' "$2" > /usr/local/lib/mini-docker/engine.sha256
 	return err
 }
 
-func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func parseHostCommand(args []string) (Options, error) {
+	options := defaultOptions()
 	if (len(args) > 1 && (args[1] == "--help" || args[1] == "-h")) || (len(args) > 2 && (args[2] == "--help" || args[2] == "-h")) {
-		fmt.Fprintln(stdout, "Usage: mdocker machine init|start|stop|status; mdocker rootfs DIRECTORY")
-		return nil
+		return options, flag.ErrHelp
 	}
-	m, err := open(stderr)
-	if err != nil {
-		return err
+	if len(args) == 0 {
+		return options, errors.New("a host command is required")
 	}
 	if args[0] == "rootfs" {
-		if len(args) != 2 {
-			return errors.New("rootfs requires one destination directory")
+		if len(args) != 2 || args[1] == "" {
+			return options, errors.New("rootfs requires one destination directory")
 		}
-		instance, err := m.ensure(ctx, defaultOptions(), false)
-		if err != nil {
-			return err
-		}
-		return m.rootfs(ctx, *instance, args[1], stdout)
+		return options, nil
+	}
+	if args[0] != "machine" {
+		return options, fmt.Errorf("unknown host command %q", args[0])
 	}
 	if len(args) < 2 {
-		return errors.New("machine requires init, start, stop, or status")
+		return options, errors.New("machine requires init, start, stop, or status")
 	}
 	switch args[1] {
 	case "init":
-		options := defaultOptions()
 		fs := flag.NewFlagSet("machine init", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		fs.IntVar(&options.CPUs, "cpus", options.CPUs, "VM CPU count")
@@ -283,21 +280,49 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		fs.IntVar(&options.Disk, "disk", options.Disk, "VM disk in GiB")
 		fs.Func("mount", "additional shared directory", func(value string) error { options.Mounts = append(options.Mounts, value); return nil })
 		if err := fs.Parse(args[2:]); err != nil {
-			return err
+			return options, err
 		}
 		if fs.NArg() != 0 {
-			return errors.New("unexpected machine init argument")
+			return options, errors.New("unexpected machine init argument")
 		}
+		_, err := configData(options)
+		return options, err
+	case "start", "stop", "status":
+		if len(args) != 2 {
+			return options, fmt.Errorf("machine %s takes no arguments", args[1])
+		}
+		return options, nil
+	default:
+		return options, fmt.Errorf("unknown machine command %q", args[1])
+	}
+}
+
+func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	options, err := parseHostCommand(args)
+	if errors.Is(err, flag.ErrHelp) {
+		_, err = fmt.Fprintln(stdout, "Usage: mdocker machine init [--cpus N] [--memory GiB] [--disk GiB] [--mount DIRECTORY ...]; mdocker machine start|stop|status; mdocker rootfs DIRECTORY")
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	m, err := open(stderr)
+	if err != nil {
+		return err
+	}
+	if args[0] == "rootfs" {
+		instance, err := m.ensure(ctx, options, false)
+		if err != nil {
+			return err
+		}
+		return m.rootfs(ctx, *instance, args[1], stdout)
+	}
+	switch args[1] {
+	case "init":
 		_, err = m.ensure(ctx, options, true)
 	case "start":
-		if len(args) != 2 {
-			return errors.New("machine start takes no arguments")
-		}
-		_, err = m.ensure(ctx, defaultOptions(), false)
+		_, err = m.ensure(ctx, options, false)
 	case "stop":
-		if len(args) != 2 {
-			return errors.New("machine stop takes no arguments")
-		}
 		lock, lockErr := m.lock(ctx)
 		if lockErr != nil {
 			return lockErr
@@ -311,9 +336,6 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 			_, err = m.command(ctx, "stop", Name)
 		}
 	case "status":
-		if len(args) != 2 {
-			return errors.New("machine status takes no arguments")
-		}
 		instance, instanceErr := m.instance(ctx)
 		if instanceErr != nil {
 			return instanceErr

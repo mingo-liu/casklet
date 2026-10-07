@@ -13,6 +13,9 @@ func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
 		return r, errors.New("image requires import, ls, or rm")
 	}
+	if args[0] == "--help" || args[0] == "-h" {
+		return Request{Action: "help"}, nil
+	}
 	r.Action = "image-" + args[0]
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

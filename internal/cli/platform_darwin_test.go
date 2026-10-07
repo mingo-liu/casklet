@@ -29,6 +29,59 @@ func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 	if strings.Contains(string(data), "Lima is required") {
 		t.Fatalf("attempted machine setup: %s", data)
 	}
+	if !strings.Contains(string(data), "mdocker doctor [--rootfs DIRECTORY]") {
+		t.Fatalf("help omitted the default doctor template: %s", data)
+	}
+}
+
+func TestMacHostArgumentErrorsDoNotRequireLima(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"machine"}, "machine requires"},
+		{[]string{"machine", "unknown"}, "unknown machine command"},
+		{[]string{"machine", "init", "--unknown"}, "flag provided but not defined"},
+		{[]string{"machine", "init", "unexpected"}, "unexpected machine init argument"},
+		{[]string{"machine", "init", "--cpus", "0"}, "machine resources require"},
+		{[]string{"machine", "start", "unexpected"}, "machine start takes no arguments"},
+		{[]string{"machine", "stop", "unexpected"}, "machine stop takes no arguments"},
+		{[]string{"machine", "status", "unexpected"}, "machine status takes no arguments"},
+		{[]string{"rootfs"}, "rootfs requires one destination directory"},
+		{[]string{"rootfs", ""}, "rootfs requires one destination directory"},
+		{[]string{"rootfs", "one", "two"}, "rootfs requires one destination directory"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			out, err := os.CreateTemp(t.TempDir(), "output")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer out.Close()
+			if code := Execute(tt.args, os.Stdin, out, out); code != 125 {
+				t.Fatalf("exit = %d; want 125", code)
+			}
+			data, err := os.ReadFile(out.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), tt.want) || strings.Contains(string(data), "Lima is required") {
+				t.Fatalf("diagnostic = %q; want %q without Lima", data, tt.want)
+			}
+		})
+	}
+}
+
+func TestMacMachineInitHelpAfterOptionsDoesNotRequireLima(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	out, err := os.CreateTemp(t.TempDir(), "output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	if code := Execute([]string{"machine", "init", "--cpus", "2", "--help"}, os.Stdin, out, out); code != 0 {
+		t.Fatalf("help exit = %d; want 0", code)
+	}
 }
 
 func TestMacDefaultTemplateLeavesWorkloadFlagsAlone(t *testing.T) {

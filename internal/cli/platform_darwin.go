@@ -44,7 +44,9 @@ func platformArguments(args []string) []string {
 func platformUsage() string {
 	text, _, _ := strings.Cut(usage, "Containers require Linux")
 	_, management, _ := strings.Cut(usage, "Management flags must precede")
-	return strings.Replace(text, "mdocker run (--rootfs DIRECTORY | --image ID)", "mdocker run [--rootfs DIRECTORY | --image ID]", 1) + `macOS host commands:
+	text = strings.Replace(text, "mdocker run (--rootfs DIRECTORY | --image ID)", "mdocker run [--rootfs DIRECTORY | --image ID]", 1)
+	text = strings.Replace(text, "mdocker doctor --rootfs DIRECTORY", "mdocker doctor [--rootfs DIRECTORY]", 1)
+	return text + `macOS host commands:
   mdocker machine init [--cpus N] [--memory GiB] [--disk GiB] [--mount DIRECTORY ...]
   mdocker machine start
   mdocker machine stop

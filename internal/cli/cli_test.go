@@ -59,7 +59,14 @@ func TestMemoryBoundaries(t *testing.T) {
 }
 
 func TestHelpDoesNotRequireRootFS(t *testing.T) {
-	for _, args := range [][]string{nil, {"help"}, {"run", "--help"}, {"doctor", "-h"}, {"ps", "--help"}, {"logs", "-h"}, {"stop", "--help"}, {"rm", "-h"}, {"exec", "--help"}} {
+	argsList := [][]string{nil, {"help"}, {"--help"}, {"-h"}}
+	commands := [][]string{{"run"}, {"doctor"}, {"ps"}, {"logs"}, {"stop"}, {"rm"}, {"exec"}, {"wait"}, {"start"}, {"restart"}, {"inspect"}, {"stats"}, {"image"}, {"image", "import"}, {"image", "ls"}, {"image", "rm"}}
+	for _, command := range commands {
+		for _, help := range []string{"-h", "--help"} {
+			argsList = append(argsList, append(append([]string(nil), command...), help))
+		}
+	}
+	for _, args := range argsList {
 		r, err := Parse(args)
 		if err != nil || r.Action != "help" {
 			t.Errorf("Parse(%q) = %+v, %v", args, r, err)
