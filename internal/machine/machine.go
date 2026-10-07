@@ -311,7 +311,17 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if err != nil {
-		return err
+		topic := "machine"
+		if len(args) > 0 && args[0] == "rootfs" {
+			topic = "rootfs"
+		}
+		if len(args) > 1 && args[0] == "machine" {
+			switch args[1] {
+			case "init", "start", "stop", "status", "share":
+				topic += " " + args[1]
+			}
+		}
+		return fmt.Errorf("%w\nHint: run mdocker %s --help for usage and examples.", err, topic)
 	}
 	var parent string
 	if args[0] == "rootfs" {

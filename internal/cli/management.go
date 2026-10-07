@@ -34,7 +34,7 @@ func executeManagement(r Request, stdout, stderr io.Writer) int {
 		return 130
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "mdocker: %v\n", operationError(r, err))
 		return 125
 	}
 	return returnCode

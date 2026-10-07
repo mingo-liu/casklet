@@ -193,7 +193,9 @@ CPU 100% means one busy core, and unavailable metrics are `N/A` or JSON `null`.
 
 Command exit codes pass through. Signals return `128 + signal`, command timeout
 returns `124`, and configuration/startup errors return `125`. Diagnostics go to
-stderr. A completed command keeps its exit code during descendant cleanup.
+stderr. Argument errors link to the relevant command help. Lifecycle errors
+include recovery commands, such as stopping a running container before removal
+or listing containers after a failed lookup. A completed command keeps its exit code during descendant cleanup.
 
 ## IPv4 networking
 

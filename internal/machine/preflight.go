@@ -67,7 +67,7 @@ func localPreflight(args []string) error {
 			}
 			root, err := rootfs.Validate(value)
 			if err != nil {
-				return fmt.Errorf("rootfs template %s: %w", value, err)
+				return fmt.Errorf("rootfs template %s: %w; export a valid template to a new directory with mdocker rootfs DIRECTORY", value, err)
 			}
 			canonicalRoot = root
 		case "mount":
@@ -77,7 +77,7 @@ func localPreflight(args []string) error {
 			}
 			mount.Source, err = sharedDirectory(mount.Source)
 			if err != nil {
-				return fmt.Errorf("bind source: %w", err)
+				return fmt.Errorf("bind source: %w; create the source directory before using --mount", err)
 			}
 			mounts = append(mounts, mount)
 		case "p", "publish":

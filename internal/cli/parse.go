@@ -24,7 +24,12 @@ type Request struct {
 	Interval    time.Duration
 }
 
-func Parse(args []string) (Request, error) {
+func Parse(args []string) (request Request, err error) {
+	defer func() {
+		if err != nil {
+			err = argumentError(args, err)
+		}
+	}()
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		return Request{Action: "help"}, nil
 	}

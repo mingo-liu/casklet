@@ -47,7 +47,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		defer signal.Stop(signals)
 		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
 		if err != nil {
-			fmt.Fprintf(stderr, "mdocker: %v\n", err)
+			fmt.Fprintf(stderr, "mdocker: %v\n", operationError(r, err))
 		}
 		return code
 	case "run":

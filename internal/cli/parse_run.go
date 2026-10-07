@@ -117,7 +117,7 @@ func parseRun(r Request, args []string) (Request, error) {
 		return r, err
 	}
 	if fs.NArg() != 0 {
-		return r, errors.New("unexpected positional argument before --")
+		return r, errors.New("unexpected positional argument before --; place -- before the container command (example: -- /bin/echo hello)")
 	}
 	if r.Action == "doctor" && r.Config.RootFS == "" {
 		return r, errors.New("--rootfs is required")
@@ -139,7 +139,7 @@ func parseRun(r Request, args []string) (Request, error) {
 		return r, nil
 	}
 	if separator < 0 || len(r.Config.Command) == 0 || r.Config.Command[0] == "" {
-		return r, errors.New("a command is required after --")
+		return r, errors.New("a command is required after --; append a command such as -- /bin/echo hello")
 	}
 	if !hostnamePattern.MatchString(r.Config.Hostname) {
 		return r, errors.New("hostname must contain 1-63 letters, digits, or hyphens and start and end with a letter or digit")

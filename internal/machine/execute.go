@@ -128,13 +128,13 @@ func checkPorts(args []string) error {
 		if mapping.Protocol == "udp" {
 			listener, err := net.ListenPacket("udp4", address)
 			if err != nil {
-				return fmt.Errorf("macOS host port unavailable: %w", err)
+				return fmt.Errorf("macOS host port unavailable: %w; choose another host port with -p HOST_PORT:CONTAINER_PORT, or stop the process using this port", err)
 			}
 			return listener.Close()
 		}
 		listener, err := net.Listen("tcp4", address)
 		if err != nil {
-			return fmt.Errorf("macOS host port unavailable: %w", err)
+			return fmt.Errorf("macOS host port unavailable: %w; choose another host port with -p HOST_PORT:CONTAINER_PORT, or stop the process using this port", err)
 		}
 		return listener.Close()
 	})
