@@ -18,6 +18,10 @@ Use English for repository documentation, identifiers, comments, CLI help, logs,
 
 Use Go's `testing` package, `*_test.go` files, and `TestXxx` functions. Test behavior and failure cleanup rather than mirroring implementation. Keep resource stress helpers bounded. Run relevant unit tests and vet before committing; runtime changes also require privileged Linux integration tests. Report checks that could not run. No coverage percentage is mandated.
 
+## Quality Reviews
+
+Before proposing project optimizations, read `guides/quality.md` and verify the current implementation and regression tests. Do not repeat a completed item as outstanding unless a new reproducible regression or an uncovered scenario demonstrates a specific remaining gap. Update that record when quality work is completed, including its scope and validation.
+
 ## Commit & Pull Request Guidelines
 
 Use Conventional Commits for this project. These rules are adapted from [vela's commit guidelines](https://github.com/mingo-liu/vela/blob/main/AGENTS.md).

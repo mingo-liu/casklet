@@ -352,7 +352,7 @@ func TestOversizedConfigurationDoesNotPublishContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if entry.Name() != ".lock" {
+		if entry.Name() != ".lock" && entry.Name() != ".transactions" {
 			t.Fatalf("failed creation left artifact: %s", entry.Name())
 		}
 	}

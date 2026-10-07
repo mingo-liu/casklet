@@ -151,6 +151,14 @@ Failed cgroup emptying or removal preserves the run directory and its recovery
 receipt. Foreground CLI invocations report infrastructure errors as status 125
 when the command would otherwise return zero.
 
+Opening, creating, listing, and removing container records opportunistically
+recover abandoned `.create-ID` and `.remove-ID` directories. Recovery checks
+private ownership, existing leases, and mount points. A stable `.transactions`
+lock outside those directories fences deletion after internal lock files have
+been unlinked. Live deletion causes opportunistic recovery to skip; recursive
+deletion runs after releasing the metadata lock. Unsafe artifacts are preserved
+with an error, and unknown directory names are left alone.
+
 ## Extending the project
 
 - New CLI options: parse in the command family, validate shared semantics in `config`, then pass values to the owning module. Keep help and usage examples consistent.

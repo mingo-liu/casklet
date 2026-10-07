@@ -47,6 +47,11 @@ func OpenStore() (*Store, error) {
 			return nil, err
 		}
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := store.recoverTransactions(ctx); err != nil {
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -146,6 +151,9 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 		if err := ValidateName(name); err != nil {
 			return Record{}, err
 		}
+	}
+	if err := store.recoverTransactions(ctx); err != nil {
+		return Record{}, err
 	}
 	bootID, err := currentBootID()
 	if err != nil {
@@ -360,6 +368,9 @@ func (store *Store) Get(ctx context.Context, ref string) (Record, error) {
 }
 
 func (store *Store) List(ctx context.Context) ([]Record, error) {
+	if err := store.recoverTransactions(ctx); err != nil {
+		return nil, err
+	}
 	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return nil, err
@@ -456,6 +467,14 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if !record.Terminal() {
 		return ErrNotTerminal
 	}
+	if err := store.recoverTransactions(ctx); err != nil {
+		return err
+	}
+	deletion, err := store.transactionLock(ctx, true)
+	if err != nil {
+		return err
+	}
+	defer deletion.Close()
 	logLock, _, err := store.lockLog(ctx, id, false)
 	if err != nil {
 		return err
@@ -500,6 +519,12 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 		return err
 	}
 	if err := syncDirectory(store.root); err != nil {
+		return err
+	}
+	// Publication is complete. Recursive deletion is fenced by the stable
+	// transaction lock, so logs and metadata for other containers can proceed.
+	lock.Close()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(tombstone); err != nil {

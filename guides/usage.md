@@ -203,7 +203,7 @@ limited to 64 MiB total. `logs -f` follows output; `--tail` accepts 0–1000000.
 If log storage is temporarily busy beyond its bounded lock wait, the affected
 chunk is discarded, `log_truncated` is set, and capture resumes for later output.
 The completion error reports that loss. Logs and metadata for other containers
-can continue during rotation.
+can continue during rotation or deletion.
 `inspect` reports environment names without values. `stats` returns one sample;
 CPU 100% means one busy core, and unavailable metrics are `N/A` or JSON `null`.
 
@@ -218,6 +218,11 @@ contains failure stages rather than private error messages. `wait` still returns
 the command's exit code. Resources that could not be safely cleaned remain
 available for recovery. A foreground command that exits zero but encounters an
 infrastructure error returns 125 from the CLI.
+
+Interrupted container creation and removal leave private transaction directories.
+Later management operations reclaim verified abandoned transactions automatically.
+Directories with live leases, unsafe ownership or permissions, or mounted
+subtrees are preserved; unsafe artifacts produce a diagnostic.
 
 ## IPv4 networking
 
