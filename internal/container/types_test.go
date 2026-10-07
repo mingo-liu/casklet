@@ -49,6 +49,8 @@ func TestRecordValidation(t *testing.T) {
 		func(r *Record) { r.CreatedAt = time.Time{} },
 		func(r *Record) { r.Command = nil },
 		func(r *Record) { code := 256; r.ExitCode = &code },
+		func(r *Record) { r.CleanupFailures = []string{"private /path"} },
+		func(r *Record) { r.CleanupFailures = []string{"cgroup.remove", "cgroup.remove"} },
 	} {
 		record := valid
 		mutate(&record)

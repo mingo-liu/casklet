@@ -51,6 +51,7 @@ func Supervisor(id string, generations ...uint64) int {
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := store.Complete(ctx, id, generation, func(record *Record) {
+		record.CleanupFailures = containerruntime.CleanupStages(runErr)
 		finished := time.Now().UTC()
 		record.FinishedAt, record.ExitCode, record.LogTruncated = &finished, &code, truncated
 		record.State = StateFailed

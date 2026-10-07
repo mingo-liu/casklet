@@ -31,26 +31,27 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
-	LogLocking   bool             `json:"log_locking,omitempty"`
-	Generation   uint64           `json:"generation"`
-	LaunchAt     *time.Time       `json:"launch_at,omitempty"`
-	PreviousExit *ExecutionResult `json:"previous_exit,omitempty"`
-	StopTimeout  *time.Duration   `json:"stop_timeout,omitempty"`
-	RetainRootFS bool             `json:"retain_rootfs"`
-	Version      int              `json:"version"`
-	ID           string           `json:"id"`
-	BootID       string           `json:"boot_id,omitempty"`
-	Name         string           `json:"name"`
-	State        string           `json:"state"`
-	CreatedAt    time.Time        `json:"created_at"`
-	StartedAt    *time.Time       `json:"started_at,omitempty"`
-	FinishedAt   *time.Time       `json:"finished_at,omitempty"`
-	ExitCode     *int             `json:"exit_code,omitempty"`
-	Error        string           `json:"error,omitempty"`
-	RunPath      string           `json:"run_path,omitempty"`
-	Cgroup       string           `json:"cgroup,omitempty"`
-	LogTruncated bool             `json:"log_truncated,omitempty"`
-	Command      []string         `json:"command"`
+	LogLocking      bool             `json:"log_locking,omitempty"`
+	CleanupFailures []string         `json:"cleanup_failures,omitempty"`
+	Generation      uint64           `json:"generation"`
+	LaunchAt        *time.Time       `json:"launch_at,omitempty"`
+	PreviousExit    *ExecutionResult `json:"previous_exit,omitempty"`
+	StopTimeout     *time.Duration   `json:"stop_timeout,omitempty"`
+	RetainRootFS    bool             `json:"retain_rootfs"`
+	Version         int              `json:"version"`
+	ID              string           `json:"id"`
+	BootID          string           `json:"boot_id,omitempty"`
+	Name            string           `json:"name"`
+	State           string           `json:"state"`
+	CreatedAt       time.Time        `json:"created_at"`
+	StartedAt       *time.Time       `json:"started_at,omitempty"`
+	FinishedAt      *time.Time       `json:"finished_at,omitempty"`
+	ExitCode        *int             `json:"exit_code,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	RunPath         string           `json:"run_path,omitempty"`
+	Cgroup          string           `json:"cgroup,omitempty"`
+	LogTruncated    bool             `json:"log_truncated,omitempty"`
+	Command         []string         `json:"command"`
 }
 
 // Terminal reports whether a supervisor has finished the container.
@@ -107,17 +108,39 @@ func validateRecord(record Record, id string) error {
 	if record.ExitCode != nil && (*record.ExitCode < 0 || *record.ExitCode > 255) {
 		return errors.New("invalid container exit code")
 	}
+	if record.PreviousExit != nil {
+		if err := validateCleanupFailures(record.PreviousExit.CleanupFailures); err != nil {
+			return err
+		}
+	}
+	return validateCleanupFailures(record.CleanupFailures)
+}
+
+func validateCleanupFailures(stages []string) error {
+	seen := make(map[string]bool)
+	for _, stage := range stages {
+		switch stage {
+		case "cgroup.kill", "cgroup.empty", "cgroup.remove", "run.remove", "init.wait", "exec.close", "terminal.close":
+		default:
+			return errors.New("invalid cleanup failure stage")
+		}
+		if seen[stage] {
+			return errors.New("duplicate cleanup failure stage")
+		}
+		seen[stage] = true
+	}
 	return nil
 }
 
 // ExecutionResult is a retained completion receipt for one container execution.
 type ExecutionResult struct {
-	Generation uint64     `json:"generation"`
-	StartedAt  *time.Time `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at"`
-	ExitCode   *int       `json:"exit_code"`
+	CleanupFailures []string   `json:"cleanup_failures,omitempty"`
+	Generation      uint64     `json:"generation"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	ExitCode        *int       `json:"exit_code"`
 }
 
 func executionResult(record Record) ExecutionResult {
-	return ExecutionResult{Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
+	return ExecutionResult{CleanupFailures: append([]string(nil), record.CleanupFailures...), Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
 }

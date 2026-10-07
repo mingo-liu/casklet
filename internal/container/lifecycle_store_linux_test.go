@@ -66,7 +66,7 @@ func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
 	record := createTestRecord(t, store, "receipt-recovery")
 	code := 11
 	now := time.Now().UTC()
-	saved := ExecutionResult{Generation: 0, StartedAt: &now, FinishedAt: &now, ExitCode: &code}
+	saved := ExecutionResult{CleanupFailures: []string{"cgroup.remove"}, Generation: 0, StartedAt: &now, FinishedAt: &now, ExitCode: &code}
 	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), saved, maxRecordBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,38 @@ func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := store.Get(context.Background(), record.ID)
-	if err != nil || recovered.ExitCode == nil || *recovered.ExitCode != 11 || recovered.State != StateExited {
+	if err != nil || recovered.ExitCode == nil || *recovered.ExitCode != 11 || recovered.State != StateExited || len(recovered.CleanupFailures) != 1 || recovered.CleanupFailures[0] != "cgroup.remove" {
 		t.Fatalf("receipt recovery=%+v error=%v", recovered, err)
+	}
+}
+
+func TestCleanupFailuresSurviveRestartInExecutionReceipt(t *testing.T) {
+	store := testStore(t)
+	record := createTestRecord(t, store, "cleanup-receipt")
+	code := 7
+	if err := store.Complete(context.Background(), record.ID, 0, func(r *Record) {
+		now := time.Now().UTC()
+		r.State, r.StartedAt, r.FinishedAt, r.ExitCode = StateExited, &now, &now, &code
+		r.CleanupFailures = []string{"cgroup.remove"}
+		r.Error = "cleanup cgroup.remove: private path"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operation, err := store.AcquireOperation(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer operation.Close()
+	next, err := store.BeginExecution(context.Background(), record.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next.CleanupFailures) != 0 || next.Error != "" || next.PreviousExit == nil || len(next.PreviousExit.CleanupFailures) != 1 {
+		t.Fatalf("restart did not separate cleanup results: %+v", next)
+	}
+	result, done, err := store.Completion(context.Background(), record.ID, 0)
+	if err != nil || !done || result.ExitCode == nil || *result.ExitCode != 7 || len(result.CleanupFailures) != 1 {
+		t.Fatalf("cleanup completion lost: %+v done=%v err=%v", result, done, err)
 	}
 }
 

@@ -212,6 +212,12 @@ returns `124`, and configuration/startup errors return `125`. Diagnostics go to
 stderr. Argument errors link to the relevant command help. Lifecycle errors
 include recovery commands, such as stopping a running container before removal
 or listing containers after a failed lookup. A completed command keeps its exit code during descendant cleanup.
+For detached containers, `inspect` reports cleanup failures separately in the
+`cleanup_failures` array; `previous_exit` retains them after a restart. The array
+contains failure stages rather than private error messages. `wait` still returns
+the command's exit code. Resources that could not be safely cleaned remain
+available for recovery. A foreground command that exits zero but encounters an
+infrastructure error returns 125 from the CLI.
 
 ## IPv4 networking
 

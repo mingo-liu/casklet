@@ -18,18 +18,20 @@ import (
 )
 
 type backgroundRecord struct {
-	ID           string     `json:"id"`
-	Generation   uint64     `json:"generation"`
-	Name         string     `json:"name"`
-	State        string     `json:"state"`
-	CreatedAt    time.Time  `json:"created_at"`
-	StartedAt    *time.Time `json:"started_at"`
-	FinishedAt   *time.Time `json:"finished_at"`
-	ExitCode     *int       `json:"exit_code"`
-	Error        string     `json:"error"`
-	Command      []string   `json:"command"`
-	LogTruncated bool       `json:"log_truncated"`
-	RunPath      string     `json:"run_path"`
+	CleanupFailures []string   `json:"cleanup_failures"`
+	Cgroup          string     `json:"cgroup"`
+	ID              string     `json:"id"`
+	Generation      uint64     `json:"generation"`
+	Name            string     `json:"name"`
+	State           string     `json:"state"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	ExitCode        *int       `json:"exit_code"`
+	Error           string     `json:"error"`
+	Command         []string   `json:"command"`
+	LogTruncated    bool       `json:"log_truncated"`
+	RunPath         string     `json:"run_path"`
 }
 
 func backgroundCommand(ctx context.Context, args ...string) (int, string, string, error) {

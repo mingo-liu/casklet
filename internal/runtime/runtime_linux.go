@@ -105,10 +105,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		}
 		if err := run.remove(); err != nil {
 			fmt.Fprintf(stderr, "mini-docker: cleanup %s: %v\n", run.path, err)
-			runErr = errors.Join(runErr, err)
-			if code == 0 {
-				code = 125
-			}
+			runErr = errors.Join(runErr, cleanupFailure("run.remove", err))
 		}
 	}()
 	if observer != nil {
@@ -153,22 +150,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		return code, err
 	}
 	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), stopGrace)
-		defer cancel()
-		if err := group.Kill(); err != nil {
-			fmt.Fprintf(stderr, "mini-docker: kill cgroup %s: %v\n", group.Path(), err)
-		}
-		if err := group.WaitEmpty(ctx); err != nil {
-			run.keep = true
-			fmt.Fprintf(stderr, "mini-docker: preserve %s: cgroup cleanup: %v\n", run.path, err)
-			return
-		}
-		if oom, err := group.OOMKilled(); err == nil && oom {
-			fmt.Fprintln(stderr, "mini-docker: container exceeded its memory limit (OOM)")
-		}
-		if err := group.Close(); err != nil {
-			fmt.Fprintf(stderr, "mini-docker: remove cgroup %s: %v\n", group.Path(), err)
-		}
+		runErr = errors.Join(runErr, cleanupWorkload(group, run, stderr))
 	}()
 	if err := run.record(group.Path()); err != nil {
 		return code, err
@@ -180,7 +162,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, errors.New("managed exec is unavailable for terminal runs")
 		}
 		defer func() {
-			runErr = errors.Join(runErr, executor.Close())
+			runErr = errors.Join(runErr, cleanupFailure("exec.close", executor.Close()))
 			ipc.CloseFiles(namespaces)
 			if executable != nil {
 				executable.Close()
@@ -279,7 +261,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 				waitConsumed = true
 			case <-time.After(stopGrace):
 				run.keep = true
-				fmt.Fprintf(stderr, "mini-docker: init did not exit; preserve %s\n", run.path)
+				runErr = errors.Join(runErr, cleanupFailure("init.wait", errors.New("init did not exit before the cleanup deadline")))
 			}
 		}
 	}()
@@ -384,10 +366,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 					terminalErrors = bridge.errors
 					defer func() {
 						if err := bridge.close(stdout); err != nil {
-							runErr = errors.Join(runErr, err)
-							if code == 0 {
-								code = 125
-							}
+							runErr = errors.Join(runErr, cleanupFailure("terminal.close", err))
 						}
 					}()
 				}

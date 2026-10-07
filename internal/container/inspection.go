@@ -15,6 +15,7 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
+	CleanupFailures    []string         `json:"cleanup_failures"`
 	Generation         uint64           `json:"generation"`
 	PreviousExit       *ExecutionResult `json:"previous_exit"`
 	FilesystemRetained bool             `json:"filesystem_retained"`
@@ -76,7 +77,8 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	}
 	logSize, logFiles := cfg.LogRetention()
 	return Inspection{
-		Generation: record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
+		CleanupFailures: append([]string{}, record.CleanupFailures...),
+		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
 		Config: InspectionConfig{LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,

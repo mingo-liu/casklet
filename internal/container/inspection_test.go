@@ -15,8 +15,15 @@ func TestInspectionPublicConfiguration(t *testing.T) {
 		Env: []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="}, Memory: 64 << 20, PidsLimit: 32,
 		CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
 	record := Record{ID: "id", Name: "worker", State: StateFailed, CreatedAt: time.Now(),
-		RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error"}
+		RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error", CleanupFailures: []string{"cgroup.remove"}}
 	got := inspectRecord(record, cfg)
+	if len(got.CleanupFailures) != 1 || got.CleanupFailures[0] != "cgroup.remove" {
+		t.Fatal("inspection omitted cleanup failures")
+	}
+	got.CleanupFailures[0] = "run.remove"
+	if record.CleanupFailures[0] != "cgroup.remove" {
+		t.Fatal("inspection aliases cleanup failures")
+	}
 	if got.Config.Workdir != "/" || got.Config.User.UID != 1000 || got.Config.Timeout != "30s" ||
 		got.Limits.CPUs != 0.25 || got.Limits.MemoryBytes != 64<<20 || got.Limits.CPUPeriodUsec != 100000 {
 		t.Fatalf("incorrect public configuration: %+v", got)

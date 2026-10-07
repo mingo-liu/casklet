@@ -142,6 +142,15 @@ failure cannot indefinitely block the workload.
 Active supervisors from an older engine keep using the metadata lock; readers
 honor that protocol until completion or a new supervisor enables log locking.
 
+Runtime cleanup returns typed failures without changing the command's exit
+code. The supervisor stores sanitized `cleanup_failures` stages in both the
+record and its execution receipt, and detailed diagnostics in the private error
+field and logs. Public inspection exposes stages without private error text.
+Restart clears current failures and retains the previous execution's stages.
+Failed cgroup emptying or removal preserves the run directory and its recovery
+receipt. Foreground CLI invocations report infrastructure errors as status 125
+when the command would otherwise return zero.
+
 ## Extending the project
 
 - New CLI options: parse in the command family, validate shared semantics in `config`, then pass values to the owning module. Keep help and usage examples consistent.
