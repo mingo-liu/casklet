@@ -8,13 +8,13 @@ command -v systemd-run >/dev/null 2>&1 || fail 'systemd-run is required'
 command -v readelf >/dev/null 2>&1 || fail 'readelf is required (install binutils)'
 project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
-binary=${MINI_DOCKER_BINARY:-$project/bin/mdocker}
+binary=${MINI_DOCKER_BINARY:-$project/bin/mdocker-engine}
 rootfs=${MINI_DOCKER_ROOTFS:-$project/rootfs/busybox}
-canonical_binary=$(realpath -e -- "$binary" 2>/dev/null) || fail "runtime binary not found: $binary (run make build first)"
+canonical_binary=$(realpath -e -- "$binary" 2>/dev/null) || fail "runtime binary not found: $binary (run make engine first)"
 canonical_rootfs=$(realpath -e -- "$rootfs" 2>/dev/null) || fail "rootfs not found: $rootfs (run make rootfs first)"
 binary=$canonical_binary
 rootfs=$canonical_rootfs
-[ -x "$binary" ] || fail 'run make build first'
+[ -x "$binary" ] || fail 'run make engine first'
 [ -x "$rootfs/bin/busybox" ] || fail 'run make rootfs first'
 native_arch=$(go env GOHOSTARCH)
 case "$native_arch" in
