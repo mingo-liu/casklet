@@ -6,6 +6,62 @@ Run `mdocker help` for the complete option reference. Management flags precede
 the container ID or exact name; `run` and `exec` require `--` before the command.
 Host environment variables are never inherited by workloads.
 
+## macOS execution environment
+
+Run every public command on the Mac as your regular user. The client creates or
+starts the `mini-docker-runtime` Lima VM as needed and installs its bundled
+mini-docker Linux engine. The default rootfs is the VM's static BusyBox template:
+
+```sh
+mdocker run -- /bin/sh
+mdocker doctor
+mdocker rootfs ./rootfs/busybox
+```
+
+An explicit `--rootfs DIRECTORY`, `image import DIRECTORY`, or bind source refers
+to a Mac directory. Relative template/import paths resolve against the Mac's
+current directory. Host symlinks are resolved before translating a path into its
+shared guest location. Workload command arguments, environment values, and
+container paths are passed unchanged; shell expansion happens only when you
+explicitly run a shell in the container.
+
+The home directory is shared writable with the VM. Additional directories can
+be configured before first use with `mdocker machine init --mount DIRECTORY`.
+Only directories inside configured writable shares are accepted. The writable
+container rootfs, image store, records, and logs live on the VM disk; bind mounts
+provide live access to shared Mac files. File ownership, executable permissions,
+case sensitivity, and filesystem events follow the shared filesystem's behavior.
+
+```sh
+mdocker machine init --cpus 4 --memory 4 --disk 20
+mdocker machine status
+mdocker machine stop
+mdocker machine start
+```
+
+Initialization creates the VM and applies resources; `start` is repeatable.
+`status` does not create a VM. Stopping the machine terminates running containers
+and preserves their data. After starting it again, use `start` or `restart` to
+run retained containers. Engine updates occur automatically when a different
+client build is used, without replacing container or image storage.
+
+CPU, memory, and process limits apply inside the VM and are additionally bounded
+by VM resources. User namespace mappings and rootless identities refer to Linux
+guest accounts. The Mac client does not escalate host privileges. The engine
+uses the guest's passwordless sudo and systemd delegation when required.
+
+Published ports use two stages: VM-to-container NAT and Lima forwarding back to
+the Mac. TCP and UDP support Mac addresses `127.0.0.1` (local access) and `0.0.0.0`
+(all interfaces); other explicit host addresses are currently rejected. Host
+port 22 is reserved by Lima. Port availability is checked on the Mac before
+launch; forwarding discovery is asynchronous and can take a few seconds. An
+external process claiming the port after that check can still prevent
+forwarding. Lima startup forces its gRPC forwarder so UDP is supported.
+Only the engine's dedicated published-port addresses are forwarded; other VM
+services are excluded. `inspect` currently reports guest filesystem and network
+addresses. `--rootfs` and imports must contain Linux executables matching the
+Mac/VM CPU architecture; macOS binaries are not container workloads.
+
 ## Resource and execution options
 
 ```sh
@@ -41,7 +97,7 @@ mdocker image rm "$image_id"
 ```
 
 Images are immutable, content-addressed local snapshots. Use the full
-`sha256:` ID and exactly one of `--rootfs` or `--image`. Imports copy the source;
+`sha256:` ID with `--image`. Omitting both source options uses the built-in BusyBox template. Imports copy the source;
 later source changes do not alter the image. Running copies are independent.
 Deletion is blocked while an image is leased or referenced by a retained
 container. Remove those containers first. There is no registry or layer support.
@@ -76,7 +132,10 @@ printf 'hello\n' | mdocker exec -i worker -- /bin/cat
 
 `-t` allocates a terminal and merges stdout/stderr; add `-i` for input. `-it`
 requires terminal stdin. Foreground runs without `-t` forward stdin by default;
-exec does not. Detached runs reject terminal/input options.
+exec does not. Detached runs reject terminal/input options. The client forwards
+external termination signals, and a separate watchdog cleans up foreground
+sessions if the Mac client exits abruptly. Detached containers remain independent
+of their launching client.
 
 Exec requires a running detached container and kernel support for `clone3` with
 `CLONE_INTO_CGROUP`. It shares the container namespaces, filesystem, identity,
@@ -125,8 +184,8 @@ mdocker run -d --name web --rootfs ./rootfs/busybox \
 ```
 
 Default `--network none` provides loopback only. `bridge` adds a veth pair,
-shared bridge, IPv4 masquerading, and DNS configuration. It requires root,
-`iproute2`, `nftables`, and `conntrack`. Repeat `--dns` for up to three non-loopback
+shared bridge, IPv4 masquerading, and DNS configuration inside the VM. The guest
+engine requires root, `iproute2`, `nftables`, and `conntrack`, configured automatically. Repeat `--dns` for up to three non-loopback
 IPv4 servers; otherwise upstream IPv4 resolvers are discovered on the host.
 
 Publish up to 32 mappings with
@@ -154,17 +213,15 @@ Choose host ranges reserved for the runtime. Copied rootfs ownership is shifted
 to mapped root without following symlinks; bind ownership stays unchanged.
 User namespaces support foreground execution and loopback networking only.
 
-For rootless execution, run as your regular Linux login user:
+For rootless execution, run the macOS client as your regular user:
 
 ```sh
 mdocker run --rootless --rootfs ./rootfs/busybox -- /bin/sh -c 'id; hostname'
 ```
 
-Rootless mode maps container `0:0` to the caller's UID/GID and uses a delegated
-systemd user scope without sudo. It requires a directory template, a private
-`/run/user/UID`, and delegated memory/PID controllers (CPU when limited), including
-writable swap limits, OOM grouping, and `cgroup.kill`. Ubuntu AppArmor must allow
-user namespaces for the executable: the VM setup installs the scoped profile
-[dev/apparmor/mini-docker](../dev/apparmor/mini-docker) for `/usr/local/bin/mdocker`.
-For a development binary, select the loaded profile with
-`aa-exec -p mini-docker-rootless -- ./bin/mdocker run --rootless ...`.
+Rootless mode maps container `0:0` to the VM login user's UID/GID and uses a
+delegated systemd user scope without guest sudo. It requires a directory
+rootfs and supports foreground execution with loopback-only networking.
+The product VM automatically configures the private user runtime directory,
+cgroup delegation, and AppArmor user namespace permission for the guest engine.
+Explicit UID/GID mapping ranges refer to guest Linux identities, not Mac accounts.
