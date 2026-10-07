@@ -63,10 +63,10 @@ mdocker machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 - [使用指南](guides/usage.md)：文件、镜像、网络、安全与生命周期管理（英文）。
 - [开发指南](guides/development.md)：构建、测试与故障排查（英文）。
 - [架构说明](ARCHITECTURE.md)：宿主机与虚拟机的边界及资源归属（英文）。
-- `mdocker help`：命令语法与选项。
+- `mdocker help`：命令概览；`mdocker COMMAND --help`：具体命令的语法、选项与示例。
 
 ```sh
-make fmt-check test vet test-race
+make fmt-check test vet test-race vuln
 make test-macos # 在运行时虚拟机中执行真实命令；需要时会自动创建虚拟机。
 ```
 
