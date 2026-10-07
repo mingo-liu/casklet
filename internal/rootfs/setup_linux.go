@@ -29,6 +29,17 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 			return err
 		}
 	}
+	// Bind pinned host devices: creating device nodes requires host privileges,
+	// which user-namespace root does not have.
+	var devices []*os.File
+	defer func() { closeMountSources(devices) }()
+	for _, name := range []string{"null", "zero", "random", "urandom", "tty"} {
+		fd, err := unix.Open("/dev/"+name, unix.O_PATH|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return fmt.Errorf("pin host device %s: %w", name, err)
+		}
+		devices = append(devices, os.NewFile(uintptr(fd), name))
+	}
 	sources, err := openMountSources(mounts, root)
 	if err != nil {
 		return err
@@ -58,16 +69,15 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	if err := unix.Mount("tmpfs", "/dev", "tmpfs", unix.MS_NOSUID|unix.MS_NOEXEC, "size=1m,mode=0755"); err != nil {
 		return fmt.Errorf("mount dev: %w", err)
 	}
-	for _, node := range []struct {
-		name  string
-		minor uint32
-	}{{"null", 3}, {"zero", 5}, {"random", 8}, {"urandom", 9}} {
-		path := "/dev/" + node.name
-		if err := unix.Mknod(path, unix.S_IFCHR|0666, int(unix.Mkdev(1, node.minor))); err != nil {
-			return fmt.Errorf("create %s: %w", path, err)
-		}
-		if err := os.Chmod(path, 0666); err != nil {
+	for i, name := range []string{"null", "zero", "random", "urandom", "tty"} {
+		target := "/dev/" + name
+		file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
+		if err != nil {
 			return err
+		}
+		file.Close()
+		if err := unix.Mount(fmt.Sprintf("/proc/self/fd/%d", devices[i].Fd()), target, "", unix.MS_BIND, ""); err != nil {
+			return fmt.Errorf("bind device %s: %w", name, err)
 		}
 	}
 	for _, link := range []struct{ name, target string }{{"fd", "/proc/self/fd"}, {"stdin", "fd/0"}, {"stdout", "fd/1"}, {"stderr", "fd/2"}} {

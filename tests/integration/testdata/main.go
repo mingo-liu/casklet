@@ -14,6 +14,10 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "security":
+		securityProbe(true)
+	case "security-unconfined":
+		securityProbe(false)
 	case "network-server":
 		networkServer(true)
 	case "network-service":

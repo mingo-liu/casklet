@@ -8,7 +8,7 @@ Foreground execution, interactive terminals, background container management, in
 
 Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. Foreground execution uses a delegated systemd scope; detached execution creates its own delegated service. Background management requires `/usr/bin/systemd-run` and `/usr/bin/systemctl`.
 
-Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, managed volumes, or rootless execution.
+Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries or managed volumes. Rootless execution is available for foreground, loopback-only directory-based runs.
 
 ## Development VM on macOS
 
@@ -49,7 +49,7 @@ printf 'hello\n' | mdocker run \
 
 `make build` produces `bin/mdocker`; after building, `sudo make install` installs it as `/usr/local/bin/mdocker` inside the Linux VM. Run `mdocker` from any directory on that host, or use `./bin/mdocker` directly without installing. `make install PREFIX=/your/prefix` selects another installation prefix; ensure its `bin` directory is on `PATH`.
 
-The CLI automatically uses `sudo` when root privileges are needed. Foreground runs and `doctor` create a delegated `systemd-run --scope` when the current process is not already in a suitable scope. Detached runs create their own delegated services; management and image commands do not create foreground scopes. Standard input, terminal handling, and command exit status pass through. Help and argument errors do not invoke `sudo`. This is a Linux CLI; on macOS, enter the VM with `limactl shell mini-docker` first.
+The CLI automatically uses `sudo` when root privileges are needed. `run --rootless` keeps the caller identity and uses `systemd-run --user --scope`; it never invokes sudo. Foreground runs and `doctor` create a delegated `systemd-run --scope` when the current process is not already in a suitable scope. Detached runs create their own delegated services; management and image commands do not create foreground scopes. Standard input, terminal handling, and command exit status pass through. Help and argument errors do not invoke `sudo`. This is a Linux CLI; on macOS, enter the VM with `limactl shell mini-docker` first.
 
 Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax. The old `scripts/run-linux.sh` remains a compatibility launcher using `sudo systemd-run --scope` and accepts `MINI_DOCKER_BINARY` to select another executable; `bin/mini-docker` is a compatibility symlink to `mdocker`.
 
@@ -69,7 +69,11 @@ mdocker run --rootfs ./rootfs/busybox \
 | `--cpus` | `0` means unlimited; accept `0.01` through `1000`, with up to three decimal places. Set total container CPU bandwidth over a 100ms period; `0.5` allows half of one CPU. Require the delegated CPU controller only when a limit is requested. |
 | `--env KEY=VALUE` | Repeat to add variables; the last assignment wins. Accept empty values and `=` in values. Names use letters, digits, and underscores and cannot start with a digit. Override the fixed `PATH=/bin:/usr/bin`, `HOME=/`, and `LANG=C` defaults without inheriting host variables. |
 | `--workdir /PATH` | Use an existing directory inside the container; default `/`. Missing or inaccessible directories fail startup. Command lookup uses the configured `PATH` and working directory inside the container. |
-| `--user UID[:GID]` | Use numeric IDs from `0` through `4294967294`; GID defaults to UID. Clear supplementary groups and all capability sets before starting the command. The container init uses the same identity to supervise descendants. |
+| `--user UID[:GID]` | Use numeric IDs from `0` through `4294967294`; GID defaults to UID. Clear all capability sets and, except in rootless mode, supplementary groups before starting the command. The container init uses the same identity to supervise descendants. |
+| `--seccomp PROFILE` | Default `default` filters dangerous syscalls on every thread and descendant. `unconfined` disables only seccomp; capability reduction and `no_new_privs` remain enforced. |
+| `--userns` | Foreground user namespace; supply repeatable `--uid-map` and `--gid-map` ranges. Requires `--network none`. |
+| `--uid-map C:H:N`, `--gid-map C:H:N` | Map `N` container IDs starting at `C` to host IDs starting at `H`. Root and the selected command identity must be mapped; ranges cannot overlap. |
+| `--rootless` | Foreground run without host privileges. Implies a user namespace with container `0:0` mapped to the caller UID/GID; requires a directory rootfs and loopback networking. |
 | `--read-only` | Mount the copied root read-only. `/tmp` remains a writable, size-limited tmpfs; minimal `/dev` remains usable. Bind mounts retain their own read-only setting. The default root is writable; detached containers retain it until removal. |
 | `--network MODE` | Default `none` supplies loopback only. `bridge` adds IPv4 connectivity through a veth pair, a shared bridge, and NAT. |
 | `--dns IPV4` | Repeat for up to three non-loopback IPv4 resolvers; requires `--network bridge`. Otherwise discover upstream IPv4 resolvers on the Linux host. |
@@ -77,11 +81,54 @@ mdocker run --rootfs ./rootfs/busybox \
 | `--stop-timeout DURATION` | Grace before forcing shutdown after a signal, timeout, or main-process exit with remaining descendants. Default `5s`; accept `0s` through `1m`. Zero skips the grace period. |
 | `--mount type=bind,source=/HOST,target=/PATH[,readonly]` | Bind an existing host directory into the container. Repeat for up to 32 independent targets; add `readonly` to prevent container writes. |
 
-Numeric users are not user-namespace mappings and do not enable rootless execution. Copied files remain owned by root; custom rootfs templates must grant the selected user access to its working directory and executables. `make rootfs` now generates a traversable root directory; regenerate an older template if its root mode is `0700`.
+The `--user` flag selects the container identity; `--userns` and `--rootless` control host mappings. Copied files belong to container root (mapped host root when enabled); custom rootfs templates must grant the selected user access to its working directory and executables. `make rootfs` now generates a traversable root directory; regenerate an older template if its root mode is `0700`.
 
 CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu). The supervisor stays outside the workload quota; init, command processes, and their threads share the limit.
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
+
+## Security capabilities
+
+The default [seccomp BPF](https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html) profile applies after filesystem/network/terminal setup and privilege reduction, before workload startup. Linux TSYNC synchronizes existing Go threads; fork/exec descendants inherit it. Background runs, restart, and managed `exec` use the saved profile, and `inspect.config.seccomp` reports it. Existing configurations without the field receive the default profile when started again.
+
+The profile returns `EPERM` for namespace creation/entry, mounting (including the newer mount API), ptrace/process-memory access, BPF, perf events, kernel keyrings, userfaultfd, io_uring setup, module loading, kexec, reboot, swap, quota changes, and terminal input injection. Ordinary thread/process creation is allowed; clone namespace flags are blocked. `clone3` returns `ENOSYS` for libc fallback because its pointer arguments cannot be inspected safely. Foreign syscall ABIs, including x32 on amd64, terminate the process with `SIGSYS`. Unlisted syscalls remain allowed: this is a denylist, not a complete security boundary. Unsupported kernels fail startup instead of silently dropping protection. Use `--seccomp unconfined` only when a trusted workload needs a blocked syscall.
+
+Use explicit [user namespace mappings](https://man7.org/linux/man-pages/man7/user_namespaces.7.html) for a privileged foreground run:
+
+```sh
+mdocker run --rootfs ./rootfs/busybox --userns \
+  --uid-map 0:200000:1000 --uid-map 1000:400000:1000 \
+  --gid-map 0:300000:2000 --user 1000:1234 \
+  -- /bin/sh -c 'id; cat /proc/self/uid_map; cat /proc/self/gid_map'
+```
+
+Each UID and GID mapping contains `CONTAINER_ID:HOST_ID:SIZE`, with at most 340 nonoverlapping ranges per type. IDs end at `4294967294`; zero-length or overflowing ranges and unmapped command IDs are rejected. Choose host ranges reserved for this runtime: assigning an existing host user's ID grants that user's ordinary filesystem access. Template contents are copied as container root; source ownership is not preserved. The private copy is shifted to the mapped host root without following symlinks. Bind source ownership remains unchanged; files created through writable binds use mapped host IDs. Grant access to the mapped host identity before mounting a source. Numeric non-root users still need appropriate permissions inside the template.
+
+User namespaces currently support foreground runs, directory templates or local images, read-only roots, bind mounts, resource limits, signals, timeouts, and terminals. Detached management and bridge networking are rejected. Foreground commands have no managed `exec` endpoint. Mapped privileged runs use a root-owned coordination directory at `/tmp/mini-docker-userns/`, with private run directories owned by the mapped root and root-owned lock/receipt files. Ordinary runs keep `/var/lib/mini-docker/runs/`; rootless runs use `/run/user/UID/mini-docker/runs/`. Normal completion removes private copies; subsequent runs in the same mode recover verified abandoned directories after workloads have exited. Keep host ranges and runtime directories under administrator control.
+
+For rootless execution, start from a real Linux login session with a running systemd user manager and a private `/run/user/UID`. The cgroups v2 user subtree must delegate `memory`, `pids`, and, for CPU quotas, `cpu`; it must expose writable `memory.swap.max`, `memory.oom.group`, and `cgroup.kill`. Every invocation creates a fresh user scope and enforces the same limits as privileged execution. Missing controllers, denied user namespaces, and inaccessible controls fail with `125`; there is no fallback to sudo or unlimited resources. The host administrator may need to configure controller delegation for `user@.service` on systems with restricted defaults.
+
+```sh
+# Run as your regular Linux login user, without sudo.
+mdocker run --rootless --rootfs ./rootfs/busybox --cpus 0.25 \
+  --memory 64m --pids-limit 32 --read-only \
+  -- /bin/sh -c 'id; cat /proc/self/uid_map; echo writable > /tmp/result'
+```
+
+Rootless mode maps only the caller's single UID/GID to container `0:0`. Other `--user` IDs, custom ranges, stored images, detached management, bridge networking, DNS, and publishing are unsupported. Directory binds are supported within the caller's existing access. No subordinate-ID helpers, registry integration, or rootless network proxy is required or provided. Linux denies `setgroups` for this unprivileged mapping, so the caller's existing supplementary host groups remain; unmapped groups can appear as overflow IDs inside the container. All capability sets are still cleared and `no_new_privs` is enforced. Device files are fixed binds of host null/zero/random/urandom/tty devices; temporary storage and devpts remain private and bounded.
+
+Ubuntu 24.04 and other AppArmor hosts may restrict unprivileged user namespace creation. Install the scoped profile from this repository for `/usr/local/bin/mdocker`, leaving the host's global user namespace policy in place:
+
+```sh
+sudo apt-get install -y apparmor-utils
+sudo install -m 0644 dev/apparmor/mini-docker /etc/apparmor.d/mini-docker
+sudo apparmor_parser -r /etc/apparmor.d/mini-docker
+# For an uninstalled development binary, explicitly select the loaded profile:
+aa-exec -p mini-docker-rootless -- ./bin/mdocker run --rootless \
+  --rootfs ./rootfs/busybox -- /bin/id
+```
+
+The profile permits user namespace creation; it does not bypass kernel ID-mapping rules or grant host capabilities. Customize its executable attachment when installing to another prefix. On hosts without AppArmor user namespace restrictions, this profile is unnecessary. Integration tests use the existing logged-in account from `SUDO_UID`, or `MINI_DOCKER_ROOTLESS_UID` when invoking the suite directly as root; that account needs a running user manager. Load the development profile first when the host requires it. Run `./scripts/test-linux.sh -test.run TestSecurity` for the focused security suite.
 
 ## External networking
 
@@ -169,13 +216,13 @@ mdocker run --rootfs ./rootfs/busybox \
   -- /bin/cat /data/result
 ```
 
-`--mount` is repeatable, accepts exactly `type=bind`, `source`, `target`, and the optional bare `readonly` flag, and defaults to writable. Option order is flexible; unknown or duplicate options fail. Paths must be clean absolute paths without `.` or `..` components, trailing slashes, NUL, or newlines; this comma-separated syntax cannot represent paths containing commas. Only existing real source directories are supported, with no symlinks in any path component. Sources are never created automatically. The host root, `/proc`, `/sys`, `/dev`, runtime storage at `/var/lib/mini-docker`, and sources overlapping the rootfs template are rejected, including ancestors of protected paths.
+`--mount` is repeatable, accepts exactly `type=bind`, `source`, `target`, and the optional bare `readonly` flag, and defaults to writable. Option order is flexible; unknown or duplicate options fail. Paths must be clean absolute paths without `.` or `..` components, trailing slashes, NUL, or newlines; this comma-separated syntax cannot represent paths containing commas. Only existing real source directories are supported, with no symlinks in any path component. Sources are never created automatically. The host root, `/proc`, `/sys`, `/dev`, runtime storage at `/var/lib/mini-docker` and `/tmp/mini-docker-userns`, rootless runtime storage for rootless runs, and sources overlapping the rootfs template are rejected, including ancestors of protected paths.
 
 Targets cannot be `/`, `/tmp`, or overlap `/proc`, `/dev`, or `/sys`. `/tmp/data` is allowed and is mounted after the runtime's temporary filesystem. Missing target directories are created in the private filesystem with mode `0755` (subject to the runtime umask). Existing target directories are covered for this run; files and symlinks in any target component fail startup. Duplicate or nested targets are rejected regardless of option order. Mounting a directory hides the target's previous contents without copying or deleting them.
 
 Bind mounts are nonrecursive: mounted descendants of a source are excluded, and their underlying directories are visible instead. Sources are pinned by directory descriptors during init setup, so later renames do not redirect an installed mount. Mount propagation is private to the container. Every bind enforces `nosuid` and `nodev`, preserves source restrictions such as `noexec` and an existing read-only flag, and applies `readonly` only to the container mount. A writable bind remains writable with `--read-only`; a read-only bind remains read-only with a writable root. The workload cannot remount it after capabilities are dropped.
 
-Host file ownership and permissions are preserved; `--user` uses those numeric host IDs directly. Grant that user access to the source before running, and avoid mounting sensitive host directories. Writable binds intentionally let the workload modify or delete source data. The runtime never changes source ownership, deletes source directories, or removes their contents during exit, timeout, startup rollback, supervisor recovery, or `rm`. Filesystem writes outside binds remain temporary. Concurrent containers can share a source; ordinary filesystem concurrency rules apply.
+Host file ownership and permissions are preserved; `--user` uses direct host IDs by default and mapped host IDs when a user namespace is enabled. Grant that user access to the source before running, and avoid mounting sensitive host directories. Writable binds intentionally let the workload modify or delete source data. The runtime never changes source ownership, deletes source directories, or removes their contents during exit, timeout, startup rollback, supervisor recovery, or `rm`. Filesystem writes outside binds remain temporary. Concurrent containers can share a source; ordinary filesystem concurrency rules apply.
 
 The same options work with detached containers. `exec` inherits existing mounts and cannot add new ones. `inspect` includes `config.mounts`, an array of `source`, `target`, and `read_only` objects (empty when no mounts are configured); these explicitly configured host paths remain visible after exit.
 
@@ -326,7 +373,7 @@ Integration tests require the dedicated VM and fail when prerequisites are missi
 
 ## Next milestones
 
-External IPv4 networking is implemented. Security capabilities remain planned. Lifecycle extensions are implemented with retained filesystems and per-execution exit receipts. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+External IPv4 networking is implemented. Seccomp filtering, explicit foreground user namespace mappings, and bounded rootless foreground execution are implemented. Lifecycle extensions are implemented with retained filesystems and per-execution exit receipts. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 

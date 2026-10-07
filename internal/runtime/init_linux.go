@@ -61,6 +61,14 @@ func Init() int {
 		signal.Notify(signals, syscall.SIGHUP, syscall.SIGQUIT)
 	}
 	defer signal.Stop(signals)
+	// The pinned launcher may be outside mapped IDs; discard it before setup.
+	if cfg.UserNS {
+		fd := 5
+		if cfg.TTY {
+			fd = 6
+		}
+		unix.Close(fd)
+	}
 	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly, cfg.Mounts...); err != nil {
 		return fail(err)
 	}
@@ -102,6 +110,9 @@ func Init() int {
 		}
 	}
 	if err := reducePrivileges(cfg.User); err != nil {
+		return fail(err)
+	}
+	if err := installSeccomp(cfg.SeccompProfile()); err != nil {
 		return fail(err)
 	}
 	if err := encoder.Encode(message{Kind: "ready"}); err != nil {
@@ -313,9 +324,16 @@ func reducePrivileges(user *config.User) error {
 	// Change the init identity as well as its children. This lets init discard
 	// SETUID/SETGID completely before exec while still signaling its workload.
 	// The syscall package applies these changes to every Go thread when built
-	// without cgo. Clear inherited supplementary groups even for UID 0.
-	if err := syscall.Setgroups(nil); err != nil {
-		return fmt.Errorf("clear supplementary groups: %w", err)
+	// without cgo. Clear supplementary groups unless the unprivileged user
+	// namespace mapping permanently denies setgroups.
+	setgroups, err := os.ReadFile("/proc/self/setgroups")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if strings.TrimSpace(string(setgroups)) != "deny" {
+		if err := syscall.Setgroups(nil); err != nil {
+			return fmt.Errorf("clear supplementary groups: %w", err)
+		}
 	}
 	if user != nil {
 		if err := syscall.Setresgid(int(user.GID), int(user.GID), int(user.GID)); err != nil {

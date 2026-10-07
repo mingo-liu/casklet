@@ -70,7 +70,7 @@ func ValidateMounts(mounts []BindMount, rootfs string) error {
 				return fmt.Errorf("mount %s must be a clean absolute path other than / without NUL or newlines", entry.name)
 			}
 		}
-		for _, reserved := range []string{"/proc", "/sys", "/dev", "/var/lib/mini-docker"} {
+		for _, reserved := range []string{"/proc", "/sys", "/dev", "/var/lib/mini-docker", "/tmp/mini-docker-userns"} {
 			if pathsOverlap(mount.Source, reserved) {
 				return fmt.Errorf("mount source overlaps protected host path %s", reserved)
 			}

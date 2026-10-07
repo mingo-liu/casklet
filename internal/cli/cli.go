@@ -63,6 +63,11 @@ Run options:
   --network      none (loopback only, default) or bridge (IPv4 connectivity)
   --dns          IPv4 DNS server; repeat up to three times (bridge only)
   -p, --publish  [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]; repeat (bridge only)
+  --seccomp      default (deny dangerous syscalls) or unconfined
+  --userns       Use a user namespace (foreground only; requires UID/GID maps)
+  --uid-map      CONTAINER_ID:HOST_ID:SIZE; repeat for independent ranges
+  --gid-map      CONTAINER_ID:HOST_ID:SIZE; repeat for independent ranges
+  --rootless     Run as the caller with container 0:0 mapped to caller IDs
   --read-only    Mount the container root filesystem read-only
   --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
   --timeout      Command duration limit; 0 disables it (default: 0)
@@ -74,7 +79,8 @@ Exec options:
   --workdir      Existing absolute directory (default: container configuration)
   --timeout      Command duration limit; 0 disables it (default: 0)
 
-Containers require Linux, root privileges, and a delegated cgroups v2 scope.
+Containers require Linux and a delegated cgroups v2 scope.
+Rootless foreground runs use a user scope without sudo; other modes require root.
 mdocker automatically uses sudo when needed and creates a delegated scope
 for foreground runs. Help and invalid arguments do not require privileges.
 Management flags must precede the container identifier. ps lists active
@@ -130,6 +136,23 @@ func Parse(args []string) (Request, error) {
 	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
 	if r.Action == "run" {
+		fs.StringVar(&r.Config.Seccomp, "seccomp", "default", "seccomp profile")
+		fs.BoolVar(&r.Config.UserNS, "userns", false, "user namespace")
+		fs.BoolVar(&r.Config.Rootless, "rootless", false, "rootless foreground execution")
+		fs.Func("uid-map", "UID mapping", func(value string) error {
+			m, err := config.ParseIDMapping(value)
+			if err == nil {
+				r.Config.UIDMappings = append(r.Config.UIDMappings, m)
+			}
+			return err
+		})
+		fs.Func("gid-map", "GID mapping", func(value string) error {
+			m, err := config.ParseIDMapping(value)
+			if err == nil {
+				r.Config.GIDMappings = append(r.Config.GIDMappings, m)
+			}
+			return err
+		})
 		fs.StringVar(&r.Config.Image, "image", "", "local image ID")
 		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
 		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
@@ -280,6 +303,21 @@ func Parse(args []string) (Request, error) {
 	}
 	if r.Config.Workdir == "" {
 		return r, errors.New("--workdir must be an absolute path")
+	}
+	if r.Config.Seccomp == "" {
+		return r, errors.New("--seccomp requires default or unconfined")
+	}
+	if r.Config.Rootless {
+		r.Config.UserNS = true
+		if len(r.Config.UIDMappings) == 0 {
+			r.Config.UIDMappings = []config.IDMapping{{ContainerID: 0, HostID: uint32(os.Getuid()), Size: 1}}
+		}
+		if len(r.Config.GIDMappings) == 0 {
+			r.Config.GIDMappings = []config.IDMapping{{ContainerID: 0, HostID: uint32(os.Getgid()), Size: 1}}
+		}
+	}
+	if r.Config.UserNS && r.Detach {
+		return r, errors.New("user namespaces currently support foreground runs only")
 	}
 	if err := r.Config.ValidateExecution(); err != nil {
 		return r, err

@@ -76,3 +76,11 @@ func TestMountTargetOverlapAndLimits(t *testing.T) {
 		t.Fatal("execution validation ignored mounts")
 	}
 }
+
+func TestMountRejectsMappedRuntimeStorage(t *testing.T) {
+	for _, source := range []string{"/tmp", "/tmp/mini-docker-userns", "/tmp/mini-docker-userns/run-a/rootfs"} {
+		if err := ValidateMounts([]BindMount{{Source: source, Target: "/data"}}, ""); err == nil {
+			t.Fatalf("accepted mapped runtime storage %s", source)
+		}
+	}
+}

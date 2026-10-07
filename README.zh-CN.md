@@ -8,7 +8,7 @@
 
 使用专用的 Ubuntu 24.04 开发 VM，具备 systemd、Linux 6.8 或更新版本、cgroups v2、root 权限、Go 1.25 或更新版本，以及 `busybox-static`。必需的 cgroup 接口包括 `memory`、`pids`、`memory.swap.max` 和 `cgroup.kill`。前台执行使用获得 cgroup 委派授权的 systemd scope；后台执行会创建自己的委派服务。后台管理需要 `/usr/bin/systemd-run` 和 `/usr/bin/systemctl`。
 
-此运行时适合运行可信程序。命令默认以容器 UID 0 运行，并削减 capabilities；可通过 `--user` 指定其他数字身份。它不为不可信代码提供安全保证。目前不支持镜像仓库、托管数据卷、容器对外联网或 rootless 执行。
+此运行时适合运行可信程序。命令默认以容器 UID 0 运行，并削减 capabilities；可通过 `--user` 指定其他数字身份。它不为不可信代码提供安全保证。目前不支持镜像仓库、托管数据卷。
 
 ## 在 macOS 上使用开发 VM
 
@@ -74,7 +74,7 @@ mdocker run --rootfs ./rootfs/busybox \
 | `--stop-timeout DURATION` | 收到信号、发生超时，或主进程退出但仍有后代进程时，强制停止前的宽限期。默认 `5s`；接受 `0s` 到 `1m`。零表示跳过宽限期。 |
 | `--mount type=bind,source=/HOST,target=/PATH[,readonly]` | 将 Linux 主机上已存在的目录绑定挂载到容器中。可重复指定，最多 32 个独立目标；添加 `readonly` 可禁止容器写入。 |
 
-数字用户身份不是用户命名空间映射，也不会启用 rootless 执行。复制的文件仍属于 root；自定义 rootfs 模板必须允许所选用户访问工作目录和可执行文件。`make rootfs` 现在会生成可遍历的根目录；如果旧模板的根目录权限为 `0700`，请重新生成。
+The `--user` flag selects the container identity; `--userns` and `--rootless` control host mappings. Copied files belong to container root. See [Security capabilities](README.md#security-capabilities) for mapping behavior and rootless supplementary groups. Templates must grant the selected identity access to the working directory and executables.
 
 CPU 配额使用 cgroups v2 的 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu)。监督进程不受工作负载配额限制；init、命令进程及其线程共享该限制。
 
@@ -316,3 +316,7 @@ exec 测试覆盖共享命名空间和文件系统、继承配置与身份、流
 - `tests/integration/`：特权 Linux 行为测试。
 
 生成的二进制文件、rootfs 模板和 `docs/` 不纳入 Git。本文件提供 README 的简体中文版；其他项目文档、代码、注释、诊断信息和提交消息使用英语。
+
+## Security capabilities update
+
+Seccomp filtering is now enabled by default for run and exec; `--seccomp unconfined` disables the filter while retaining capability restrictions. Foreground runs support explicit `--userns --uid-map C:H:N --gid-map C:H:N` mappings. `--rootless` maps container `0:0` to the caller and uses a delegated systemd user scope without sudo, with enforced memory, PID, and CPU limits. User namespace modes currently require foreground, loopback-only execution; rootless mode also requires a directory template and a single caller mapping. See [Security capabilities](README.md#security-capabilities) for complete usage, prerequisites, AppArmor configuration, supplementary-group behavior, and limitations.

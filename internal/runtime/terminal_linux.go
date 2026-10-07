@@ -38,12 +38,6 @@ func prepareTerminalMounts() error {
 	if err := os.Symlink("pts/ptmx", "/dev/ptmx"); err != nil {
 		return err
 	}
-	if err := unix.Mknod("/dev/tty", unix.S_IFCHR|0666, int(unix.Mkdev(5, 0))); err != nil {
-		return err
-	}
-	if err := os.Chmod("/dev/tty", 0666); err != nil {
-		return err
-	}
 	return nil
 }
 

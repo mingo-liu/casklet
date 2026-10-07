@@ -24,7 +24,10 @@ func prepareLaunch(args []string, request Request) error {
 	if err != nil {
 		return fmt.Errorf("resolve runtime executable: %w", err)
 	}
-	if os.Geteuid() != 0 {
+	if request.Config.Rootless && os.Geteuid() == 0 {
+		return errors.New("--rootless requires an unprivileged host user")
+	}
+	if os.Geteuid() != 0 && !request.Config.Rootless {
 		if _, err := exec.LookPath("/usr/bin/sudo"); err != nil {
 			return errors.New("root privileges are required; install sudo or run mdocker as root")
 		}
@@ -51,6 +54,10 @@ func prepareLaunch(args []string, request Request) error {
 	if err := os.Setenv(scopeEnvironment, "1"); err != nil {
 		return err
 	}
-	command := append([]string{"systemd-run", "--scope", "--quiet", "--property=Delegate=memory pids cpu", "--", executable}, args...)
+	scopeArgs := []string{"systemd-run"}
+	if request.Config.Rootless {
+		scopeArgs = append(scopeArgs, "--user")
+	}
+	command := append(append(scopeArgs, "--scope", "--quiet", "--property=Delegate=memory pids cpu", "--", executable), args...)
 	return unix.Exec("/usr/bin/systemd-run", command, os.Environ())
 }

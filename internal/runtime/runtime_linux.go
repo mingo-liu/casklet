@@ -41,9 +41,14 @@ type message struct {
 }
 
 func Check(template string) error {
-	if os.Geteuid() != 0 {
-		return errors.New("container execution requires root; run mdocker as root")
+	return checkConfig(config.Config{RootFS: template})
+}
+
+func checkConfig(cfg config.Config) error {
+	if err := validateExecutionMode(cfg); err != nil {
+		return err
 	}
+	template := cfg.RootFS
 	if _, err := rootfs.Validate(template); err != nil {
 		return err
 	}
@@ -56,9 +61,15 @@ func Check(template string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), startupLimit)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, "__probe")
+	probeBinary, err := os.Open(exe)
+	if err != nil {
+		return err
+	}
+	defer probeBinary.Close()
+	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", "__probe")
+	cmd.ExtraFiles = []*os.File{probeBinary}
 	cmd.Env = baseEnvironment
-	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
+	cmd.SysProcAttr = namespaceAttributes(cfg)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("probe namespace capabilities: %w: %s", err, output)
 	}
@@ -76,6 +87,14 @@ func Probe() int {
 		return 125
 	}
 	if err := unix.Sethostname([]byte("mini-probe")); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 125
+	}
+	if err := reducePrivileges(nil); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 125
+	}
+	if err := installSeccomp("default"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 125
 	}
@@ -168,7 +187,10 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		defer lease.Close()
 		cfg.RootFS = tree
 	}
-	if err := Check(cfg.RootFS); err != nil {
+	if cfg.UserNS && (executor != nil || retainedRoot != "") {
+		return code, errors.New("user namespaces currently support foreground runs only")
+	}
+	if err := checkConfig(cfg); err != nil {
 		return code, err
 	}
 	template, err := rootfs.Validate(cfg.RootFS)
@@ -181,10 +203,10 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := rootfs.ValidateMountSources(cfg.Mounts, template); err != nil {
 		return code, err
 	}
-	if err := recoverRuns(prepareCtx, stderr); err != nil {
+	if err := recoverExecutionRuns(prepareCtx, stderr, cfg.Rootless, cfg.UserNS); err != nil {
 		return preparationError(err, signals)
 	}
-	run, err := createRun(prepareCtx)
+	run, err := createExecutionRun(prepareCtx, cfg.Rootless, cfg.UserNS)
 	if err != nil {
 		return preparationError(err, signals)
 	}
@@ -241,6 +263,17 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 				return code, err
 			}
 		}
+	}
+	if cfg.UserNS && !cfg.Rootless {
+		uid, _ := config.MappedID(0, cfg.UIDMappings)
+		gid, _ := config.MappedID(0, cfg.GIDMappings)
+		if err := os.Chown(run.path, int(uid), int(gid)); err != nil {
+			return code, err
+		}
+		run.owner = uid
+	}
+	if err := mapRootOwnership(prepareCtx.Err, cfg.RootFS, cfg); err != nil {
+		return code, fmt.Errorf("map rootfs ownership: %w", err)
 	}
 	if cfg.NetworkMode() == "bridge" {
 		servers, err := network.Resolvers(cfg.DNS)
@@ -343,7 +376,17 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		defer childTerminal.Close()
 		cmd.ExtraFiles = append(cmd.ExtraFiles, childTerminal)
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
+
+	if cfg.UserNS {
+		binary, err := os.Open(exe)
+		if err != nil {
+			return code, err
+		}
+		defer binary.Close()
+		cmd.ExtraFiles = append(cmd.ExtraFiles, binary)
+		cmd.Path = fmt.Sprintf("/proc/self/fd/%d", 2+len(cmd.ExtraFiles))
+	}
+	cmd.SysProcAttr = namespaceAttributes(cfg)
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start container init: %w", err)
 	}

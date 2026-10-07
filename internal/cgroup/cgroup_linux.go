@@ -28,9 +28,6 @@ func Check() error {
 }
 
 func delegation(cpuQuota int64) (string, error) {
-	if os.Geteuid() != 0 {
-		return "", errors.New("cgroup management requires root")
-	}
 	var fs unix.Statfs_t
 	if err := unix.Statfs(mountRoot, &fs); err != nil {
 		return "", fmt.Errorf("inspect cgroup mount: %w", err)
@@ -53,8 +50,14 @@ func delegation(cpuQuota int64) (string, error) {
 	}
 	marker := make([]byte, 32)
 	n, err := unix.Getxattr(dir, "user.delegate", marker)
-	if err != nil || string(marker[:n]) != "1" {
+	if os.Geteuid() == 0 && (err != nil || string(marker[:n]) != "1") {
 		return "", fmt.Errorf("cgroup %s is not marked user.delegate=1; run mdocker to create a delegated scope", dir)
+	}
+	if os.Geteuid() != 0 {
+		var stat unix.Stat_t
+		if err := unix.Stat(dir, &stat); err != nil || stat.Uid != uint32(os.Geteuid()) {
+			return "", errors.New("rootless cgroup delegation must be owned by the current user")
+		}
 	}
 	for _, name := range []string{"cgroup.controllers", "cgroup.type", "cgroup.procs"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {

@@ -442,6 +442,9 @@ func ExecInit() int {
 	if err := reducePrivileges(cfg.User); err != nil {
 		return fail(err)
 	}
+	if err := installSeccomp(cfg.SeccompProfile()); err != nil {
+		return fail(err)
+	}
 	if cfg.TTY {
 		// Credential changes may reset dumpability according to host policy.
 		if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {

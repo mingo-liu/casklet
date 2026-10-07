@@ -26,16 +26,20 @@ const (
 )
 
 type runDirectory struct {
-	path string
-	lock *os.File
-	keep bool
+	path  string
+	root  string
+	lock  *os.File
+	keep  bool
+	owner uint32
 }
 
 type runMetadata struct {
 	Cgroup string `json:"cgroup"`
 }
 
-func secureDirectory(path string) error {
+func secureDirectory(path string) error { return ownedDirectory(path, uint32(os.Geteuid())) }
+
+func ownedDirectory(path string, owner uint32) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -49,8 +53,8 @@ func secureDirectory(path string) error {
 		}
 		stat = &actual
 	}
-	if !info.IsDir() || info.Mode().Perm()&0022 != 0 || stat.Uid != 0 {
-		return fmt.Errorf("runtime directory must be a real root-owned directory without group or other write permissions: %s", path)
+	if !info.IsDir() || info.Mode().Perm()&0022 != 0 || stat.Uid != owner {
+		return fmt.Errorf("runtime directory must be real, owned by UID %d, and not writable by group or others: %s", owner, path)
 	}
 	return nil
 }
@@ -78,7 +82,9 @@ func openRunLock(path string, create bool) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), "run-lock")
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	var stat unix.Stat_t
+	statErr := unix.Fstat(fd, &stat)
+	if err != nil || statErr != nil || !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&0022 != 0 {
 		f.Close()
 		return nil, fmt.Errorf("invalid run lock: %s", path)
 	}
@@ -112,7 +118,7 @@ func createRunAt(ctx context.Context, root string) (*runDirectory, error) {
 		os.RemoveAll(path)
 		return nil, err
 	}
-	return &runDirectory{path: path, lock: lock}, nil
+	return &runDirectory{path: path, root: root, lock: lock, owner: uint32(os.Geteuid())}, nil
 }
 
 func (run *runDirectory) record(group string) error {
@@ -145,14 +151,16 @@ func (run *runDirectory) remove() error {
 	if run.keep {
 		return nil
 	}
-	if err := validateRunPath(runsRoot, run.path); err != nil {
+	if err := validateRunPath(run.root, run.path); err != nil {
 		return err
 	}
-	if err := secureDirectory(run.path); err != nil {
+	if err := ownedDirectory(run.path, run.owner); err != nil {
 		return err
 	}
-	if err := network.Cleanup(run.path); err != nil {
-		return fmt.Errorf("network cleanup: %w", err)
+	if run.root == runsRoot {
+		if err := network.Cleanup(run.path); err != nil {
+			return fmt.Errorf("network cleanup: %w", err)
+		}
 	}
 	return os.RemoveAll(run.path)
 }
@@ -395,8 +403,12 @@ func readRunState(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("run state must be a regular file")
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&0022 != 0 {
+		return nil, errors.New("run state must be a singly linked regular file owned by the supervisor without group or other write permissions")
 	}
 	if info.Size() > maxStateBytes {
 		return nil, errors.New("run state exceeds the size limit")
@@ -436,4 +448,63 @@ func cgroupEmpty(events string) (bool, error) {
 		return false, errors.New("missing populated counter")
 	}
 	return empty, nil
+}
+
+// Rootless state lives under the login manager's per-user runtime directory.
+// Ignore XDG_RUNTIME_DIR so an environment override cannot redirect recovery.
+func executionRunsRoot(rootless, userns bool) (string, error) {
+	if !rootless {
+		if !userns {
+			return runsRoot, ensureRunsRoot()
+		}
+		root := "/tmp/mini-docker-userns"
+		if err := os.Mkdir(root, 0711); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		if err := secureDirectory(root); err != nil {
+			return "", err
+		}
+		return root, nil
+	}
+	base := fmt.Sprintf("/run/user/%d", os.Geteuid())
+	if err := secureDirectory(base); err != nil {
+		return "", fmt.Errorf("rootless requires a login session with a private /run/user directory: %w", err)
+	}
+	root := filepath.Join(base, "mini-docker", "runs")
+	for _, dir := range []string{filepath.Dir(root), root} {
+		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		if err := secureDirectory(dir); err != nil {
+			return "", err
+		}
+	}
+	return root, nil
+}
+
+func createExecutionRun(ctx context.Context, rootless, userns bool) (*runDirectory, error) {
+	root, err := executionRunsRoot(rootless, userns)
+	if err != nil {
+		return nil, err
+	}
+	return createRunAt(ctx, root)
+}
+
+func recoverExecutionRuns(ctx context.Context, stderr io.Writer, rootless, userns bool) error {
+	root, err := executionRunsRoot(rootless, userns)
+	if err != nil {
+		return err
+	}
+	paths := productionStatePaths()
+	paths.runsRoot = root
+	if userns && !rootless {
+		paths.checkDirectory = func(path string) error {
+			var stat unix.Stat_t
+			if err := unix.Lstat(path, &stat); err != nil {
+				return err
+			}
+			return ownedDirectory(path, stat.Uid)
+		}
+	}
+	return recoverRunsAt(ctx, stderr, paths)
 }

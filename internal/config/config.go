@@ -27,6 +27,11 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	Seccomp     string         `json:"seccomp,omitempty"`
+	UserNS      bool           `json:"userns,omitempty"`
+	Rootless    bool           `json:"rootless,omitempty"`
+	UIDMappings []IDMapping    `json:"uid_mappings,omitempty"`
+	GIDMappings []IDMapping    `json:"gid_mappings,omitempty"`
 	Network     string         `json:"network,omitempty"`
 	DNS         []string       `json:"dns,omitempty"`
 	Publish     []PortMapping  `json:"publish,omitempty"`
@@ -53,6 +58,9 @@ var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if err := c.ValidateSecurity(); err != nil {
+		return err
+	}
 	if c.StopTimeout != nil {
 		if err := ValidateStopTimeout(*c.StopTimeout); err != nil {
 			return err
