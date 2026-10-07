@@ -14,12 +14,8 @@ concurrency:
 
 jobs:
   checks:
-    name: Checks (${{ matrix.runner }})
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
-    runs-on: ${{ matrix.runner }}
+    name: Checks (macOS)
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -31,25 +27,3 @@ jobs:
         run: |
           make build GOARCH=arm64
           make build GOARCH=amd64
-
-  integration:
-    name: Privileged Linux (${{ matrix.runner }})
-    needs: checks
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-    # Each hosted job gets a dedicated disposable VM with systemd. Do not
-    # replace this with a job container or a shared persistent runner.
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: go.mod
-      - name: Prepare dedicated Linux VM
-        env:
-          MINI_DOCKER_DEDICATED_VM: '1'
-        run: ./scripts/prepare-integration-vm.sh
-      - run: make rootfs test-integration

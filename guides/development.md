@@ -70,7 +70,10 @@ Snapshots include tracked and unignored source files, including the embedded
 rootfs helper, but exclude generated engines and host state. Use a fresh snapshot
 after changes. Engine tests need root, systemd, cgroups v2, namespaces, and network
 administration privileges, and must not run on a shared production Linux host.
-CI retains Linux engine checks and adds macOS builds with bundled engines.
+CI runs formatting, unit tests, static checks, and race detection on macOS,
+then builds arm64 and amd64 macOS clients with their bundled Linux engines.
+Run the macOS end-to-end suite and privileged Linux engine suite locally in
+their dedicated VMs; neither suite runs on hosted CI runners.
 
 ## Troubleshooting
 
