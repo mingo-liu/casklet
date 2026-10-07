@@ -109,7 +109,7 @@ exec /bin/sh`)
 	if code != 7 || stderr != "" || strings.Contains(out, "job control turned off") || strings.Contains(out, "can't access tty") {
 		t.Fatalf("interactive exec shell exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	assertExecTerminalReleased(t, id)
 	if logs := backgroundSuccess(t, "logs", name); strings.Contains(logs, "exec-terminal-ready") || strings.Contains(logs, "EXEC-AFTER-INT") {
 		t.Fatalf("terminal exec output entered background logs: %q", logs)
@@ -223,8 +223,8 @@ func TestExecTerminalConcurrentSessionsRemainIndependent(t *testing.T) {
 	if code, out, stderr := second.wait(t); code != 0 || !strings.Contains(out, "second-complete\r\n") || strings.Contains(out, "first-input") {
 		t.Fatalf("second exec session exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
-	assertExecCgroupRemoved(t, firstGroup)
-	assertExecCgroupRemoved(t, secondGroup)
+	assertCgroupRemoved(t, firstGroup)
+	assertCgroupRemoved(t, secondGroup)
 	waitBackground(t, id, "running")
 	assertExecTerminalReleased(t, id)
 }
@@ -301,7 +301,7 @@ func TestExecTerminalRestorationAndFailureCleanup(t *testing.T) {
 		if code, out, stderr := call.wait(t); code != 124 {
 			t.Fatalf("exec terminal timeout exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
-		assertExecCgroupRemoved(t, group)
+		assertCgroupRemoved(t, group)
 		assertExecTerminalReleased(t, id)
 	})
 	t.Run("signal", func(t *testing.T) {
@@ -311,7 +311,7 @@ func TestExecTerminalRestorationAndFailureCleanup(t *testing.T) {
 		if code, out, stderr := call.wait(t); code != 23 || !strings.Contains(out, "exec-stopped\r\n") {
 			t.Fatalf("exec terminal signal exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
-		assertExecCgroupRemoved(t, group)
+		assertCgroupRemoved(t, group)
 		assertExecTerminalReleased(t, id)
 	})
 	t.Run("client-interrupt", func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestExecTerminalRestorationAndFailureCleanup(t *testing.T) {
 		if code, out, stderr := call.wait(t); code != 130 {
 			t.Fatalf("exec client interruption exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
-		assertExecCgroupRemoved(t, group)
+		assertCgroupRemoved(t, group)
 		assertExecTerminalReleased(t, id)
 	})
 	t.Run("descendant", func(t *testing.T) {
@@ -335,7 +335,7 @@ exit 9`)
 		if code, out, stderr := call.wait(t); code != 9 {
 			t.Fatalf("exec terminal descendant exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
-		assertExecCgroupRemoved(t, group)
+		assertCgroupRemoved(t, group)
 		assertExecTerminalReleased(t, id)
 	})
 	waitBackground(t, id, "running")
@@ -349,7 +349,7 @@ func TestExecTerminalContainerStopRestoresHost(t *testing.T) {
 	if code, out, stderr := call.wait(t); code == 0 {
 		t.Fatalf("stopped container retained a successful ongoing exec: stdout=%q stderr=%q", out, stderr)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	waitBackground(t, id, "exited")
 	assertBackgroundUnitStopped(t, id)
 }
@@ -371,6 +371,6 @@ func TestExecTerminalSupervisorLossRestoresHost(t *testing.T) {
 	if code, out, stderr := call.wait(t); code == 0 {
 		t.Fatalf("supervisor loss produced successful terminal exec exit: stdout=%q stderr=%q", out, stderr)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	assertBackgroundUnitStopped(t, id)
 }

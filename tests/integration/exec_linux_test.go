@@ -146,21 +146,6 @@ func execCgroup(t *testing.T, output string) string {
 	return ""
 }
 
-func assertExecCgroupRemoved(t *testing.T, group string) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(group); os.IsNotExist(err) {
-			return
-		} else if err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	events, _ := os.ReadFile(filepath.Join(group, "cgroup.events"))
-	t.Fatalf("exec cgroup retained after session completion: %s: %s", group, events)
-}
-
 func TestExecSharedNamespacesAndFilesystem(t *testing.T) {
 	name, id := execContainer(t, []string{"--hostname", "exec-host"})
 	out := execSuccess(t, nil, name, "/bin/sh", "-c", `
@@ -334,7 +319,7 @@ exit 9`)
 	if metadata.Cgroup == "" || group == metadata.Cgroup || !strings.HasPrefix(group, metadata.Cgroup+string(os.PathSeparator)) {
 		t.Fatalf("exec did not use a child of the workload cgroup: exec=%s workload=%s", group, metadata.Cgroup)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	if out := execSuccess(t, nil, id, "/bin/echo", "still-running"); out != "still-running\n" {
 		t.Fatal("exec cleanup stopped the container")
 	}
@@ -407,7 +392,7 @@ func TestExecCPUQuota(t *testing.T) {
 	if after <= before {
 		t.Fatalf("exec CPU workload did not increase ancestor throttling: before=%d after=%d", before, after)
 	}
-	assertExecCgroupRemoved(t, execCgroup(t, out))
+	assertCgroupRemoved(t, execCgroup(t, out))
 	waitBackground(t, id, "running")
 	t.Logf("exec quarter-CPU quota: elapsed_us=%d cpu_us=%d throttled_periods=%d", elapsedUS, cpuUS, after-before)
 }
@@ -433,7 +418,7 @@ func TestExecSignalAndTimeoutPreserveContainer(t *testing.T) {
 			if code != test.want {
 				t.Fatalf("exec signal did not preserve trap exit: exit=%d stdout=%q stderr=%q", code, out, stderr)
 			}
-			assertExecCgroupRemoved(t, group)
+			assertCgroupRemoved(t, group)
 			waitBackground(t, id, "running")
 		})
 	}
@@ -442,7 +427,7 @@ func TestExecSignalAndTimeoutPreserveContainer(t *testing.T) {
 	if code != 124 || !strings.Contains(out, "timeout-ready\n") {
 		t.Fatalf("exec timeout exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
-	assertExecCgroupRemoved(t, execCgroup(t, out))
+	assertCgroupRemoved(t, execCgroup(t, out))
 	waitBackground(t, id, "running")
 }
 
@@ -454,7 +439,7 @@ func TestExecClientLossCleansOnlyItsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	call.wait(t)
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	waitBackground(t, id, "running")
 	if out := execSuccess(t, nil, name, "/bin/echo", "replacement-session"); out != "replacement-session\n" {
 		t.Fatal("lost client prevented a replacement exec")
@@ -475,8 +460,8 @@ func TestExecParallelSessions(t *testing.T) {
 			t.Fatalf("parallel exec failed: exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
 	}
-	assertExecCgroupRemoved(t, firstGroup)
-	assertExecCgroupRemoved(t, secondGroup)
+	assertCgroupRemoved(t, firstGroup)
+	assertCgroupRemoved(t, secondGroup)
 	waitBackground(t, id, "running")
 }
 
@@ -506,7 +491,7 @@ func TestExecConcurrentStopAndRemove(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("stop allowed an unfinished exec to succeed: stdout=%q stderr=%q", out, stderr)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	waitBackground(t, id, "exited")
 	backgroundSuccess(t, "rm", id)
 	if _, ok := findBackground(backgroundRecords(t, true), id); ok {
@@ -525,7 +510,7 @@ func TestExecContainerMainExitTerminatesSession(t *testing.T) {
 		t.Fatalf("main exit allowed ongoing exec to succeed: stdout=%q stderr=%q", out, stderr)
 	}
 	assertBackgroundExit(t, waitBackground(t, id, "exited"), 17)
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 }
 
 func TestExecSupervisorLossRecoversSession(t *testing.T) {
@@ -547,7 +532,7 @@ func TestExecSupervisorLossRecoversSession(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("supervisor loss produced successful exec exit: stdout=%q stderr=%q", out, stderr)
 	}
-	assertExecCgroupRemoved(t, group)
+	assertCgroupRemoved(t, group)
 	if _, err := os.Stat(record.RunPath); !os.IsNotExist(err) {
 		t.Fatalf("supervisor recovery retained exec runtime directory: %v", err)
 	}

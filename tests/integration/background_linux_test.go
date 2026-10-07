@@ -549,9 +549,7 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 		t.Fatalf("lost supervisor did not retain an unknown command exit: %+v", record)
 	}
 	assertBackgroundUnitStopped(t, id)
-	if _, err := os.Stat(group); !os.IsNotExist(err) {
-		t.Fatalf("supervisor recovery left its cgroup %s: %v", group, err)
-	}
+	assertCgroupRemoved(t, group)
 	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
 	if err != nil {
 		t.Fatal(err)

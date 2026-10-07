@@ -64,7 +64,10 @@ make rootfs test-integration
 ```
 
 This installs dependencies and the scoped AppArmor profile, enables user
-lingering, and delegates controllers to the test user's systemd manager.
+lingering, and delegates controllers to the test user's systemd manager. It
+also permits IPv4 forwarding to/from `mdocker0` in the host iptables chain, so
+Docker's default `FORWARD DROP` policy on hosted runners does not block the
+network fixtures. Other interfaces, policies, and firewall rules are preserved.
 
 Run focused checks after the integration binary and helpers have been built:
 
