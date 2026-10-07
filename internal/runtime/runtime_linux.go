@@ -10,96 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/cgroup"
 	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/image"
 	"github.com/mingo-liu/mini-docker/internal/ipc"
 	"github.com/mingo-liu/mini-docker/internal/network"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
-
-const (
-	namespaceFlags = unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWIPC | unix.CLONE_NEWNET
-	startupLimit   = 30 * time.Second
-	stopGrace      = 5 * time.Second
-)
-
-var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
-
-type message struct {
-	Kind        string         `json:"kind"`
-	Config      *config.Config `json:"config,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	ExitCode    int            `json:"exit_code,omitempty"`
-	StopTimeout time.Duration  `json:"stop_timeout,omitempty"`
-	ExecEnabled bool           `json:"exec_enabled,omitempty"`
-}
-
-func Check(template string) error {
-	return checkConfig(config.Config{RootFS: template})
-}
-
-func checkConfig(cfg config.Config) error {
-	if err := validateExecutionMode(cfg); err != nil {
-		return err
-	}
-	template := cfg.RootFS
-	if _, err := rootfs.Validate(template); err != nil {
-		return err
-	}
-	if err := cgroup.Check(); err != nil {
-		return err
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), startupLimit)
-	defer cancel()
-	probeBinary, err := os.Open(exe)
-	if err != nil {
-		return err
-	}
-	defer probeBinary.Close()
-	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", "__probe")
-	cmd.ExtraFiles = []*os.File{probeBinary}
-	cmd.Env = baseEnvironment
-	cmd.SysProcAttr = namespaceAttributes(cfg)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("probe namespace capabilities: %w: %s", err, output)
-	}
-	return nil
-}
-
-// Probe runs only in a temporary namespace child created by Check.
-func Probe() int {
-	if os.Getpid() != 1 {
-		fmt.Fprintln(os.Stderr, "mini-docker: namespace probe requires container PID 1")
-		return 125
-	}
-	if err := enableLoopback(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 125
-	}
-	if err := unix.Sethostname([]byte("mini-probe")); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 125
-	}
-	if err := reducePrivileges(nil); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 125
-	}
-	if err := installSeccomp("default"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 125
-	}
-	return 0
-}
 
 func Run(cfg config.Config, stdin, stdout, stderr *os.File) (code int, runErr error) {
 	return RunWithObserver(cfg, stdin, stdout, stderr, nil)
@@ -159,48 +79,16 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			}
 		}
 	}()
-	retainedReady := false
-	if retainedRoot != "" {
-		info, err := os.Lstat(retainedRoot)
-		if err == nil {
-			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				return code, errors.New("retained rootfs must be a real directory")
-			}
-			if err := rootfs.CheckUnmounted(retainedRoot); err != nil {
-				return code, err
-			}
-			retainedReady = true
-			cfg.RootFS = retainedRoot
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return code, err
-		}
-	}
-	if cfg.Image != "" && !retainedReady {
-		images, err := image.OpenStore()
-		if err != nil {
-			return preparationError(err, signals)
-		}
-		_, tree, lease, err := images.Acquire(prepareCtx, cfg.Image)
-		if err != nil {
-			return preparationError(err, signals)
-		}
-		defer lease.Close()
-		cfg.RootFS = tree
-	}
 	if cfg.UserNS && (executor != nil || retainedRoot != "") {
 		return code, errors.New("user namespaces currently support foreground runs only")
 	}
-	if err := checkConfig(cfg); err != nil {
-		return code, err
-	}
-	template, err := rootfs.Validate(cfg.RootFS)
+	source, retainedReady, err := acquireRunTemplate(prepareCtx, cfg, retainedRoot)
 	if err != nil {
-		return code, err
+		return preparationError(err, signals)
 	}
-	if cfg.Image == "" && image.IsStorePath(template) {
-		return code, errors.New("stored image filesystems require --image")
-	}
-	if err := rootfs.ValidateMountSources(cfg.Mounts, template); err != nil {
+	defer source.Close()
+	cfg.RootFS = source.Path
+	if err := checkConfig(cfg); err != nil {
 		return code, err
 	}
 	if err := recoverExecutionRuns(prepareCtx, stderr, cfg.Rootless, cfg.UserNS); err != nil {
@@ -228,41 +116,9 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("record container preparation: %w", err)
 		}
 	}
-	if retainedRoot == "" {
-		cfg.RootFS = filepath.Join(run.path, "rootfs")
-		if err := os.Mkdir(cfg.RootFS, 0700); err != nil {
-			return code, err
-		}
-		if err := rootfs.Copy(prepareCtx, template, cfg.RootFS); err != nil {
-			return preparationError(fmt.Errorf("prepare rootfs: %w", err), signals)
-		}
-	} else {
-		cfg.RootFS = retainedRoot
-		if !retainedReady {
-			stage, err := os.MkdirTemp(filepath.Dir(retainedRoot), ".rootfs-")
-			if err != nil {
-				return code, err
-			}
-			defer os.RemoveAll(stage)
-			if err := rootfs.Copy(prepareCtx, template, stage); err != nil {
-				return preparationError(fmt.Errorf("prepare retained rootfs: %w", err), signals)
-			}
-			if err := rootfs.SyncTree(prepareCtx, stage); err != nil {
-				return preparationError(err, signals)
-			}
-			if err := os.Rename(stage, retainedRoot); err != nil {
-				return code, err
-			}
-			parent, err := os.Open(filepath.Dir(retainedRoot))
-			if err != nil {
-				return code, err
-			}
-			err = parent.Sync()
-			parent.Close()
-			if err != nil {
-				return code, err
-			}
-		}
+	cfg.RootFS, err = prepareRunRootFS(prepareCtx, source.Path, run.path, retainedRoot, retainedReady)
+	if err != nil {
+		return preparationError(err, signals)
 	}
 	if cfg.UserNS && !cfg.Rootless {
 		uid, _ := config.MappedID(0, cfg.UIDMappings)

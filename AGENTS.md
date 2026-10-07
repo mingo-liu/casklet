@@ -2,9 +2,9 @@
 
 ## Project Structure & Module Organization
 
-`cmd/mini-docker/` contains the executable entry point. `internal/cli`, `internal/runtime`, `internal/rootfs`, and `internal/cgroup` implement parsing, process supervision, filesystems, and resource limits. Unit tests live beside their packages; privileged Linux tests and bounded helpers live in `tests/integration/`. Development scripts are in `scripts/`, and the Lima configuration is in `dev/`.
+`cmd/mini-docker/` contains the executable entry point. `internal/cli` owns parsing and presentation; `internal/container` owns durable lifecycle management; `internal/runtime` owns process supervision and isolation. `internal/template` resolves rootfs/image sources and owns image leases, while `internal/rootfs`, `internal/image`, `internal/cgroup`, `internal/network`, and `internal/ipc` provide resource operations. See `ARCHITECTURE.md` for module boundaries and ownership. Unit tests live beside their packages; privileged Linux tests and bounded helpers live in `tests/integration/`. Development scripts are in `scripts/`, and the Lima configuration is in `dev/`.
 
-`docs/` contains local design notes and is excluded from Git. Do not force-add its contents. Keep generated `bin/`, `rootfs/`, and runtime state untracked.
+`README.md` is the quick start; maintained usage and development documentation lives in `guides/`. `docs/` contains local design notes and is excluded from Git. Do not force-add its contents. Keep generated `bin/`, `rootfs/`, and runtime state untracked.
 
 ## Build, Test, and Development Commands
 
