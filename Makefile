@@ -5,7 +5,7 @@ ROOTFS ?= rootfs/busybox
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-.PHONY: build install fmt vet test rootfs test-integration
+.PHONY: build install fmt fmt-check vet test test-race rootfs test-integration
 
 build:
 	mkdir -p bin
@@ -19,13 +19,19 @@ install:
 	install -m 0755 bin/mdocker "$(DESTDIR)$(PREFIX)/bin/mdocker"
 
 fmt:
-	$(GO) fmt ./...
+	gofmt -w cmd internal tests
+
+fmt-check:
+	./scripts/check-format.sh
 
 vet:
 	$(GO) vet ./...
 
 test:
 	$(GO) test ./...
+
+test-race:
+	$(GO) test -race ./...
 
 rootfs:
 	./scripts/prepare-rootfs.sh "$(ROOTFS)"

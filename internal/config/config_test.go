@@ -110,3 +110,20 @@ func TestStoppingTimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestLogRetentionDefaultsAndValidation(t *testing.T) {
+	size, files := (Config{}).LogRetention()
+	if size != 4<<20 || files != 4 {
+		t.Fatalf("defaults = %d, %d", size, files)
+	}
+	for _, cfg := range []Config{{LogMaxSize: -1}, {LogMaxFiles: -1}, {LogMaxSize: 1023}, {LogMaxSize: 65 << 20}, {LogMaxFiles: 17}, {LogMaxSize: 8 << 20, LogMaxFiles: 9}} {
+		if cfg.ValidateLogs() == nil {
+			t.Errorf("accepted %+v", cfg)
+		}
+	}
+	for _, cfg := range []Config{{}, {LogMaxSize: 1024, LogMaxFiles: 1}, {LogMaxSize: 64 << 20, LogMaxFiles: 1}, {LogMaxSize: 4 << 20, LogMaxFiles: 16}} {
+		if err := cfg.ValidateLogs(); err != nil {
+			t.Errorf("rejected %+v: %v", cfg, err)
+		}
+	}
+}

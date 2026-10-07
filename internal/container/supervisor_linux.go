@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,25 +72,15 @@ func Supervisor(id string, generations ...uint64) int {
 func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	cfg, err := store.Config(ctx, id)
-	if err != nil {
-		cancel()
-		return 125, err, false
-	}
-	log, err := store.OpenLog(ctx, id, true)
 	cancel()
 	if err != nil {
 		return 125, err, false
 	}
-	defer log.Close()
 	root, err := store.RootFS(context.Background(), id)
 	if err != nil {
 		return 125, err, false
 	}
 	if err := store.cleanupRootFSStages(id); err != nil {
-		return 125, err, false
-	}
-	stat, err := log.Stat()
-	if err != nil {
 		return 125, err, false
 	}
 	record, err := store.Get(context.Background(), id)
@@ -115,17 +104,12 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 		err       error
 	}
 	completed := make(chan captureResult, 1)
+	log := &rotatingLog{store: store, id: id, cfg: cfg, truncated: previouslyTruncated}
 	go func() {
-		truncated := previouslyTruncated
-		var err error
-		if previouslyTruncated || MaxLogBytes-stat.Size() < int64(len(logLimitMessage)) {
-			_, err = io.Copy(io.Discard, reader)
-			truncated = true
-		} else {
-			truncated, err = captureLog(reader, log, MaxLogBytes-stat.Size())
-		}
-		completed <- captureResult{truncated, errors.Join(err, log.Sync())}
+		err := captureLog(reader, log)
+		completed <- captureResult{log.truncated, errors.Join(err, log.Sync())}
 	}()
+
 	observer := func(event containerruntime.Event) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

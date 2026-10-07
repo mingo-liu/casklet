@@ -3,6 +3,7 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -374,21 +375,20 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 		return err
 	}
 	generation := record.Generation
-	file, err := store.OpenLog(ctx, record.ID, false)
+	cfg, err := store.Config(ctx, record.ID)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	stat, err := file.Stat()
+	data, cursor, err := store.logSnapshot(ctx, record.ID, cfg, logCursor{}, generation)
 	if err != nil {
 		return err
 	}
-	if stat.Size() > MaxLogBytes {
-		return errors.New("container log exceeds the retained size limit")
-	}
-	// Snapshot initial length so a continuously writing command cannot hold a
-	// non-following logs request open. New bytes are streamed only with --follow.
-	if err := copyInitialLog(file, stat.Size(), tail, out); err != nil || !follow {
+	defer func() {
+		if cursor.pin != nil {
+			cursor.pin.Close()
+		}
+	}()
+	if err := copyInitialLog(bytes.NewReader(data), int64(len(data)), tail, out); err != nil || !follow {
 		return err
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -397,12 +397,20 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, file); err != nil {
+		data, next, err := store.logSnapshot(ctx, record.ID, cfg, cursor, generation)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		cursor = next
+		if _, err := io.Copy(out, bytes.NewReader(data)); err != nil {
 			return err
 		}
 		record, err = store.Get(ctx, record.ID)
 		if errors.Is(err, ErrNotFound) {
-			return nil // The open inode remains readable after concurrent removal.
+			return nil // The captured snapshot remains valid after concurrent removal.
 		}
 		if err != nil {
 			return err
@@ -415,7 +423,15 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 			return err
 		}
 		if record.Terminal() || record.Generation != generation {
-			_, err := io.Copy(out, file) // Completion is written after the log closes.
+			data, next, err := store.logSnapshot(ctx, record.ID, cfg, cursor, generation)
+			cursor = next
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(out, bytes.NewReader(data))
 			return err
 		}
 		select {

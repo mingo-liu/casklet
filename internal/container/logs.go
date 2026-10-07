@@ -6,49 +6,25 @@ import (
 	"io"
 )
 
-const logLimitMessage = "\nmini-docker: log limit reached; remaining output was discarded.\n"
-
-// captureLog retains a bounded prefix and keeps draining after the limit or a
-// storage failure, so an unattended command cannot block forever on its output.
-func captureLog(input io.Reader, output io.Writer, limit int64) (bool, error) {
-	if limit < int64(len(logLimitMessage)) {
-		return false, errors.New("log limit is too small")
-	}
-	remaining := limit - int64(len(logLimitMessage))
+// captureLog continues draining after storage failure so a workload cannot block
+// indefinitely on its output. Rotation is handled by the destination writer.
+func captureLog(input io.Reader, output io.Writer) error {
 	buffer := make([]byte, 32*1024)
-	truncated := false
 	var writeErr error
 	for {
 		n, readErr := input.Read(buffer)
 		if n > 0 && writeErr == nil {
-			keep := int64(n)
-			if keep > remaining {
-				keep = remaining
-			}
-			if keep > 0 {
-				written, err := output.Write(buffer[:keep])
-				writeErr = err
-				if written != int(keep) && writeErr == nil {
-					writeErr = io.ErrShortWrite
-				}
-				remaining -= keep
-			}
-			if int64(n) > keep && !truncated {
-				truncated = true
-				if writeErr == nil {
-					written, err := io.WriteString(output, logLimitMessage)
-					writeErr = err
-					if written != len(logLimitMessage) && writeErr == nil {
-						writeErr = io.ErrShortWrite
-					}
-				}
+			written, err := output.Write(buffer[:n])
+			writeErr = err
+			if written != n && writeErr == nil {
+				writeErr = io.ErrShortWrite
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				readErr = nil
 			}
-			return truncated, errors.Join(writeErr, readErr)
+			return errors.Join(writeErr, readErr)
 		}
 	}
 }
@@ -62,7 +38,7 @@ func copyInitialLog(file io.ReadSeeker, length int64, tail int, out io.Writer) e
 		_, err := file.Seek(length, io.SeekStart)
 		return err
 	}
-	// At most 16 MiB is retained. Reading this bounded snapshot preserves exact
+	// At most 64 MiB is retained. Reading this bounded snapshot preserves exact
 	// newline handling for tails, including a final unterminated line.
 	data, err := io.ReadAll(io.LimitReader(file, length))
 	if err != nil {

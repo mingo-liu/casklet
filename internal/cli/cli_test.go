@@ -550,3 +550,24 @@ func TestNetworkOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestLogRetentionOptions(t *testing.T) {
+	r, err := Parse([]string{"run", "-d", "--rootfs", "/tmp/r", "--log-max-size", "2m", "--log-max-files", "3", "--", "echo"})
+	if err != nil || r.Config.LogMaxSize != 2<<20 || r.Config.LogMaxFiles != 3 {
+		t.Fatalf("retention = %+v, %v", r.Config, err)
+	}
+	for _, options := range [][]string{
+		{"--log-max-size", "0"}, {"--log-max-size", "1023"}, {"--log-max-size", "65m"},
+		{"--log-max-files", "0"}, {"--log-max-files", "-1"}, {"--log-max-files", "17"},
+		{"--log-max-size", "8m", "--log-max-files", "9"},
+	} {
+		args := append([]string{"run", "-d", "--rootfs", "/tmp/r"}, options...)
+		args = append(args, "--", "echo")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted %q", args)
+		}
+	}
+	if _, err := Parse([]string{"run", "--rootfs", "/tmp/r", "--log-max-size", "1m", "--", "echo"}); err == nil {
+		t.Fatal("accepted foreground retention option")
+	}
+}

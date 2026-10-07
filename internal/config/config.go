@@ -27,6 +27,8 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	LogMaxSize  int64          `json:"log_max_size,omitempty"`
+	LogMaxFiles int            `json:"log_max_files,omitempty"`
 	Seccomp     string         `json:"seccomp,omitempty"`
 	UserNS      bool           `json:"userns,omitempty"`
 	Rootless    bool           `json:"rootless,omitempty"`
@@ -58,6 +60,9 @@ var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if err := c.ValidateLogs(); err != nil {
+		return err
+	}
 	if err := c.ValidateSecurity(); err != nil {
 		return err
 	}
@@ -152,4 +157,24 @@ func (c Config) StoppingTimeout() time.Duration {
 		return 5 * time.Second
 	}
 	return *c.StopTimeout
+}
+
+// LogRetention supplies defaults for older persisted configurations.
+func (c Config) LogRetention() (int64, int) {
+	size, files := c.LogMaxSize, c.LogMaxFiles
+	if size == 0 {
+		size = 4 << 20
+	}
+	if files == 0 {
+		files = 4
+	}
+	return size, files
+}
+
+func (c Config) ValidateLogs() error {
+	size, files := c.LogRetention()
+	if size < 1024 || size > 64<<20 || files < 1 || files > 16 || size > (64<<20)/int64(files) {
+		return errors.New("log retention requires 1 KiB-64 MiB per file, 1-16 files, and at most 64 MiB total")
+	}
+	return nil
 }

@@ -265,10 +265,10 @@ func TestBackgroundLogBound(t *testing.T) {
 	record := waitBackground(t, id, "exited")
 	assertBackgroundExit(t, record, 0)
 	out := backgroundSuccess(t, "logs", name)
-	const notice = "\nmini-docker: log limit reached; remaining output was discarded.\n"
-	if len(out) != 16*1024*1024 || !strings.HasSuffix(out, notice) || strings.Trim(strings.TrimSuffix(out, notice), "\x00") != "" || !record.LogTruncated {
-		t.Fatalf("logs must retain a bounded 16 MiB prefix with truncation notice without blocking the writer: bytes=%d truncated=%v", len(out), record.LogTruncated)
+	if len(out) > 16*1024*1024 || len(out) < 12*1024*1024 || strings.Trim(out, "\x00") != "" || !record.LogTruncated {
+		t.Fatalf("logs must retain recent bounded output without blocking: bytes=%d discarded=%v", len(out), record.LogTruncated)
 	}
+
 }
 
 func TestBackgroundFollowCancellation(t *testing.T) {
@@ -740,4 +740,34 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 		t.Fatalf("canceled startup left its runtime directory: %v", err)
 	}
 	assertBackgroundUnitStopped(t, interrupted.ID)
+}
+
+func TestBackgroundLogRotationFollow(t *testing.T) {
+	name := backgroundName(t)
+	id := startBackground(t, name, []string{"--log-max-size", "1k", "--log-max-files", "3"}, "/bin/sh", "-c", `echo ready; sleep 1; i=0; while [ "$i" -lt 10 ]; do printf '%0900d\n' "$i"; i=$((i+1)); sleep .15; done; printf final`)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	code, out, stderr, err := backgroundCommand(ctx, "logs", "-f", id)
+	var want strings.Builder
+	want.WriteString("ready\n")
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(&want, "%0900d\n", i)
+	}
+	want.WriteString("final")
+	if err != nil || code != 0 || out != want.String() {
+		t.Fatalf("rotated follow: code=%d bytes=%d want=%d stderr=%q error=%v", code, len(out), want.Len(), stderr, err)
+	}
+	assertBackgroundExit(t, waitBackground(t, id, "exited"), 0)
+	retained := backgroundSuccess(t, "logs", id)
+	if len(retained) > 3072 || !strings.HasSuffix(want.String(), retained) || !strings.HasSuffix(retained, "final") {
+		t.Fatalf("retained rotation: %d bytes", len(retained))
+	}
+	tail := backgroundSuccess(t, "logs", "--tail", "2", id)
+	if tail != fmt.Sprintf("%0900d\nfinal", 9) {
+		t.Fatal("tail failed across segments")
+	}
+	inspect := backgroundSuccess(t, "inspect", id)
+	if !strings.Contains(inspect, `"log_max_size": 1024`) || !strings.Contains(inspect, `"log_max_files": 3`) {
+		t.Fatalf("retention missing from inspection: %s", inspect)
+	}
 }

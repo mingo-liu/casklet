@@ -199,7 +199,9 @@ mdocker rm worker
 
 运行时会执行选定的停止宽限期，随后杀死剩余工作负载进程，并在有限时间内完成清理。systemd 提供 75 秒的最终服务终止边界：如果监督进程无法完成停止，这段时间涵盖最长一分钟的宽限期及清理。管理停止操作的截止时间为所选宽限期再加 25 秒，用于状态核对和清理。
 
-日志在多次执行之间追加，最多保留合并输出的前 16 MiB，必要时包含截断提示。超出部分会被持续读取并丢弃，避免日志写满后阻塞工作负载；JSON 记录提供 `log_truncated`。此版本不轮转日志，也不会在主机/VM 重启后自动重启容器；完成状态核对后可使用 `start`。管理命令通过服务身份和锁核对丢失的监督进程，保留失败记录；如果监督进程突然消失导致完成状态无法记录，命令退出状态会保持未知。
+Logs now rotate and retain recent output across executions. See [bounded log rotation](README.md#bounded-log-rotation) for `--log-max-size`, `--log-max-files`, and tail/follow behavior.
+
+管理命令通过服务身份和锁核对丢失的监督进程，保留失败记录；如果监督进程突然消失导致完成状态无法记录，命令退出状态会保持未知。
 
 ## 检查与资源统计
 

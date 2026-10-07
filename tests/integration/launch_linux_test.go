@@ -22,7 +22,7 @@ func TestLaunchAutomaticScope(t *testing.T) {
 		{
 			name: "streams arguments and exit status", input: "piped input\n",
 			command: []string{"/bin/sh", "-c", "cat; printf '%s\\n' \"$1\" \"$2\"; echo diagnostic >&2; exit 7", "shell", "two words", "$(literal)"},
-			code: 7, output: "piped input\ntwo words\n$(literal)\n",
+			code:    7, output: "piped input\ntwo words\n$(literal)\n",
 		},
 		{
 			name: "timeout", options: []string{"--timeout", "100ms", "--stop-timeout", "0s"},

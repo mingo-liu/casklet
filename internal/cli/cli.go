@@ -70,6 +70,8 @@ Run options:
   --rootless     Run as the caller with container 0:0 mapped to caller IDs
   --read-only    Mount the container root filesystem read-only
   --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
+  --log-max-size Maximum log file size in bytes or k/m/g (default: 4m; detached only)
+  --log-max-files Retained log files including current (default: 4; detached only)
   --timeout      Command duration limit; 0 disables it (default: 0)
 
 Exec options:
@@ -85,7 +87,7 @@ mdocker automatically uses sudo when needed and creates a delegated scope
 for foreground runs. Help and invalid arguments do not require privileges.
 Management flags must precede the container identifier. ps lists active
 containers; --all also includes completed containers. logs defaults to the
-entire retained log (maximum 16 MiB); --tail accepts 0-1000000 lines.
+entire retained log (default maximum 16 MiB); --tail accepts 0-1000000 lines.
 stop sends SIGTERM, then SIGKILL after the configured grace period. rm requires a stopped
 container. Detached containers receive no input; stdout and stderr are merged.
 run terminal options require a foreground run. -it requires a terminal on stdin.
@@ -153,6 +155,12 @@ func Parse(args []string) (Request, error) {
 			}
 			return err
 		})
+		fs.Func("log-max-size", "maximum log file size", func(value string) error {
+			size, err := ParseMemory(value)
+			r.Config.LogMaxSize = size
+			return err
+		})
+		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
 		fs.StringVar(&r.Config.Image, "image", "", "local image ID")
 		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
 		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
@@ -273,6 +281,16 @@ func Parse(args []string) (Request, error) {
 	}
 	if !interactiveSpecified && !r.Detach && !r.Config.TTY {
 		r.Config.Interactive = true
+	}
+	logSpecified := false
+	fs.Visit(func(f *flag.Flag) {
+		logSpecified = logSpecified || f.Name == "log-max-size" || f.Name == "log-max-files"
+	})
+	if logSpecified && !r.Detach {
+		return r, errors.New("log retention options require --detach")
+	}
+	if r.Config.LogMaxFiles == 0 {
+		return r, errors.New("--log-max-files must be between 1 and 16")
 	}
 	nameSpecified := false
 	fs.Visit(func(f *flag.Flag) { nameSpecified = nameSpecified || f.Name == "name" })

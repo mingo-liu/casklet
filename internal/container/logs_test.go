@@ -8,34 +8,15 @@ import (
 	"testing"
 )
 
-func TestCaptureLogRetainsBoundedPrefixAndDrainsInput(t *testing.T) {
-	limit := int64(len(logLimitMessage) + 5)
-	for _, tt := range []struct {
-		name      string
-		input     string
-		want      string
-		truncated bool
-	}{
-		{"empty", "", "", false},
-		{"small", "abc", "abc", false},
-		{"exact payload", "abcde", "abcde", false},
-		{"over payload", "abcdef", "abcde" + logLimitMessage, true},
-		{"many chunks", strings.Repeat("x", 256*1024), "xxxxx" + logLimitMessage, true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			input := bytes.NewReader([]byte(tt.input))
-			var output bytes.Buffer
-			truncated, err := captureLog(input, &output, limit)
-			if err != nil || truncated != tt.truncated || output.String() != tt.want {
-				t.Fatalf("capture = %q, %v, %v; want %q, %v", output.String(), truncated, err, tt.want, tt.truncated)
-			}
-			if input.Len() != 0 {
-				t.Fatalf("left %d input bytes unread", input.Len())
-			}
-			if int64(output.Len()) > limit {
-				t.Fatalf("retained %d bytes exceeds limit %d", output.Len(), limit)
-			}
-		})
+func TestCaptureLogDrainsAllOutput(t *testing.T) {
+	want := bytes.Repeat([]byte("data"), 128*1024)
+	input := bytes.NewReader(want)
+	var output bytes.Buffer
+	if err := captureLog(input, &output); err != nil {
+		t.Fatal(err)
+	}
+	if input.Len() != 0 || !bytes.Equal(output.Bytes(), want) {
+		t.Fatal("capture lost output")
 	}
 }
 
@@ -61,7 +42,7 @@ func TestCaptureLogDrainsAfterWriteFailure(t *testing.T) {
 	failure := errors.New("storage unavailable")
 	input := bytes.NewReader(bytes.Repeat([]byte("data"), 128*1024))
 	output := &logFailureWriter{failAt: 1, failure: failure}
-	_, err := captureLog(input, output, MaxLogBytes)
+	err := captureLog(input, output)
 	if !errors.Is(err, failure) {
 		t.Fatalf("write failure was lost: %v", err)
 	}
@@ -71,25 +52,13 @@ func TestCaptureLogDrainsAfterWriteFailure(t *testing.T) {
 }
 
 func TestCaptureLogRejectsShortWrites(t *testing.T) {
-	for _, tt := range []struct {
-		name   string
-		limit  int64
-		failAt int
-	}{
-		{"payload", MaxLogBytes, 1},
-		{"marker", int64(len(logLimitMessage) + 5), 2},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			input := bytes.NewReader(bytes.Repeat([]byte("x"), 128*1024))
-			output := &logFailureWriter{failAt: tt.failAt, short: true}
-			_, err := captureLog(input, output, tt.limit)
-			if !errors.Is(err, io.ErrShortWrite) {
-				t.Fatalf("short write error = %v; want %v", err, io.ErrShortWrite)
-			}
-			if input.Len() != 0 || output.calls != tt.failAt {
-				t.Fatalf("short write did not drain: unread=%d, writes=%d", input.Len(), output.calls)
-			}
-		})
+	input := bytes.NewReader(bytes.Repeat([]byte("x"), 128*1024))
+	output := &logFailureWriter{failAt: 1, short: true}
+	if err := captureLog(input, output); !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("short write error = %v", err)
+	}
+	if input.Len() != 0 || output.calls != 1 {
+		t.Fatal("did not drain after short write")
 	}
 }
 
@@ -111,28 +80,18 @@ func TestCaptureLogPreservesFinalBytesAndErrors(t *testing.T) {
 	readFailure := errors.New("input failed")
 	writeFailure := errors.New("output failed")
 	var output bytes.Buffer
-	_, err := captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &output, MaxLogBytes)
+	err := captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &output)
 	if !errors.Is(err, readFailure) || output.String() != "last bytes" {
 		t.Fatalf("final bytes or read failure lost: %q, %v", output.String(), err)
 	}
-	_, err = captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &logFailureWriter{failAt: 1, failure: writeFailure}, MaxLogBytes)
+	err = captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &logFailureWriter{failAt: 1, failure: writeFailure})
 	if !errors.Is(err, readFailure) || !errors.Is(err, writeFailure) {
 		t.Fatalf("combined errors lost: %v", err)
 	}
 	output.Reset()
-	_, err = captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: io.EOF}, &output, MaxLogBytes)
+	err = captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: io.EOF}, &output)
 	if err != nil || output.String() != "last bytes" {
 		t.Fatalf("final bytes with EOF lost: %q, %v", output.String(), err)
-	}
-}
-
-func TestCaptureLogRejectsUnusableLimit(t *testing.T) {
-	input := bytes.NewReader([]byte("unchanged"))
-	if _, err := captureLog(input, io.Discard, int64(len(logLimitMessage)-1)); err == nil {
-		t.Fatal("accepted a limit smaller than the truncation marker")
-	}
-	if input.Len() != len("unchanged") {
-		t.Fatal("consumed input for an invalid limit")
 	}
 }
 

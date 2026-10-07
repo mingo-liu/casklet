@@ -328,21 +328,17 @@ func TestLifecycleRetainedRootSafety(t *testing.T) {
 
 func TestLifecycleLogBoundAcrossStarts(t *testing.T) {
 	name := backgroundName(t)
-	id := startBackground(t, name, nil, "/bin/sh", "-c", "dd if=/dev/zero bs=1048576 count=17 2>/dev/null")
+	command := `n=0; [ ! -e /log-counter ] || n=$(cat /log-counter); n=$((n+1)); echo "$n" > /log-counter; dd if=/dev/zero bs=1024 count=5 2>/dev/null; echo "execution-$n"`
+	id := startBackground(t, name, []string{"--log-max-size", "1k", "--log-max-files", "3"}, "/bin/sh", "-c", command)
 	lifecycleWait(t, id, 0)
-	path := filepath.Join("/var/lib/mini-docker/containers", id, "container.log")
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
+	if out := backgroundSuccess(t, "logs", "--tail", "1", id); !strings.HasSuffix(out, "execution-1\n") {
+		t.Fatal("first execution log missing")
 	}
 	backgroundSuccess(t, "start", id)
 	lifecycleWait(t, id, 0)
-	after, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Size() != before.Size() || after.Size() > 16*1024*1024 || !inspectBackground(t, id).LogTruncated {
-		t.Fatalf("logs exceeded cumulative cap: %d -> %d", before.Size(), after.Size())
+	out := backgroundSuccess(t, "logs", id)
+	if len(out) > 3072 || !strings.HasSuffix(out, "execution-2\n") || strings.Contains(out, "execution-1") || !inspectBackground(t, id).LogTruncated {
+		t.Fatalf("restart retention failed: bytes=%d", len(out))
 	}
 }
 
