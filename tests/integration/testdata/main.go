@@ -14,6 +14,12 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "network-server":
+		networkServer(true)
+	case "network-service":
+		networkServer(false)
+	case "network-client":
+		networkClient()
 	case "cpu":
 		runtime.GOMAXPROCS(1)
 		var before, after syscall.Rusage

@@ -16,7 +16,7 @@ provision:
       set -eu
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
-      apt-get install -y busybox-static binutils ca-certificates curl make
+      apt-get install -y busybox-static binutils ca-certificates curl make iproute2 nftables util-linux conntrack
       case $(uname -m) in
         aarch64)
           arch=arm64

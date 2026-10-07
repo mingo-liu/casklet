@@ -60,6 +60,9 @@ Run options:
   --user         Numeric UID[:GID]; GID defaults to UID (default: 0:0)
   --mount        Bind a directory: type=bind,source=/HOST,target=/PATH[,readonly]
                  Repeat for multiple directories (maximum: 32)
+  --network      none (loopback only, default) or bridge (IPv4 connectivity)
+  --dns          IPv4 DNS server; repeat up to three times (bridge only)
+  -p, --publish  [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]; repeat (bridge only)
   --read-only    Mount the container root filesystem read-only
   --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
   --timeout      Command duration limit; 0 disables it (default: 0)
@@ -128,6 +131,17 @@ func Parse(args []string) (Request, error) {
 	var memory, cpus, user string
 	if r.Action == "run" {
 		fs.StringVar(&r.Config.Image, "image", "", "local image ID")
+		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
+		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
+		publish := func(value string) error {
+			mapping, err := config.ParsePortMapping(value)
+			if err == nil {
+				r.Config.Publish = append(r.Config.Publish, mapping)
+			}
+			return err
+		}
+		fs.Func("publish", "published port", publish)
+		fs.Func("p", "published port", publish)
 		fs.BoolVar(&r.Detach, "detach", false, "run in the background")
 		fs.BoolVar(&r.Detach, "d", false, "run in the background")
 		fs.BoolVar(&r.Config.Interactive, "interactive", false, "forward stdin")

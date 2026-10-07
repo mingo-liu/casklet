@@ -27,6 +27,9 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	Network     string         `json:"network,omitempty"`
+	DNS         []string       `json:"dns,omitempty"`
+	Publish     []PortMapping  `json:"publish,omitempty"`
 	StopTimeout *time.Duration `json:"stop_timeout,omitempty"`
 	Image       string         `json:"image,omitempty"`
 	Mounts      []BindMount    `json:"mounts,omitempty"`
@@ -82,6 +85,9 @@ func (c Config) ValidateExecution() error {
 	}
 	if c.User != nil && (c.User.UID == math.MaxUint32 || c.User.GID == math.MaxUint32) {
 		return errors.New("user and group IDs must be between 0 and 4294967294")
+	}
+	if err := ValidateNetwork(c.Network, c.DNS, c.Publish, c.Mounts); err != nil {
+		return err
 	}
 	return ValidateMounts(c.Mounts, c.RootFS)
 }

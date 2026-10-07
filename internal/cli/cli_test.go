@@ -529,3 +529,24 @@ func TestLifecycleOptions(t *testing.T) {
 		t.Fatal("zero stop timeout was treated as default")
 	}
 }
+
+func TestNetworkOptions(t *testing.T) {
+	request, err := Parse([]string{"run", "--rootfs", "/rootfs", "--network", "bridge", "--dns", "8.8.8.8", "-p", "127.0.0.1:8080:80", "--publish", "5353:53/udp", "--", "/bin/true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Config.NetworkMode() != "bridge" || len(request.Config.DNS) != 1 || len(request.Config.Publish) != 2 || request.Config.Publish[1].Protocol != "udp" {
+		t.Fatalf("config=%+v", request.Config)
+	}
+	for _, options := range [][]string{
+		{"--network", "host"}, {"-p", "80:80"}, {"--dns", "8.8.8.8"},
+		{"--network", "bridge", "-p", "80:80", "-p", "127.0.0.1:80:90"},
+		{"--network", "bridge", "--dns", "127.0.0.53"},
+	} {
+		args := append([]string{"run", "--rootfs", "/rootfs"}, options...)
+		args = append(args, "--", "/bin/true")
+		if _, err := Parse(args); err == nil {
+			t.Errorf("accepted %q", args)
+		}
+	}
+}

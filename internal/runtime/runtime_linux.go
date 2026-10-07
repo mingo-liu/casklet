@@ -18,6 +18,7 @@ import (
 	"github.com/mingo-liu/mini-docker/internal/config"
 	"github.com/mingo-liu/mini-docker/internal/image"
 	"github.com/mingo-liu/mini-docker/internal/ipc"
+	"github.com/mingo-liu/mini-docker/internal/network"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
@@ -187,9 +188,17 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err != nil {
 		return preparationError(err, signals)
 	}
+	var networkLease *network.Lease
 	defer func() {
+		if networkLease != nil {
+			defer networkLease.Close()
+		}
 		if err := run.remove(); err != nil {
 			fmt.Fprintf(stderr, "mini-docker: cleanup %s: %v\n", run.path, err)
+			runErr = errors.Join(runErr, err)
+			if code == 0 {
+				code = 125
+			}
 		}
 	}()
 	if observer != nil {
@@ -231,6 +240,15 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			if err != nil {
 				return code, err
 			}
+		}
+	}
+	if cfg.NetworkMode() == "bridge" {
+		servers, err := network.Resolvers(cfg.DNS)
+		if err != nil {
+			return code, err
+		}
+		if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
+			return code, fmt.Errorf("configure DNS: %w", err)
 		}
 	}
 	select {
@@ -329,6 +347,17 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start container init: %w", err)
 	}
+	// Pin the namespace before Wait can reap init and permit host PID reuse.
+	var networkNamespace *os.File
+	if cfg.NetworkMode() == "bridge" {
+		networkNamespace, err = os.Open(fmt.Sprintf("/proc/%d/ns/net", cmd.Process.Pid))
+		if err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return code, fmt.Errorf("pin container network namespace: %w", err)
+		}
+		defer networkNamespace.Close()
+	}
 	childControl.Close()
 	if childTerminal != nil {
 		childTerminal.Close()
@@ -356,6 +385,12 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		// Init may still be outside the workload cgroup on a failed migration.
 		cmd.Process.Kill()
 		return code, fmt.Errorf("attach init to cgroup: %w", err)
+	}
+	if cfg.NetworkMode() == "bridge" {
+		networkLease, err = network.Setup(prepareCtx, run.path, networkNamespace, cfg.Publish)
+		if err != nil {
+			return preparationError(fmt.Errorf("configure network: %w", err), signals)
+		}
 	}
 	encoder := json.NewEncoder(control)
 	if err := control.SetWriteDeadline(time.Now().Add(startupLimit)); err != nil {

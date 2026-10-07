@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/cgroup"
+	"github.com/mingo-liu/mini-docker/internal/network"
 
 	"golang.org/x/sys/unix"
 )
@@ -149,6 +150,9 @@ func (run *runDirectory) remove() error {
 	}
 	if err := secureDirectory(run.path); err != nil {
 		return err
+	}
+	if err := network.Cleanup(run.path); err != nil {
+		return fmt.Errorf("network cleanup: %w", err)
 	}
 	return os.RemoveAll(run.path)
 }
@@ -368,6 +372,11 @@ func reclaimRunAt(path string, paths statePaths) error {
 			if unescaped == path || strings.HasPrefix(unescaped, path+"/") {
 				return errors.New("runtime directory is referenced by a mount")
 			}
+		}
+	}
+	if paths.runsRoot == runsRoot {
+		if err := network.Cleanup(path); err != nil {
+			return fmt.Errorf("recover network: %w", err)
 		}
 	}
 	return os.RemoveAll(path)

@@ -2,13 +2,13 @@
 
 A small Go container runtime for Linux arm64 and amd64. Run foreground or background commands in separate PID, mount, UTS, IPC, and network namespaces, with a copied BusyBox root filesystem and cgroups v2 memory, process, and optional CPU limits.
 
-Foreground execution, interactive terminals, background container management, interactive container execution, inspection, resource statistics, directory bind mounts, local images, and lifecycle extensions are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, read-only root filesystems, and content-addressed local images.
+Foreground execution, interactive terminals, background container management, interactive container execution, inspection, resource statistics, directory bind mounts, local images, external IPv4 networking, and lifecycle extensions are implemented and validated in the dedicated Linux VM. Execution options include configurable environments, working directories, numeric users, read-only root filesystems, and content-addressed local images.
 
 ## Requirements
 
 Use a dedicated Ubuntu 24.04 development VM with systemd, Linux 6.8 or newer, cgroups v2, root privileges, Go 1.25 or newer, and `busybox-static`. Required cgroup interfaces include `memory`, `pids`, `memory.swap.max`, and `cgroup.kill`. Foreground execution uses a delegated systemd scope; detached execution creates its own delegated service. Background management requires `/usr/bin/systemd-run` and `/usr/bin/systemctl`.
 
-Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, managed volumes, external container networking, or rootless execution.
+Use this runtime for trusted programs. Commands run as container UID 0 by default, with reduced capabilities; `--user` selects another numeric identity. It does not provide a security guarantee for untrusted code. There are no image registries, managed volumes, or rootless execution.
 
 ## Development VM on macOS
 
@@ -34,7 +34,7 @@ make rootfs
 sudo make install
 ```
 
-Repeat the transfer after source changes and use the new printed directory. The snapshot script includes existing tracked and unignored files using null-delimited filenames. Each transfer uses a fresh directory, so deleted source files cannot survive in subsequent builds. Previous snapshots remain available until explicitly removed. The VM keeps build artifacts, rootfs templates, and runtime state on its own filesystem. No host directory is mounted into the VM. On an existing Ubuntu VM, install `busybox-static binutils make` with `apt-get`, and install Go 1.25 or newer before using the commands below.
+Repeat the transfer after source changes and use the new printed directory. The snapshot script includes existing tracked and unignored files using null-delimited filenames. Each transfer uses a fresh directory, so deleted source files cannot survive in subsequent builds. Previous snapshots remain available until explicitly removed. The VM keeps build artifacts, rootfs templates, and runtime state on its own filesystem. No host directory is mounted into the VM. On an existing Ubuntu VM, install `busybox-static binutils make iproute2 nftables util-linux conntrack` with `apt-get`, and install Go 1.25 or newer before using the commands below.
 
 ## Run
 
@@ -53,7 +53,7 @@ The CLI automatically uses `sudo` when root privileges are needed. Foreground ru
 
 Arguments after the required `--` are executed directly; explicitly invoke `/bin/sh -c` for shell syntax. The old `scripts/run-linux.sh` remains a compatibility launcher using `sudo systemd-run --scope` and accepts `MINI_DOCKER_BINARY` to select another executable; `bin/mini-docker` is a compatibility symlink to `mdocker`.
 
-Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited), shutdown grace `5s`. Memory suffixes `k`, `m`, and `g` use powers of 1024. Each new container copies the rootfs template and mounts independent `/proc` and temporary storage. Foreground execution removes its working filesystem after exit; detached containers retain their private copy until `rm`. Explicit directory bind mounts preserve data in their host sources. Networking contains loopback only. By default, the command receives a fixed environment and starts in `/`.
+Defaults: hostname `mini`, memory `128m`, process/thread limit `64`, timeout `0` (unlimited), shutdown grace `5s`. Memory suffixes `k`, `m`, and `g` use powers of 1024. Each new container copies the rootfs template and mounts independent `/proc` and temporary storage. Foreground execution removes its working filesystem after exit; detached containers retain their private copy until `rm`. Explicit directory bind mounts preserve data in their host sources. Networking defaults to loopback only; `--network bridge` enables external IPv4 connectivity. By default, the command receives a fixed environment and starts in `/`.
 
 ### Resource and execution options
 
@@ -71,6 +71,9 @@ mdocker run --rootfs ./rootfs/busybox \
 | `--workdir /PATH` | Use an existing directory inside the container; default `/`. Missing or inaccessible directories fail startup. Command lookup uses the configured `PATH` and working directory inside the container. |
 | `--user UID[:GID]` | Use numeric IDs from `0` through `4294967294`; GID defaults to UID. Clear supplementary groups and all capability sets before starting the command. The container init uses the same identity to supervise descendants. |
 | `--read-only` | Mount the copied root read-only. `/tmp` remains a writable, size-limited tmpfs; minimal `/dev` remains usable. Bind mounts retain their own read-only setting. The default root is writable; detached containers retain it until removal. |
+| `--network MODE` | Default `none` supplies loopback only. `bridge` adds IPv4 connectivity through a veth pair, a shared bridge, and NAT. |
+| `--dns IPV4` | Repeat for up to three non-loopback IPv4 resolvers; requires `--network bridge`. Otherwise discover upstream IPv4 resolvers on the Linux host. |
+| `-p, --publish [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp\|udp]` | Repeat for up to 32 mappings; requires `--network bridge`. Default host address is `0.0.0.0`, protocol `tcp`. |
 | `--stop-timeout DURATION` | Grace before forcing shutdown after a signal, timeout, or main-process exit with remaining descendants. Default `5s`; accept `0s` through `1m`. Zero skips the grace period. |
 | `--mount type=bind,source=/HOST,target=/PATH[,readonly]` | Bind an existing host directory into the container. Repeat for up to 32 independent targets; add `readonly` to prevent container writes. |
 
@@ -79,6 +82,44 @@ Numeric users are not user-namespace mappings and do not enable rootless executi
 CPU quotas use cgroups v2 [`cpu.max`](https://www.kernel.org/doc/html/v6.8/admin-guide/cgroup-v2.html#cpu). The supervisor stays outside the workload quota; init, command processes, and their threads share the limit.
 
 Normal command exit codes pass through. Signal exits use `128 + signal`; timeout returns `124` while the main command is running; completed commands keep their exit code during descendant cleanup; configuration, unsupported-platform, and startup errors return `125`. Diagnostics go to stderr. SIGINT and SIGTERM are forwarded, with a bounded shutdown grace period.
+
+## External networking
+
+Networking remains opt-in. On the Linux host, install the networking tools if the VM predates this feature:
+
+```sh
+sudo apt-get install -y iproute2 nftables util-linux conntrack
+mdocker run --rootfs ./rootfs/busybox --network bridge \
+  -- /bin/sh -c 'ip addr show eth0; ip route; cat /etc/resolv.conf'
+mdocker run --rootfs ./rootfs/busybox --network bridge \
+  --dns 1.1.1.1 --dns 8.8.8.8 -- /bin/nslookup example.com
+```
+
+Bridge containers receive unique addresses from `10.231.0.2` through `10.231.0.254`, an `eth0` veth endpoint, and a default route through the shared `mdocker0` bridge at `10.231.0.1/24`. Outbound traffic uses IPv4 masquerading. Concurrent containers share this bridge and can communicate directly; it is not a network policy boundary. The subnet is fixed in this version. Startup rejects overlapping host routes, an unrelated `mdocker0` interface, and occupied runtime interface or NAT table names.
+
+DNS is written into the private filesystem's `/etc/resolv.conf` before a read-only root is installed. Explicit `--dns` values take precedence. Otherwise the runtime selects up to three non-loopback IPv4 nameservers from `/run/systemd/resolve/resolv.conf`, then `/etc/resolv.conf`; this skips systemd's unreachable container-local stub at `127.0.0.53`. If neither file supplies usable servers, startup fails with instructions to specify `--dns`. Search domains and host resolver options are not inherited. DNS is regenerated on each start, and `exec` uses the installed file. Bridge networking reserves `/etc/resolv.conf` and its staging name `/etc/.mini-docker-resolv`; directory binds covering the resolver, including `/etc`, are rejected.
+
+Publish a BusyBox HTTP server on the Linux host's loopback interface:
+
+```sh
+mdocker run -d --name web --rootfs ./rootfs/busybox \
+  --network bridge -p 127.0.0.1:8080:8080 \
+  -- /bin/sh -c 'mkdir -p /www; echo hello > /www/index.html; httpd -f -p 8080 -h /www'
+curl http://127.0.0.1:8080/
+mdocker exec web -- /bin/ip addr show eth0
+mdocker inspect web
+mdocker restart web
+mdocker stop web
+mdocker rm web
+```
+
+The container service must listen on `eth0` or `0.0.0.0`, rather than only its own loopback address. Container commands retain their existing capability restrictions; use unprivileged listening ports such as `8080`. Mapping syntax is `[HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]`: `-p 8080:8080` publishes TCP on all host IPv4 addresses, while `-p 127.0.0.1:5353:7777/udp` publishes UDP locally. Ports must be between 1 and 65535; ranges, automatic ports, IPv6 addresses, and other protocols are unsupported. Explicit host addresses must be locally bindable. Duplicate and wildcard-overlapping mappings are rejected. TCP and UDP may use the same host port independently.
+
+Published ports use [nftables destination NAT](https://wiki.nftables.org/wiki-nftables/index.php/Performing_Network_Address_Translation_(NAT)) for incoming and host-originated traffic, including host loopback and container hairpin access. The supervisor also reserves each host socket for the execution's lifetime, so conflicts with host services or other mini-docker containers fail startup. These reservations do not proxy traffic. Mapped connections are source-NATed to the bridge gateway, so container services see that gateway as their peer. Stop releases mappings; start and restart reinstall the saved configuration and fail if a port has since been occupied. Container IP addresses are allocated per execution and are not promised to remain the same. `inspect.config` exposes `network`, explicitly configured `dns`, and `publish`; automatically discovered resolvers can be read through `exec`.
+
+Use the dedicated VM with forwarding permitted by its host firewall. The runtime creates only its own per-execution nftables tables and preserves unrelated firewall rules; an existing firewall drop policy can still block forwarding. IPv4 forwarding is enabled while bridge allocations exist, with its prior on/off setting recorded and restored after the last allocation is removed. Loopback routing is enabled only on the owned bridge. Do not concurrently modify runtime-owned interfaces, firewall tables, or forwarding configuration. With Lima, published host ports belong to the Linux VM; macOS access depends on Lima's port forwarding configuration.
+
+Normal exit, stop, timeout, and startup failure remove veth pairs, owned NAT tables, matching connection-tracking entries, and host neighbor cache entries before releasing the allocation. The last allocation also removes the bridge. A private journal records ownership and reservations before per-container mutations; failed cleanup preserves it for recovery rather than silently reusing resources. Boot identities prevent previous-boot journals from modifying newly configured host resources. Abandoned supervisors are reclaimed through existing `ps`, `stop`, `rm`, and subsequent-run recovery. Retained stopped containers keep their networking configuration, but consume no live network allocation. `--network none` needs no networking tools and preserves the original loopback-only behavior. This version has no host network mode, custom networks, IPv6 routing, or rootless networking.
 
 ## Local images
 
@@ -281,11 +322,11 @@ Terminal stdout and stderr are merged on stdout, with terminal newline processin
 
 `make build GOARCH=amd64` cross-compiles for amd64. `make test-integration` always builds for the Linux VM's native architecture, regardless of inherited `GOOS` or `GOARCH`; the test launcher checks the runtime's ELF architecture. Unit tests and vet also run on macOS. Container execution and rootfs preparation require Linux. `make rootfs` refuses to overwrite an existing destination; remove it explicitly before regeneration. The generated `.mini-docker-rootfs.json` records architecture, package version, and SHA-256 checksum.
 
-Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Image tests cover import identity and deduplication, source independence, isolated private copies, bind mounts and numeric users, retained references and supervisor recovery, foreground leases, concurrent creation/removal, unsafe sources, special files, mounted subtrees, and partial import cleanup. Image store unit tests also verify cancellation, corrupted content and metadata, concurrent imports/readers, and staging recovery. Use `./scripts/test-linux.sh -test.run TestImage` for image checks. Launcher tests cover automatic scope creation, piped input, argument preservation, exit codes, timeout, capability checks, and failed-delegation recursion prevention. Use `./scripts/test-linux.sh -test.run TestLaunch` for these checks. Lifecycle tests cover wait status and cancellation, retained rootfs and bind data, fresh temporary storage, execution receipts across restart, failed-start retry, stop overrides and deadlines, concurrent starts, unsafe retained mounts, and cumulative log limits. Use `./scripts/test-linux.sh -test.run TestLifecycle` for these checks. Resource tests use bounded helpers and deadlines.
+Integration tests require the dedicated VM and fail when prerequisites are missing. They exercise execution, input/output, exit status, isolation, privileges, resource limits, signal handling, timeout, child cleanup, repetition, and concurrency. Additional tests verify actual CPU throttling, environment and command lookup, working-directory errors, non-root credentials and cleanup, and read-only roots with writable temporary storage. Background tests cover independent lifetime, retained status and logs, tail/follow/cancellation, log limits, names, concurrent management, bounded stops, removal, and supervisor-loss recovery. Terminal tests verify interactive shell input, job control, Ctrl+C, resizing, private PTYs, restored host settings, input modes, and output draining. Use `./scripts/test-linux.sh -test.run TestTerminal` for a focused terminal run, or `-test.run TestBackground` for background management. Exec tests cover shared namespaces and filesystems, inherited configuration and identity, stream separation, actual exit codes, aggregate CPU limits, concurrent sessions, cancellation, descendant cleanup, launcher removal, and container shutdown. Interactive exec tests also cover job control, resizing, terminal restoration, independent PTYs, and session cleanup. Use `./scripts/test-linux.sh -test.run TestExecTerminal` for terminal exec checks, or `-test.run TestExec` for all exec checks. Inspection and statistics tests cover active, completed, and failed records, configuration privacy, real CPU and memory accounting, idle workloads, unavailable metrics, sampling cancellation, and concurrent exit, removal, and name reuse. Use `./scripts/test-linux.sh -test.run "TestInspection|TestStats"` for these checks. Bind mount tests verify persistence across runs, read-only enforcement, host ownership, writable data with read-only roots, private mount propagation, concurrent containers and exec, excluded submounts, inherited source restrictions, invalid paths, partial startup rollback, timeout, supervisor recovery, and data retention after removal. Use `./scripts/test-linux.sh -test.run TestBindMount` for these checks. Image tests cover import identity and deduplication, source independence, isolated private copies, bind mounts and numeric users, retained references and supervisor recovery, foreground leases, concurrent creation/removal, unsafe sources, special files, mounted subtrees, and partial import cleanup. Image store unit tests also verify cancellation, corrupted content and metadata, concurrent imports/readers, and staging recovery. Use `./scripts/test-linux.sh -test.run TestImage` for image checks. Launcher tests cover automatic scope creation, piped input, argument preservation, exit codes, timeout, capability checks, and failed-delegation recursion prevention. Use `./scripts/test-linux.sh -test.run TestLaunch` for these checks. Lifecycle tests cover wait status and cancellation, retained rootfs and bind data, fresh temporary storage, execution receipts across restart, failed-start retry, stop overrides and deadlines, concurrent starts, unsafe retained mounts, and cumulative log limits. Use `./scripts/test-linux.sh -test.run TestLifecycle` for these checks. Network tests use a separate upstream namespace with no route to container addresses to verify actual masquerading and DNS. They cover host and remote TCP mappings, UDP, loopback restrictions, hairpin access, concurrent allocations, exec and restart, read-only roots and numeric users, port and subnet conflicts, partial-setup rollback with retained reservations, startup rollback, timeout, supervisor-loss and previous-boot recovery, and restoration of interfaces, NAT tables, journals, and forwarding settings. Use `./scripts/test-linux.sh -test.run TestNetwork` for these checks. Resource tests use bounded helpers and deadlines.
 
 ## Next milestones
 
-External networking and security capabilities remain planned. Lifecycle extensions are implemented with retained filesystems and per-execution exit receipts. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
+External IPv4 networking is implemented. Security capabilities remain planned. Lifecycle extensions are implemented with retained filesystems and per-execution exit receipts. Each addition must retain the foreground and background isolation and cleanup guarantees and pass privileged Linux integration tests.
 
 ## Source layout
 
@@ -297,6 +338,7 @@ External networking and security capabilities remain planned. Lifecycle extensio
 - `internal/rootfs/`: template validation and confined filesystem preparation.
 - `internal/image/`: content-addressed local images, import publication, integrity checks, and deletion leases.
 - `internal/cgroup/`: cgroups v2 delegation and limits.
+- `internal/network/`: IPv4 bridge/veth setup, DNS discovery, NAT and port reservations, and journaled recovery.
 - `internal/ipc/`: bounded local messages and close-on-exec descriptor transfer.
 - `scripts/`, `dev/`: Linux launchers and development VM configuration.
 - `tests/integration/`: privileged Linux behavior tests.

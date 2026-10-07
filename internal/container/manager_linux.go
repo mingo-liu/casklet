@@ -19,7 +19,7 @@ import (
 
 const (
 	detachedStartupLimit = 95 * time.Second
-	managementStopLimit  = 25 * time.Second
+	managementStopLimit  = 35 * time.Second
 )
 
 func managementStore() (*Store, error) {
@@ -91,7 +91,7 @@ func launchExecution(ctx context.Context, store *Store, record Record) (Record, 
 		return record, rollbackStart(store, id, generation, err)
 	}
 	args := []string{"--quiet", "--service-type=exec", "--unit=" + unitName(id, record.Generation),
-		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=75s",
+		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=95s",
 		"--property=Restart=no", "--property=StandardInput=null", "--property=StandardOutput=null",
 		"--property=StandardError=null", "--working-directory=/", "--", exe, "__supervise", id, strconv.FormatUint(record.Generation, 10)}
 	if _, err := systemdCommand(ctx, "systemd-run", args...); err != nil {

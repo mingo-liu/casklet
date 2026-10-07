@@ -31,19 +31,22 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
-	StopTimeout      string             `json:"stop_timeout"`
-	Image            string             `json:"image,omitempty"`
-	Mounts           []config.BindMount `json:"mounts"`
-	RootFS           string             `json:"rootfs"`
-	Hostname         string             `json:"hostname"`
-	Command          []string           `json:"command"`
-	EnvironmentNames []string           `json:"environment_names"`
-	Workdir          string             `json:"workdir"`
-	User             config.User        `json:"user"`
-	ReadOnly         bool               `json:"read_only"`
-	Interactive      bool               `json:"interactive"`
-	TTY              bool               `json:"tty"`
-	Timeout          string             `json:"timeout"`
+	Network          string               `json:"network"`
+	DNS              []string             `json:"dns"`
+	Publish          []config.PortMapping `json:"publish"`
+	StopTimeout      string               `json:"stop_timeout"`
+	Image            string               `json:"image,omitempty"`
+	Mounts           []config.BindMount   `json:"mounts"`
+	RootFS           string               `json:"rootfs"`
+	Hostname         string               `json:"hostname"`
+	Command          []string             `json:"command"`
+	EnvironmentNames []string             `json:"environment_names"`
+	Workdir          string               `json:"workdir"`
+	User             config.User          `json:"user"`
+	ReadOnly         bool                 `json:"read_only"`
+	Interactive      bool                 `json:"interactive"`
+	TTY              bool                 `json:"tty"`
+	Timeout          string               `json:"timeout"`
 }
 
 type ResourceLimits struct {
@@ -71,7 +74,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	return Inspection{
 		Generation: record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{StopTimeout: cfg.StoppingTimeout().String(), Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), Image: cfg.Image, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,
