@@ -113,6 +113,9 @@ func TestCopyInitialLogTailAndSnapshotPosition(t *testing.T) {
 		{"more lines than available", "one\ntwo\n", 20, "one\ntwo\n"},
 		{"empty", "", 3, ""},
 		{"long line", strings.Repeat("x", 128*1024), 1, strings.Repeat("x", 128*1024)},
+		{"long terminated line", "first\n" + strings.Repeat("x", 128*1024) + "\n", 1, strings.Repeat("x", 128*1024) + "\n"},
+		{"newline at block start", "first\n" + strings.Repeat("x", 32*1024-1) + "\n", 1, strings.Repeat("x", 32*1024-1) + "\n"},
+		{"newline across blocks", "first\n" + strings.Repeat("x", 32*1024) + "\n", 1, strings.Repeat("x", 32*1024) + "\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			file := strings.NewReader(tt.data + "later\n")
@@ -131,12 +134,50 @@ func TestCopyInitialLogTailAndSnapshotPosition(t *testing.T) {
 	}
 }
 
+type countingLogReader struct {
+	*bytes.Reader
+	readBytes int
+}
+
+func (reader *countingLogReader) Read(data []byte) (int, error) {
+	n, err := reader.Reader.Read(data)
+	reader.readBytes += n
+	return n, err
+}
+
+func TestCopyInitialLogTailReadsOnlySuffix(t *testing.T) {
+	data := bytes.Repeat([]byte("old entry\n"), 100000)
+	data = append(data, []byte("last entry\n")...)
+	file := &countingLogReader{Reader: bytes.NewReader(data)}
+	var output bytes.Buffer
+	if err := copyInitialLog(file, int64(len(data)), 1, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "last entry\n" {
+		t.Fatalf("tail = %q", output.String())
+	}
+	if file.readBytes > 32*1024+len("last entry\n") {
+		t.Fatalf("read %d bytes to tail one short line", file.readBytes)
+	}
+}
+
 func TestCopyInitialLogPropagatesWriteFailure(t *testing.T) {
 	failure := errors.New("output closed")
 	for _, tail := range []int{-1, 1} {
 		file := strings.NewReader("one\ntwo\n")
 		if err := copyInitialLog(file, 8, tail, &logFailureWriter{failAt: 1, failure: failure}); !errors.Is(err, failure) {
 			t.Fatalf("tail %d write error = %v", tail, err)
+		}
+	}
+}
+
+func BenchmarkCopyInitialLogTail(b *testing.B) {
+	data := bytes.Repeat([]byte("log entry\n"), (16<<20)/10)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if err := copyInitialLog(bytes.NewReader(data), int64(len(data)), 10, io.Discard); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

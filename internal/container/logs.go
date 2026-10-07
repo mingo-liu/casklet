@@ -1,7 +1,6 @@
 package container
 
 import (
-	"bytes"
 	"errors"
 	"io"
 )
@@ -38,25 +37,35 @@ func copyInitialLog(file io.ReadSeeker, length int64, tail int, out io.Writer) e
 		_, err := file.Seek(length, io.SeekStart)
 		return err
 	}
-	// At most 64 MiB is retained. Reading this bounded snapshot preserves exact
-	// newline handling for tails, including a final unterminated line.
-	data, err := io.ReadAll(io.LimitReader(file, length))
-	if err != nil {
-		return err
-	}
-	end, start := len(data), 0
-	if end > 0 && data[end-1] == '\n' {
-		end--
-	}
-	for i := end - 1; i >= 0; i-- {
-		if data[i] == '\n' {
-			tail--
-			if tail == 0 {
-				start = i + 1
-				break
+	// Search backwards with bounded memory, then stream only the requested
+	// suffix. Ignore a final newline so it terminates the last line rather
+	// than introducing an extra one. Reads stay within the initial snapshot.
+	buffer := make([]byte, 32*1024)
+	start := int64(0)
+search:
+	for end := length; end > 0; {
+		begin := max(int64(0), end-int64(len(buffer)))
+		if _, err := file.Seek(begin, io.SeekStart); err != nil {
+			return err
+		}
+		chunk := buffer[:end-begin]
+		if _, err := io.ReadFull(file, chunk); err != nil {
+			return err
+		}
+		for i := len(chunk) - 1; i >= 0; i-- {
+			if chunk[i] == '\n' && begin+int64(i) != length-1 {
+				tail--
+				if tail == 0 {
+					start = begin + int64(i) + 1
+					break search
+				}
 			}
 		}
+		end = begin
 	}
-	_, err = io.Copy(out, bytes.NewReader(data[start:]))
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := io.CopyN(out, file, length-start)
 	return err
 }
