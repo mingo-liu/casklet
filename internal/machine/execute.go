@@ -113,23 +113,15 @@ func checkPorts(args []string) error {
 	if len(args) == 0 || args[0] != "run" {
 		return nil
 	}
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" {
-			break
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+	return visitHostResources(args, func(name, value string) error {
 		if name != "p" && name != "publish" {
-			continue
-		}
-		if !inline {
-			i++
-			if i >= len(args) {
-				return errors.New("missing published port")
-			}
-			value = args[i]
+			return nil
 		}
 		mapping, err := config.ParsePortMapping(value)
 		if err != nil {
+			return err
+		}
+		if err := validateMacPort(mapping); err != nil {
 			return err
 		}
 		address := net.JoinHostPort(mapping.HostIP, strconv.Itoa(int(mapping.HostPort)))
@@ -138,16 +130,14 @@ func checkPorts(args []string) error {
 			if err != nil {
 				return fmt.Errorf("macOS host port unavailable: %w", err)
 			}
-			listener.Close()
-		} else {
-			listener, err := net.Listen("tcp4", address)
-			if err != nil {
-				return fmt.Errorf("macOS host port unavailable: %w", err)
-			}
-			listener.Close()
+			return listener.Close()
 		}
-	}
-	return nil
+		listener, err := net.Listen("tcp4", address)
+		if err != nil {
+			return fmt.Errorf("macOS host port unavailable: %w", err)
+		}
+		return listener.Close()
+	})
 }
 
 func engineCommand(rootless bool, args ...string) []string {
@@ -164,8 +154,14 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 			return 125, err
 		}
 	}
+	if err := localPreflight(invocation.Args); err != nil {
+		return 125, err
+	}
 	m, err := open(stderr)
 	if err != nil {
+		return 125, err
+	}
+	if err := m.preflightShares(ctx, invocation.Args); err != nil {
 		return 125, err
 	}
 	instance, err := m.ensure(ctx, defaultOptions(), false)

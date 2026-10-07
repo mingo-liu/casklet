@@ -313,11 +313,22 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if err != nil {
 		return err
 	}
+	var parent string
+	if args[0] == "rootfs" {
+		parent, err = exportParent(args[1])
+		if err != nil {
+			return err
+		}
+	}
 	m, err := open(stderr)
 	if err != nil {
 		return err
 	}
 	if args[0] == "rootfs" {
+		// Validate the share using the parent, not the new template destination.
+		if err := m.preflightShares(ctx, []string{"run", "--rootfs", parent}); err != nil {
+			return err
+		}
 		instance, err := m.ensure(ctx, options, false)
 		if err != nil {
 			return err

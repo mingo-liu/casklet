@@ -169,5 +169,8 @@ func (instance Instance) hostPath(path string) (string, error) {
 			return filepath.Join(point, rel), nil
 		}
 	}
+	if instance.Name == "" {
+		return "", fmt.Errorf("directory is not shared with the default machine: %s; create it with mdocker machine init --mount %s before retrying", absolute, quote(absolute))
+	}
 	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with mdocker machine stop, add it with mdocker machine share %s, then mdocker machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
 }
