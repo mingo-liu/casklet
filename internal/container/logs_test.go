@@ -51,6 +51,22 @@ func TestCaptureLogDrainsAfterWriteFailure(t *testing.T) {
 	}
 }
 
+func TestCaptureLogResumesAfterTemporaryLockFailure(t *testing.T) {
+	input := bytes.NewReader(bytes.Repeat([]byte("x"), 3*32*1024))
+	output := &logFailureWriter{failAt: 1, failure: errLogBusy}
+	if err := captureLog(input, output); !errors.Is(err, errLogBusy) {
+		t.Fatalf("lost contention diagnostic: %v", err)
+	}
+	if input.Len() != 0 || output.calls != 3 {
+		t.Fatalf("capture did not resume: unread=%d, writes=%d", input.Len(), output.calls)
+	}
+	readFailure := errors.New("final read failed")
+	err := captureLog(&logFinalErrorReader{data: []byte("last"), err: readFailure}, &logFailureWriter{failAt: 1, failure: errLogBusy})
+	if !errors.Is(err, readFailure) || !errors.Is(err, errLogBusy) {
+		t.Fatalf("final contention or input failure lost: %v", err)
+	}
+}
+
 func TestCaptureLogRejectsShortWrites(t *testing.T) {
 	input := bytes.NewReader(bytes.Repeat([]byte("x"), 128*1024))
 	output := &logFailureWriter{failAt: 1, short: true}

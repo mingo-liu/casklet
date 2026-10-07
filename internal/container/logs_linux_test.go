@@ -6,14 +6,194 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
 )
+
+type contentionLogWriter struct {
+	*rotatingLog
+	timedOut chan struct{}
+}
+
+func (writer contentionLogWriter) Write(data []byte) (int, error) {
+	n, err := writer.rotatingLog.Write(data)
+	if errors.Is(err, errLogBusy) {
+		close(writer.timedOut)
+	}
+	return n, err
+}
+
+func TestLogCaptureResumesAfterLockTimeout(t *testing.T) {
+	for _, metadata := range []bool{false, true} {
+		name := "log"
+		if metadata {
+			name = "metadata"
+		}
+		t.Run(name, func(t *testing.T) { testLogCaptureResumesAfterLockTimeout(t, metadata) })
+	}
+}
+
+func testLogCaptureResumesAfterLockTimeout(t *testing.T, metadata bool) {
+	t.Helper()
+	store, record, cfg, log := rotationFixture(t, 3)
+	var lock *os.File
+	var err error
+	if metadata {
+		lock, err = store.lock(context.Background(), false)
+	} else {
+		lock, _, err = store.lockLog(context.Background(), record.ID, false)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	timedOut := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- captureLog(reader, contentionLogWriter{log, timedOut}) }()
+	if _, err := writer.Write([]byte("discarded during contention\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-timedOut:
+	case <-time.After(7 * time.Second):
+		t.Fatal("log lock wait was not bounded")
+	}
+	lock.Close()
+	if _, err := writer.Write([]byte("saved after recovery\n")); err != nil {
+		t.Fatal(err)
+	}
+	writer.Close()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errLogBusy) || !log.truncated {
+			t.Fatalf("discard was not reported: %v, truncated=%v", err, log.truncated)
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("capture did not finish")
+	}
+	var cursor logCursor
+	if got := snapshotLogs(t, store, record, cfg, &cursor); got != "saved after recovery\n" {
+		t.Fatalf("capture did not resume: %q", got)
+	}
+	defer cursor.pin.Close()
+}
+
+func TestLogLockDoesNotBlockMetadataOrOtherContainers(t *testing.T) {
+	store, record, _, _ := rotationFixture(t, 3)
+	other, err := store.Create(context.Background(), testConfig(), "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, _, err := store.lockLog(context.Background(), record.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := store.Update(ctx, record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
+		t.Fatalf("log lock blocked metadata: %v", err)
+	}
+	otherLog := &rotatingLog{store: store, id: other.ID, cfg: testConfig()}
+	if _, err := otherLog.Write([]byte("independent\n")); err != nil {
+		t.Fatal(err)
+	}
+	short, stop := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer stop()
+	if err := store.Remove(short, record.ID); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("removal bypassed live log lock: %v", err)
+	}
+	lock.Close()
+	if err := store.Remove(ctx, record.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLogLockUpgradesOldRecordsAndRejectsUnsafeFiles(t *testing.T) {
+	for _, kind := range []string{"missing", "symlink", "hardlink", "public"} {
+		t.Run(kind, func(t *testing.T) {
+			store, record, _, log := rotationFixture(t, 3)
+			path := filepath.Join(store.root, record.ID, ".logs")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			outside := filepath.Join(t.TempDir(), "outside")
+			if err := os.WriteFile(outside, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch kind {
+			case "symlink":
+				err = os.Symlink(outside, path)
+			case "hardlink":
+				err = os.Link(outside, path)
+			case "public":
+				err = os.WriteFile(path, nil, 0644)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = log.Write([]byte("safe\n"))
+			if (err == nil) != (kind == "missing") {
+				t.Fatalf("lock %s: %v", kind, err)
+			}
+		})
+	}
+}
+
+func TestLegacyRunningLogUsesMetadataLockUntilCompletion(t *testing.T) {
+	store, record, _, _ := rotationFixture(t, 3)
+	if err := store.Update(context.Background(), record.ID, func(r *Record) error {
+		r.LogLocking, r.State = false, StateRunning
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lock, _, err := store.lockLog(context.Background(), record.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := store.Update(ctx, record.ID, func(*Record) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("legacy snapshot did not fence the old writer: %v", err)
+	}
+	lock.Close()
+	if err := store.Update(context.Background(), record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	lock, _, err = store.lockLog(context.Background(), record.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := store.Update(ctx, record.ID, func(*Record) error { return nil }); err != nil {
+		t.Fatalf("completed legacy snapshot still blocked metadata: %v", err)
+	}
+	lock.Close()
+	operation, err := store.AcquireOperation(ctx, record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer operation.Close()
+	next, err := store.BeginExecution(ctx, record.ID, record.Generation)
+	if err != nil || !next.LogLocking {
+		t.Fatalf("restarted legacy record did not enable log locking: %+v, %v", next, err)
+	}
+}
 
 func rotationFixture(t *testing.T, files int) (*Store, Record, config.Config, *rotatingLog) {
 	t.Helper()

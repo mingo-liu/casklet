@@ -177,6 +177,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	record.PreviousExit = &previous
 	record.BootID = boot
 	record.State = StateStarting
+	record.LogLocking = true
 	record.StartedAt, record.FinishedAt, record.ExitCode = nil, nil, nil
 	record.Error, record.RunPath, record.Cgroup = "", "", ""
 	record.StopTimeout = nil

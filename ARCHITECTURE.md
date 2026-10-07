@@ -133,6 +133,15 @@ the source directory disappears. Temporary mounts and execution resources are
 fresh for each generation. Image acquisition must protect the source until a
 copy or durable reference exists; do not reverse image/container lock ordering.
 
+Log rotation and snapshots use a per-container `.logs` lock. Lookup and lock
+acquisition briefly use the metadata lock; waiting and log I/O do not. Removal
+claims the log lock before hiding a record. A bounded lock timeout discards only
+the current capture chunk, records truncation and a diagnostic, then continues
+capturing later output. Permanent storage errors still drain the pipe so output
+failure cannot indefinitely block the workload.
+Active supervisors from an older engine keep using the metadata lock; readers
+honor that protocol until completion or a new supervisor enables log locking.
+
 ## Extending the project
 
 - New CLI options: parse in the command family, validate shared semantics in `config`, then pass values to the owning module. Keep help and usage examples consistent.

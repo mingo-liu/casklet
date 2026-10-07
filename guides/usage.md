@@ -200,6 +200,10 @@ a stopped container and removes its private files, metadata, and logs.
 Detached stdout/stderr share rotating logs, defaulting to four files of 4 MiB.
 Set `--log-max-size` and `--log-max-files` on detached `run`; retained logs are
 limited to 64 MiB total. `logs -f` follows output; `--tail` accepts 0–1000000.
+If log storage is temporarily busy beyond its bounded lock wait, the affected
+chunk is discarded, `log_truncated` is set, and capture resumes for later output.
+The completion error reports that loss. Logs and metadata for other containers
+can continue during rotation.
 `inspect` reports environment names without values. `stats` returns one sample;
 CPU 100% means one busy core, and unavailable metrics are `N/A` or JSON `null`.
 

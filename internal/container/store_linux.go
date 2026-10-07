@@ -183,11 +183,11 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 			os.RemoveAll(path)
 		}
 	}()
-	record := Record{RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
+	record := Record{LogLocking: true, RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
 	if err := store.writeJSON(path, "config.json", cfg, maxConfigBytes); err != nil {
 		return Record{}, err
 	}
-	for _, filename := range []string{".lease", ".operation", "container.log"} {
+	for _, filename := range []string{".lease", ".operation", ".logs", "container.log"} {
 		file, err := store.openFile(filepath.Join(path, filename), unix.O_RDWR|unix.O_EXCL, true)
 		if err != nil {
 			return Record{}, err
@@ -449,12 +449,24 @@ func (store *Store) OpenLog(ctx context.Context, id string, write bool) (*os.Fil
 
 // Remove requires both a terminal record and an unclaimed supervisor lease.
 func (store *Store) Remove(ctx context.Context, id string) error {
+	record, err := store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !record.Terminal() {
+		return ErrNotTerminal
+	}
+	logLock, _, err := store.lockLog(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	defer logLock.Close()
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	record, err := store.readRecord(id)
+	record, err = store.readRecord(id)
 	if err != nil {
 		return err
 	}

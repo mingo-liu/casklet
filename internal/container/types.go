@@ -31,6 +31,7 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
+	LogLocking   bool             `json:"log_locking,omitempty"`
 	Generation   uint64           `json:"generation"`
 	LaunchAt     *time.Time       `json:"launch_at,omitempty"`
 	PreviousExit *ExecutionResult `json:"previous_exit,omitempty"`

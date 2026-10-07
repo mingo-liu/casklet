@@ -71,6 +71,16 @@ func Supervisor(id string, generations ...uint64) int {
 
 func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := store.Update(ctx, id, func(record *Record) error {
+		if record.Generation != generation || record.Terminal() {
+			return errors.New("container execution changed before log capture")
+		}
+		record.LogLocking = true
+		return nil
+	}); err != nil {
+		cancel()
+		return 125, err, false
+	}
 	cfg, err := store.Config(ctx, id)
 	cancel()
 	if err != nil {

@@ -29,19 +29,64 @@ func logName(index int) string {
 	return fmt.Sprintf("container.log.%d", index)
 }
 
-// Writes and snapshots share the storage lock. Output to a slow CLI is copied
-// after releasing the lock; it cannot hold up capture or container management.
+// Metadata lookup is brief; rotation and snapshots use a per-container lock.
+// Waiting for that lock never holds the metadata lock or blocks another log.
+func (store *Store) lockLog(ctx context.Context, id string, shared bool) (*os.File, Record, error) {
+	operation := unix.LOCK_EX
+	if shared {
+		operation = unix.LOCK_SH
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		lock, err := store.lock(ctx, true)
+		if err != nil {
+			return nil, Record{}, err
+		}
+		record, err := store.readRecord(id)
+		// Supervisors pinned to an older engine still rotate under the metadata
+		// lock. Keep that protocol until they finish or a new supervisor starts.
+		if err == nil && shared && !record.LogLocking && !record.Terminal() {
+			return lock, record, nil
+		}
+		var file *os.File
+		if err == nil {
+			// Create lazily for records written before log locks were introduced.
+			file, err = store.openFile(filepath.Join(store.root, id, ".logs"), unix.O_RDWR, true)
+		}
+		if err == nil {
+			err = unix.Flock(int(file.Fd()), operation|unix.LOCK_NB)
+		}
+		lock.Close()
+		if err == nil {
+			return file, record, nil
+		}
+		if file != nil {
+			file.Close()
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			return nil, Record{}, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, Record{}, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (log *rotatingLog) Write(data []byte) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	lock, err := log.store.lock(ctx, false)
+	lock, _, err := log.store.lockLog(ctx, log.id, false)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.truncated = true
+			return 0, errors.Join(errLogBusy, err)
+		}
 		return 0, err
 	}
 	defer lock.Close()
-	if _, err := log.store.readRecord(log.id); err != nil {
-		return 0, err
-	}
 	size, files := log.cfg.LogRetention()
 	dir := filepath.Join(log.store.root, log.id)
 	// Validate every artifact before deleting or renaming anything.
@@ -126,14 +171,11 @@ func (log *rotatingLog) Write(data []byte) (int, error) {
 func (log *rotatingLog) Sync() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	lock, err := log.store.lock(ctx, false)
+	lock, _, err := log.store.lockLog(ctx, log.id, false)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	if _, err := log.store.readRecord(log.id); err != nil {
-		return err
-	}
 	// A supervisor can die between rotating the current file and creating its
 	// replacement. Recover the missing current file even for a silent command.
 	file, err := log.store.openFile(filepath.Join(log.store.root, log.id, logName(0)), unix.O_RDWR, true)
@@ -159,15 +201,11 @@ type logSegment struct {
 }
 
 func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64) ([]byte, logCursor, error) {
-	lock, err := store.lock(ctx, true)
+	lock, record, err := store.lockLog(ctx, id, true)
 	if err != nil {
 		return nil, cursor, err
 	}
 	defer lock.Close()
-	record, err := store.readRecord(id)
-	if err != nil {
-		return nil, cursor, err
-	}
 	if record.Generation != generation {
 		return nil, cursor, nil
 	}

@@ -5,25 +5,31 @@ import (
 	"io"
 )
 
-// captureLog continues draining after storage failure so a workload cannot block
-// indefinitely on its output. Rotation is handled by the destination writer.
+var errLogBusy = errors.New("log storage lock timed out; output was discarded")
+
+// Temporary lock contention drops only the current chunk. Permanent storage
+// failures drain the remaining output so the workload cannot block indefinitely.
 func captureLog(input io.Reader, output io.Writer) error {
 	buffer := make([]byte, 32*1024)
-	var writeErr error
+	var writeErr, contentionErr error
 	for {
 		n, readErr := input.Read(buffer)
 		if n > 0 && writeErr == nil {
 			written, err := output.Write(buffer[:n])
-			writeErr = err
-			if written != n && writeErr == nil {
-				writeErr = io.ErrShortWrite
+			if errors.Is(err, errLogBusy) {
+				contentionErr = err
+			} else {
+				writeErr = err
+				if written != n && writeErr == nil {
+					writeErr = io.ErrShortWrite
+				}
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
 				readErr = nil
 			}
-			return errors.Join(writeErr, readErr)
+			return errors.Join(contentionErr, writeErr, readErr)
 		}
 	}
 }
