@@ -4,7 +4,7 @@
 
 ## macOS client
 
-Install Go 1.25+, Make, and Lima 2.0+ on macOS 13.5+:
+Install Go 1.27.1+, Make, and Lima 2.0+ on macOS 13.5+:
 
 ```sh
 brew install lima
@@ -30,12 +30,21 @@ architecture must match the client. Build each release architecture separately;
 | `make rootfs` | Export the built-in BusyBox template to `rootfs/busybox` |
 | `make fmt` / `make fmt-check` | Format / check Go sources |
 | `make test vet test-race` | Unit tests, static checks, and race detection |
+| `make vuln` | Reachable vulnerability checks for Darwin/Linux on arm64/amd64 |
 | `make test-macos` | Opt-in macOS end-to-end tests through Lima |
 | `make engine` | Internal Linux executable for guest development |
 | `make test-integration` | Privileged Linux engine suite, inside a dedicated VM |
 
 The macOS suite checks VM stop/start as well as commands and terminals. It skips
 the VM reboot test if another active container exists, preserving that workload.
+
+The Go version in `go.mod` is the minimum patched build toolchain and the exact
+version selected by CI. Keep it aligned with the verified Go archives in
+`dev/lima.yaml` when updating the toolchain. `make vuln` builds the pinned
+govulncheck analyzer as a host executable, then scans all four supported
+client/engine targets against the current Go vulnerability database. It needs
+network access and fails on reachable vulnerable symbols. Review reported
+platform and input conditions before treating a finding as an exploit.
 
 The client maintains its initialization lock and generated VM configuration in
 `~/Library/Application Support/mini-docker`. Lima owns the VM disk and SSH

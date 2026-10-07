@@ -70,7 +70,7 @@ mdocker machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 - `mdocker help`: command overview; `mdocker COMMAND --help`: syntax, options, and examples.
 
 ```sh
-make fmt-check test vet test-race
+make fmt-check test vet test-race vuln
 make test-macos # Real commands through the runtime VM; creates it if needed.
 ```
 

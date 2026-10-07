@@ -5,7 +5,7 @@ ROOTFS ?= rootfs/busybox
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-.PHONY: build engine install fmt fmt-check vet test test-race rootfs test-integration test-macos
+.PHONY: build engine install fmt fmt-check vet test test-race vuln rootfs test-integration test-macos
 
 build:
 	test "$(GOOS)" = darwin
@@ -39,6 +39,9 @@ test:
 
 test-race:
 	$(GO) test -race ./...
+
+vuln:
+	GO="$(GO)" ./scripts/check-vulnerabilities.sh
 
 test-macos: build
 	test "$$(uname -s)" = Darwin
