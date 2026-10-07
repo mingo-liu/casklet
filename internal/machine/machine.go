@@ -203,17 +203,18 @@ func enginePayload() ([]byte, error) {
 	return payload, nil
 }
 
+// A matching marker is usable only while both installed executables remain
+// available. Check them in one SSH request before accepting the cached payload.
+const installationCheckScript = `test -f "$1" && test -x "$1" && test -f "$2/bin/busybox" && test -x "$2/bin/busybox" && test "$(cat "$3")" = "$4"`
+
 func (m *Machine) install(ctx context.Context, instance Instance) error {
 	payload, err := enginePayload()
 	if err != nil {
 		return err
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
-	current, _ := m.output(ctx, instance, "cat", "/usr/local/lib/mini-docker/engine.sha256")
-	if strings.TrimSpace(string(current)) == hash {
-		if _, err := m.output(ctx, instance, "test", "-x", guestRootFS+"/bin/busybox"); err == nil {
-			return nil
-		}
+	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, guestRootFS, "/usr/local/lib/mini-docker/engine.sha256", hash); err == nil {
+		return nil
 	}
 	fmt.Fprintln(m.stderr, "Installing the bundled container engine...")
 	stage, err := os.MkdirTemp(m.directory, "install-")

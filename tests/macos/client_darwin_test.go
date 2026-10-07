@@ -113,6 +113,31 @@ func TestDefaultRootFSAndExactStreams(t *testing.T) {
 	}
 }
 
+func TestMachineRepairsNonExecutableEngine(t *testing.T) {
+	success(t, "doctor")
+	guest := func(args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "mini-docker-runtime", "sudo", "-n", "--"}, args...)...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("guest command: %w: %s", err, output)
+		}
+		return nil
+	}
+	const engine = "/usr/local/bin/mdocker"
+	t.Cleanup(func() {
+		if err := guest("chmod", "0755", engine); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := guest("chmod", "0644", engine); err != nil {
+		t.Fatal(err)
+	}
+	if out := success(t, "run", "--", "/bin/echo", "engine-repaired"); out != "engine-repaired\n" {
+		t.Fatalf("repaired engine output: %q", out)
+	}
+}
+
 func TestLifecycleRetainsContainerWrites(t *testing.T) {
 	id := detached(t, "--", "/bin/sh", "-c", "echo retained >> /count; echo lifecycle-ready; sleep 60")
 	waitForContents(t, id, "retained\n")

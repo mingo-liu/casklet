@@ -121,3 +121,62 @@ func TestMachineDiscoveryDoesNotAdoptDevelopmentVM(t *testing.T) {
 		t.Fatalf("discovery: %+v, %v", instance, err)
 	}
 }
+
+func TestInstallationCheckRequiresExecutablePayloadAndTemplate(t *testing.T) {
+	for _, failure := range []string{"healthy", "missing engine", "nonexecutable engine", "engine directory", "missing busybox", "nonexecutable busybox", "busybox directory", "missing marker", "stale marker"} {
+		t.Run(failure, func(t *testing.T) {
+			directory := filepath.Join(t.TempDir(), "installation with spaces")
+			rootfs := filepath.Join(directory, "rootfs")
+			if err := os.MkdirAll(filepath.Join(rootfs, "bin"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			engine := filepath.Join(directory, "mdocker")
+			busybox := filepath.Join(rootfs, "bin", "busybox")
+			marker := filepath.Join(directory, "engine.sha256")
+			for _, file := range []string{engine, busybox} {
+				if err := os.WriteFile(file, []byte("payload"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(marker, []byte("installed-hash\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch failure {
+			case "missing engine":
+				err = os.Remove(engine)
+			case "nonexecutable engine":
+				err = os.Chmod(engine, 0644)
+			case "engine directory":
+				err = os.Remove(engine)
+				if err == nil {
+					err = os.Mkdir(engine, 0755)
+				}
+			case "missing busybox":
+				err = os.Remove(busybox)
+			case "nonexecutable busybox":
+				err = os.Chmod(busybox, 0644)
+			case "busybox directory":
+				err = os.Remove(busybox)
+				if err == nil {
+					err = os.Mkdir(busybox, 0755)
+				}
+			case "missing marker":
+				err = os.Remove(marker)
+			case "stale marker":
+				err = os.WriteFile(marker, []byte("previous-hash\n"), 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := exec.Command("/bin/sh", "-c", installationCheckScript, "check-install", engine, rootfs, marker, "installed-hash").Output()
+			if failure == "healthy" {
+				if err != nil {
+					t.Fatalf("healthy installation: %q, %v", output, err)
+				}
+			} else if err == nil {
+				t.Fatalf("accepted %s: %q", failure, output)
+			}
+		})
+	}
+}
