@@ -10,6 +10,9 @@ import (
 )
 
 func main() {
+	if handled, code := remoteMode(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "__enter" {
 		os.Exit(containerruntime.EnterExec())
 	}
