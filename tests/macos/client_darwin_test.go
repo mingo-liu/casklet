@@ -262,7 +262,13 @@ func TestPublishedTCPAndUDP(t *testing.T) {
 	}
 	tcp, udp := freePort(t), freePort(t)
 	id := detached(t, "--rootfs", template, "--network", "bridge", "-p", fmt.Sprintf("127.0.0.1:%d:8080", tcp), "-p", fmt.Sprintf("%d:7777/udp", udp), "--", "/bin/network-helper", "network-service")
-	_ = id
+	inspection := inspectHost(t, id)
+	if len(inspection.Config.Publish) != 2 || inspection.Config.Publish[0].HostIP != "127.0.0.1" || inspection.Config.Publish[1].HostIP != "0.0.0.0" || inspection.Config.Publish[1].Protocol != "udp" {
+		t.Fatalf("Mac published addresses: %+v", inspection.Config.Publish)
+	}
+	if len(inspection.GuestResources.Publish) != 2 || inspection.GuestResources.Publish[0].HostIP != "127.0.0.3" || inspection.GuestResources.Publish[1].HostIP != "127.0.0.2" {
+		t.Fatalf("guest published addresses: %+v", inspection.GuestResources.Publish)
+	}
 	address := "127.0.0.1:" + strconv.Itoa(tcp)
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{Proxy: nil}}
 	deadline := time.Now().Add(20 * time.Second)

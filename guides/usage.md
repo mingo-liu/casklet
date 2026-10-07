@@ -72,8 +72,10 @@ launch; forwarding discovery is asynchronous and can take a few seconds. An
 external process claiming the port after that check can still prevent
 forwarding. Lima startup forces its gRPC forwarder so UDP is supported.
 Only the engine's dedicated published-port addresses are forwarded; other VM
-services are excluded. `inspect` currently reports guest filesystem and network
-addresses. `--rootfs` and imports must contain Linux executables matching the
+services are excluded. `inspect` reports Mac published-port addresses and canonical Mac filesystem
+paths in `config`; its `guest_resources` field retains VM paths and forwarding
+addresses for diagnostics. The built-in template is shown as `builtin:busybox`.
+Inspection does not require the original source directory to still exist. `--rootfs` and imports must contain Linux executables matching the
 Mac/VM CPU architecture; macOS binaries are not container workloads.
 
 ## Resource and execution options

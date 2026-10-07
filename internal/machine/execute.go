@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -195,6 +194,11 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
 	cmd := sshCommand(context.Background(), *instance, invocation.TTY, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	var inspection *inspectionOutput
+	if len(invocation.Args) > 0 && invocation.Args[0] == "inspect" {
+		inspection = &inspectionOutput{}
+		cmd.Stdout = inspection
+	}
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
 	defer signal.Stop(signals)
@@ -207,14 +211,7 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	for {
 		select {
 		case err := <-done:
-			if err == nil {
-				return 0, nil
-			}
-			var exit *exec.ExitError
-			if errors.As(err, &exit) && exit.ExitCode() >= 0 {
-				return exit.ExitCode(), nil
-			}
-			return 125, err
+			return guestResult(*instance, inspection, stdout, err)
 		case signal := <-signals:
 			if signal == syscall.SIGWINCH {
 				_ = cmd.Process.Signal(signal)
