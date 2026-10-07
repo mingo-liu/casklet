@@ -67,7 +67,7 @@ mdocker machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 - [Usage guide](guides/usage.md): files, images, networking, security, and lifecycle.
 - [Development guide](guides/development.md): builds, tests, and troubleshooting.
 - [Architecture](ARCHITECTURE.md): host/guest boundaries and resource ownership.
-- `mdocker help`: command syntax and options.
+- `mdocker help`: command overview; `mdocker COMMAND --help`: syntax, options, and examples.
 
 ```sh
 make fmt-check test vet test-race

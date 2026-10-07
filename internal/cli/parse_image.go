@@ -14,7 +14,10 @@ func parseImage(r Request, args []string) (Request, error) {
 		return r, errors.New("image requires import, ls, or rm")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
-		return Request{Action: "help"}, nil
+		if len(args) != 1 {
+			return r, errors.New("image help takes no arguments; use mdocker help image COMMAND for a subcommand")
+		}
+		return Request{Action: "help", HelpTopic: "image"}, nil
 	}
 	r.Action = "image-" + args[0]
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
@@ -28,7 +31,7 @@ func parseImage(r Request, args []string) (Request, error) {
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return Request{Action: "help"}, nil
+			return parseFlagHelp("image "+args[0], fs, args[1:])
 		}
 		return r, err
 	}

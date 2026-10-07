@@ -112,7 +112,7 @@ func parseRun(r Request, args []string) (Request, error) {
 	}
 	if err := fs.Parse(options); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return Request{Action: "help"}, nil
+			return parseFlagHelp(r.Action, fs, args)
 		}
 		return r, err
 	}

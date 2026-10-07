@@ -253,8 +253,8 @@ printf '%s\n' "$2" > /usr/local/lib/mini-docker/engine.sha256
 
 func parseHostCommand(args []string) (Options, error) {
 	options := defaultOptions()
-	if (len(args) > 1 && (args[1] == "--help" || args[1] == "-h")) || (len(args) > 2 && (args[2] == "--help" || args[2] == "-h")) {
-		return options, flag.ErrHelp
+	if handled, err := directHostHelp(args); handled {
+		return options, err
 	}
 	if len(args) == 0 {
 		return options, errors.New("a host command is required")
@@ -280,6 +280,9 @@ func parseHostCommand(args []string) (Options, error) {
 		fs.IntVar(&options.Disk, "disk", options.Disk, "VM disk in GiB")
 		fs.Func("mount", "additional shared directory", func(value string) error { options.Mounts = append(options.Mounts, value); return nil })
 		if err := fs.Parse(args[2:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return options, initHelpResult(args[2:])
+			}
 			return options, err
 		}
 		if fs.NArg() != 0 {
@@ -307,21 +310,15 @@ func parseHostCommand(args []string) (Options, error) {
 func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	options, err := parseHostCommand(args)
 	if errors.Is(err, flag.ErrHelp) {
-		_, err = fmt.Fprintln(stdout, "Usage: mdocker machine init [--cpus N] [--memory GiB] [--disk GiB] [--mount DIRECTORY ...]; mdocker machine start|stop|status; mdocker machine share DIRECTORY; mdocker rootfs DIRECTORY")
+		text, helpErr := Help(hostCommandTopic(args))
+		if helpErr != nil {
+			return helpErr
+		}
+		_, err = fmt.Fprint(stdout, text)
 		return err
 	}
 	if err != nil {
-		topic := "machine"
-		if len(args) > 0 && args[0] == "rootfs" {
-			topic = "rootfs"
-		}
-		if len(args) > 1 && args[0] == "machine" {
-			switch args[1] {
-			case "init", "start", "stop", "status", "share":
-				topic += " " + args[1]
-			}
-		}
-		return fmt.Errorf("%w\nHint: run mdocker %s --help for usage and examples.", err, topic)
+		return fmt.Errorf("%w\nHint: run mdocker %s --help for usage and examples.", err, hostCommandTopic(args))
 	}
 	var parent string
 	if args[0] == "rootfs" {

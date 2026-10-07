@@ -21,6 +21,17 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		return 125
 	}
+	if r.Action == "help" {
+		text, err := platformUsage(r.HelpTopic)
+		if err == nil {
+			_, err = fmt.Fprint(stdout, text)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "mdocker: %v\n", err)
+			return 125
+		}
+		return 0
+	}
 	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {
 		return code
 	}
@@ -29,9 +40,6 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return 125
 	}
 	switch r.Action {
-	case "help":
-		fmt.Fprint(stdout, platformUsage())
-		return 0
 	case "doctor":
 		if err := containerruntime.Check(r.Config.RootFS); err != nil {
 			fmt.Fprintf(stderr, "mdocker: %v\n", err)

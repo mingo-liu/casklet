@@ -2,7 +2,18 @@
 
 [Quick start](../README.md) · [Development](development.md) · [Architecture](../ARCHITECTURE.md)
 
-Run `mdocker help` for the complete option reference. Management flags precede
+Run `mdocker help` for the command overview. Each command has a focused reference:
+
+```sh
+mdocker run --help
+mdocker help logs
+mdocker help image import
+mdocker machine share --help
+```
+
+`mdocker help COMMAND` and `mdocker COMMAND --help` show the same reference,
+including options, defaults, constraints, and examples. Help works without Lima
+and does not create or start the VM. Management flags precede
 the container ID or exact name; `run` and `exec` require `--` before the command.
 Host environment variables are never inherited by workloads.
 Local rootfs structure, bind sources, supported published addresses, and occupied
@@ -76,11 +87,12 @@ launch; forwarding discovery is asynchronous and can take a few seconds. An
 external process claiming the port after that check can still prevent
 forwarding. Lima startup forces its gRPC forwarder so UDP is supported.
 Only the engine's dedicated published-port addresses are forwarded; other VM
-services are excluded. `inspect` reports Mac published-port addresses and canonical Mac filesystem
-paths in `config`; its `guest_resources` field retains VM paths and forwarding
+services are excluded. `inspect` reports Mac published-port addresses and
+canonical Mac filesystem paths in `config`; its `guest_resources` field retains VM paths and forwarding
 addresses for diagnostics. The built-in template is shown as `builtin:busybox`.
-Inspection does not require the original source directory to still exist. `--rootfs` and imports must contain Linux executables matching the
-Mac/VM CPU architecture; macOS binaries are not container workloads.
+Inspection does not require the original source directory to still exist.
+`--rootfs` and imports must contain Linux executables matching the Mac/VM CPU
+architecture; macOS binaries are not container workloads.
 
 ## Resource and execution options
 

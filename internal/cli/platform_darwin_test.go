@@ -19,6 +19,9 @@ func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 	if code := Execute([]string{"help"}, os.Stdin, out, out); code != 0 {
 		t.Fatalf("help requires Lima: %d", code)
 	}
+	if code := Execute([]string{"help", "doctor"}, os.Stdin, out, out); code != 0 {
+		t.Fatalf("doctor help requires Lima: %d", code)
+	}
 	if code := Execute([]string{"run", "--unknown", "--", "true"}, os.Stdin, out, out); code != 125 {
 		t.Fatalf("invalid arguments: %d", code)
 	}
