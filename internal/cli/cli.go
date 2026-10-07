@@ -12,10 +12,17 @@ import (
 )
 
 func Execute(args []string, stdin, stdout, stderr *os.File) int {
+	if handled, code := executeHostCommand(args, stdin, stdout, stderr); handled {
+		return code
+	}
+	args = platformArguments(args)
 	r, err := Parse(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		return 125
+	}
+	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {
+		return code
 	}
 	if err := prepareLaunch(args, r); err != nil {
 		fmt.Fprintf(stderr, "mdocker: %v\n", err)
@@ -23,7 +30,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	}
 	switch r.Action {
 	case "help":
-		fmt.Fprint(stdout, usage)
+		fmt.Fprint(stdout, platformUsage())
 		return 0
 	case "doctor":
 		if err := containerruntime.Check(r.Config.RootFS); err != nil {
