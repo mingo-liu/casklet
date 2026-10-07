@@ -5,7 +5,7 @@ ROOTFS ?= rootfs/busybox
 PREFIX ?= /usr/local
 DESTDIR ?=
 
-.PHONY: build engine install fmt fmt-check vet test test-race rootfs test-integration
+.PHONY: build engine install fmt fmt-check vet test test-race rootfs test-integration test-macos
 
 build:
 	test "$(GOOS)" = darwin
@@ -39,6 +39,11 @@ test:
 
 test-race:
 	$(GO) test -race ./...
+
+test-macos: build
+	test "$$(uname -s)" = Darwin
+	./bin/mdocker doctor
+	MINI_DOCKER_MACOS_INTEGRATION=1 MINI_DOCKER_MACOS_BINARY="$(abspath bin/mdocker)" $(GO) test -v -timeout 10m ./tests/macos
 
 rootfs:
 	@if [ "$$(uname -s)" = Darwin ]; then ./bin/mdocker rootfs "$(ROOTFS)"; else ./scripts/prepare-rootfs.sh "$(ROOTFS)"; fi
