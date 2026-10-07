@@ -79,10 +79,20 @@ Snapshots include tracked and unignored source files, including the embedded
 rootfs helper, but exclude generated engines and host state. Use a fresh snapshot
 after changes. Engine tests need root, systemd, cgroups v2, namespaces, and network
 administration privileges, and must not run on a shared production Linux host.
-CI runs formatting, unit tests, static checks, and race detection on macOS,
-then builds arm64 and amd64 macOS clients with their bundled Linux engines.
-Run the macOS end-to-end suite and privileged Linux engine suite locally in
-their dedicated VMs; neither suite runs on hosted CI runners.
+CI runs formatting, unit tests, static checks, and race detection on macOS and
+native Linux amd64/arm64 runners. It builds both macOS client architectures and
+their bundled Linux engines, and each native Linux engine. A separate job runs
+the four-target vulnerability check.
+
+After those checks pass, the privileged Linux integration suite runs on fresh
+GitHub-hosted Ubuntu 24.04 amd64/arm64 VMs. Each job explicitly opts into
+`scripts/prepare-integration-vm.sh`, which installs prerequisites, permits only
+the test bridge through existing forwarding rules, and prepares rootless user
+delegation. Do not use that provisioning script on a shared self-hosted runner.
+All jobs run for pushes, pull requests, and manual dispatch; integration failures
+fail CI rather than being ignored. Configure these checks as required in the
+repository's branch/release rules. macOS end-to-end tests still run locally
+through the dedicated Lima product VM with `make test-macos`.
 
 ## Troubleshooting
 
