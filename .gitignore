@@ -3,6 +3,7 @@
 /rootfs/
 /.cache/
 /.runtime/
+/internal/machine/assets/mdocker-engine
 *.test
 *.out
 .DS_Store
