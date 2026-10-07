@@ -27,6 +27,20 @@ explicitly run a shell in the container.
 
 The home directory is shared writable with the VM. Additional directories can
 be configured before first use with `mdocker machine init --mount DIRECTORY`.
+To add a directory to an existing VM, stop it, add the share, and start it:
+
+```sh
+mdocker machine stop
+mdocker machine share /Volumes/Projects
+mdocker machine start
+```
+
+Stopping the VM terminates running containers and preserves their files. Restart
+retained containers with `mdocker start NAME`. Adding a share preserves the VM
+disk, resources, forwarding rules, and existing shares. Sharing an already
+covered writable directory is a no-op. Overlapping or read-only shares are
+rejected rather than replaced.
+
 Only directories inside configured writable shares are accepted. The writable
 container rootfs, image store, records, and logs live on the VM disk; bind mounts
 provide live access to shared Mac files. File ownership, executable permissions,

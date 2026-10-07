@@ -269,7 +269,7 @@ func parseHostCommand(args []string) (Options, error) {
 		return options, fmt.Errorf("unknown host command %q", args[0])
 	}
 	if len(args) < 2 {
-		return options, errors.New("machine requires init, start, stop, or status")
+		return options, errors.New("machine requires init, start, stop, status, or share")
 	}
 	switch args[1] {
 	case "init":
@@ -287,6 +287,13 @@ func parseHostCommand(args []string) (Options, error) {
 		}
 		_, err := configData(options)
 		return options, err
+	case "share":
+		if len(args) != 3 || args[2] == "" {
+			return options, errors.New("machine share requires one existing directory")
+		}
+		path, err := sharedDirectory(args[2])
+		options.Mounts = []string{path}
+		return options, err
 	case "start", "stop", "status":
 		if len(args) != 2 {
 			return options, fmt.Errorf("machine %s takes no arguments", args[1])
@@ -300,7 +307,7 @@ func parseHostCommand(args []string) (Options, error) {
 func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	options, err := parseHostCommand(args)
 	if errors.Is(err, flag.ErrHelp) {
-		_, err = fmt.Fprintln(stdout, "Usage: mdocker machine init [--cpus N] [--memory GiB] [--disk GiB] [--mount DIRECTORY ...]; mdocker machine start|stop|status; mdocker rootfs DIRECTORY")
+		_, err = fmt.Fprintln(stdout, "Usage: mdocker machine init [--cpus N] [--memory GiB] [--disk GiB] [--mount DIRECTORY ...]; mdocker machine start|stop|status; mdocker machine share DIRECTORY; mdocker rootfs DIRECTORY")
 		return err
 	}
 	if err != nil {
@@ -318,6 +325,8 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return m.rootfs(ctx, *instance, args[1], stdout)
 	}
 	switch args[1] {
+	case "share":
+		return m.share(ctx, options.Mounts[0], stdout)
 	case "init":
 		_, err = m.ensure(ctx, options, true)
 	case "start":

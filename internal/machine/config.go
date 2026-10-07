@@ -169,5 +169,5 @@ func (instance Instance) hostPath(path string) (string, error) {
 			return filepath.Join(point, rel), nil
 		}
 	}
-	return "", fmt.Errorf("directory is not shared with the machine: %s; configure it with machine init --mount before creating the VM", absolute)
+	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with mdocker machine stop, add it with mdocker machine share %s, then mdocker machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
 }

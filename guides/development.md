@@ -81,8 +81,9 @@ their dedicated VMs; neither suite runs on hosted CI runners.
 - `mdocker doctor` checks the guest runtime with the default BusyBox template.
 - If startup was interrupted, retry `mdocker machine start`; engine installation
   is repeatable and executable replacement preserves existing container storage.
-- A directory outside your shared home must be configured with `machine init
-  --mount` before VM creation. The client reports unavailable shares explicitly.
+- For a directory outside your shared home, use `machine init --mount` before
+  VM creation, or `machine stop`, `machine share DIRECTORY`, and `machine start`
+  for an existing VM. Stopping terminates workloads and preserves their files.
 - Initialization flags apply only to a new machine. To change an existing VM,
   stop it, use Lima's configuration tools, then start it. Preserve the product's
   dedicated loopback forwarding rules and writable home share.

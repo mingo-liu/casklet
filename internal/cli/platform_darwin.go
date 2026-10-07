@@ -51,12 +51,14 @@ func platformUsage() string {
   mdocker machine start
   mdocker machine stop
   mdocker machine status
+  mdocker machine share DIRECTORY
   mdocker rootfs DIRECTORY
 
 Requires macOS 13.5+ and Lima 2.0+. Install Lima with: brew install lima
 The first container command creates a dedicated Linux VM automatically.
 The default filesystem is the VM's built-in BusyBox template.
-Your home directory is shared with the VM; use machine init --mount for other directories.
+Your home directory is shared with the VM; use machine init --mount before creation.
+To add a share later: machine stop, machine share DIRECTORY, machine start.
 Container state and images live in the VM. Rootless identities refer to the VM user.
 Published ports support 0.0.0.0 and 127.0.0.1 on the Mac, for TCP and UDP.
 Stopping the machine terminates its containers and preserves their files.
