@@ -33,8 +33,9 @@ mkdir -p "$staging/bin" "$staging/proc" "$staging/dev" "$staging/tmp" "$staging/
 chmod 1777 "$staging/tmp"
 cp "$busybox" "$staging/bin/busybox"
 chmod 0755 "$staging/bin/busybox"
-"$busybox" --list | while IFS= read -r applet; do
-    case "$applet" in ''|busybox) continue ;; */*|.|..) fail "invalid applet: $applet" ;; esac
+applets=$("$busybox" --list)
+printf '%s\n' "$applets" | while IFS= read -r applet; do
+    case "$applet" in ''|busybox) continue ;; */*|.|..|*\"*|*\\*) fail "invalid applet: $applet" ;; esac
     ln -s busybox "$staging/bin/$applet"
 done
 printf 'root:x:0:0:root:/:/bin/sh\n' > "$staging/etc/passwd"
@@ -46,9 +47,10 @@ cat > "$staging/.mini-docker-rootfs.json" <<METADATA
   "source": "installed Debian/Ubuntu package",
   "package": "busybox-static",
   "version": "$version",
-  "sha256": "$checksum"
-}
+  "sha256": "$checksum",
+  "applets":
 METADATA
+printf '%s\n' "$applets" | awk 'BEGIN { printf "[" } $0 != "" && $0 != "busybox" { printf "%s\"%s\"", separator, $0; separator=", " } END { print "]\n}" }' >> "$staging/.mini-docker-rootfs.json"
 # Commands using a numeric non-root identity must be able to traverse the root.
 chmod 0755 "$staging"
 mv "$staging" "$rootfs"

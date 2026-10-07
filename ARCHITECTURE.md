@@ -32,6 +32,16 @@ executable and preserves the Linux container/image stores. The writable Mac
 home share provides installation staging and live bind sources; persistent
 container roots remain on the Linux disk.
 
+Engine caching is independent of builtin template health. A private guest
+installation operation checks the template's layout, applet links, permissions,
+architecture, and recorded BusyBox checksum. Repairs generate and validate a
+private sibling tree before a Linux rename exchange publishes it atomically.
+The template module owns a stable lease outside the exchanged directory: source
+copies hold it shared, and repair holds it exclusively. Runtime releases the
+copy lease once its private root is ready, so running workloads do not delay
+repair. Interrupted staging trees are reclaimed under the exclusive lease;
+symlinks, unsafe directory ownership/permissions, and mounts block reclamation.
+
 SSH carries exact shell-quoted argv, standard streams, exit status, and PTYs.
 `remote` owns per-session Unix datagram sockets in private guest directories,
 relays control signals to the CLI child, and removes sockets when sessions end.
@@ -110,7 +120,7 @@ the existing executor contract.
 
 | Resource | Owner and lifetime |
 | --- | --- |
-| Template/image lease | `template.Template`; caller closes after use. Failure closes before returning. Directory templates must stay stable while copying. |
+| Template/image lease | `template.Template`; builtin copy leases release after copying, image leases close after use. Failure closes before returning. Other directory templates must stay stable while copying. |
 | Transient root and run directory | Runtime; removed after workload cleanup, or preserved when safe cleanup cannot be established. |
 | Retained root | Container store; reused on start/restart and removed by `rm`. Runtime stages, syncs, and atomically publishes the first copy. |
 | Cgroup and network allocation | Runtime coordinates adapter cleanup and preserves recovery receipts when needed. |

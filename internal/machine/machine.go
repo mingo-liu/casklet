@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/elf"
-	"embed"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,9 +19,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-//go:embed assets/*
-var assets embed.FS
 
 type Machine struct {
 	lima      string
@@ -188,7 +184,7 @@ func (m *Machine) output(ctx context.Context, instance Instance, args ...string)
 }
 
 func enginePayload() ([]byte, error) {
-	payload, err := assets.ReadFile("assets/mdocker-engine")
+	payload, err := bundledEngine()
 	if err != nil {
 		return nil, errors.New("this client has no bundled engine; build it with make build")
 	}
@@ -203,9 +199,9 @@ func enginePayload() ([]byte, error) {
 	return payload, nil
 }
 
-// A matching marker is usable only while both installed executables remain
-// available. Check them in one SSH request before accepting the cached payload.
-const installationCheckScript = `test -f "$1" && test -x "$1" && test -f "$2/bin/busybox" && test -x "$2/bin/busybox" && test "$(cat "$3")" = "$4"`
+// Engine caching and template health are independent. The guest checks and
+// repairs the template even when the installed engine matches this client.
+const installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3"`
 
 func (m *Machine) install(ctx context.Context, instance Instance) error {
 	payload, err := enginePayload()
@@ -213,8 +209,9 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 		return err
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
-	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, guestRootFS, "/usr/local/lib/mini-docker/engine.sha256", hash); err == nil {
-		return nil
+	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, "/usr/local/lib/mini-docker/engine.sha256", hash); err == nil {
+		_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-template")
+		return err
 	}
 	fmt.Fprintln(m.stderr, "Installing the bundled container engine...")
 	stage, err := os.MkdirTemp(m.directory, "install-")
@@ -229,22 +226,13 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 	if err := os.WriteFile(filepath.Join(stage, "mdocker"), payload, 0700); err != nil {
 		return err
 	}
-	prepare, err := assets.ReadFile("assets/prepare-rootfs.sh")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(stage, "prepare-rootfs.sh"), prepare, 0600); err != nil {
-		return err
-	}
 	// Atomic executable replacement lets existing supervisors finish with their
 	// pinned binary. Persistent container/image storage is never replaced.
 	script := `set -eu
 install -d -m 0755 /usr/local/lib/mini-docker
 install -m 0755 "$1/mdocker" /usr/local/bin/mdocker.new
 mv /usr/local/bin/mdocker.new /usr/local/bin/mdocker
-if [ ! -e /var/lib/mini-docker/templates/busybox ]; then
-  /bin/sh "$1/prepare-rootfs.sh" /var/lib/mini-docker/templates/busybox
-fi
+/usr/local/bin/mdocker __ensure-template
 printf '%s\n' "$2" > /usr/local/lib/mini-docker/engine.sha256
 `
 	_, err = m.output(ctx, instance, "sudo", "-n", "--", "/bin/sh", "-c", script, "install", guestStage, hash)

@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/mingo-liu/mini-docker/internal/template"
 )
 
 const Name = "mini-docker-runtime"
 const BuiltinRootFS = "builtin:busybox"
-const guestRootFS = "/var/lib/mini-docker/templates/busybox"
+const guestRootFS = template.BuiltinPath
 const guestEngine = "/usr/local/bin/mdocker"
 
 type Options struct {

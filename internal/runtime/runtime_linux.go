@@ -120,6 +120,9 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err != nil {
 		return preparationError(err, signals)
 	}
+	if err := source.ReleaseCopyLease(); err != nil {
+		return code, fmt.Errorf("release template copy lease: %w", err)
+	}
 	if cfg.UserNS && !cfg.Rootless {
 		uid, _ := config.MappedID(0, cfg.UIDMappings)
 		gid, _ := config.MappedID(0, cfg.GIDMappings)

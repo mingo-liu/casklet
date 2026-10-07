@@ -90,6 +90,13 @@ their dedicated VMs; neither suite runs on hosted CI runners.
 - `mdocker doctor` checks the guest runtime with the default BusyBox template.
 - If startup was interrupted, retry `mdocker machine start`; engine installation
   is repeatable and executable replacement preserves existing container storage.
+- Every engine command checks the builtin template, including when the bundled
+  engine is already installed. Missing/corrupt BusyBox files, applets, metadata,
+  or required directories are repaired from the installed static BusyBox package.
+  Repair validates a private candidate before atomically replacing the template;
+  preparation failure preserves the original. Existing container roots and user
+  templates are unaffected. Unsafe ownership, writable directories, symlinks at
+  the managed root, or mounts produce an error instead of automatic deletion.
 - For a directory outside your shared home, use `machine init --mount` before
   VM creation, or `machine stop`, `machine share DIRECTORY`, and `machine start`
   for an existing VM. Stopping terminates workloads and preserves their files.
