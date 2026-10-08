@@ -7,10 +7,12 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
 	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/mini-docker/internal/image"
 )
 
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
@@ -44,7 +46,8 @@ func parseRun(r Request, args []string) (Request, error) {
 			return err
 		})
 		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
-		fs.StringVar(&r.Config.Image, "image", "", "local image ID")
+		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
+		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })
 		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
 		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
 		publish := func(value string) error {
@@ -91,7 +94,7 @@ func parseRun(r Request, args []string) (Request, error) {
 			r.Config.Mounts = append(r.Config.Mounts, mount)
 			return nil
 		})
-		fs.StringVar(&r.Config.Workdir, "workdir", "/", "working directory")
+		fs.StringVar(&r.Config.Workdir, "workdir", "", "working directory")
 		fs.StringVar(&user, "user", "", "numeric user and group IDs")
 		fs.BoolVar(&r.Config.ReadOnly, "read-only", false, "read-only root filesystem")
 	}
@@ -129,7 +132,7 @@ func parseRun(r Request, args []string) (Request, error) {
 			imageSpecified = imageSpecified || f.Name == "image"
 		})
 		if rootSpecified == imageSpecified || (rootSpecified && r.Config.RootFS == "") || (imageSpecified && r.Config.Image == "") {
-			return r, errors.New("run requires exactly one of --rootfs DIRECTORY or --image ID")
+			return r, errors.New("run requires exactly one of --rootfs DIRECTORY or --image REFERENCE")
 		}
 	}
 	if r.Action == "doctor" {
@@ -138,8 +141,16 @@ func parseRun(r Request, args []string) (Request, error) {
 		}
 		return r, nil
 	}
-	if separator < 0 || len(r.Config.Command) == 0 || r.Config.Command[0] == "" {
+	if (r.Config.Image == "" && separator < 0) || (separator >= 0 && (len(r.Config.Command) == 0 || r.Config.Command[0] == "")) {
 		return r, errors.New("a command is required after --; append a command such as -- /bin/echo hello")
+	}
+	if r.Config.Image != "" && image.ValidateID(r.Config.Image) != nil {
+		if _, err := image.NormalizeReference(r.Config.Image); err != nil {
+			return r, err
+		}
+	}
+	if r.Entrypoint != nil && (r.Config.Image == "" || strings.ContainsRune(*r.Entrypoint, 0)) {
+		return r, errors.New("--entrypoint requires --image and cannot contain NUL")
 	}
 	if !hostnamePattern.MatchString(r.Config.Hostname) {
 		return r, errors.New("hostname must contain 1-63 letters, digits, or hyphens and start and end with a letter or digit")
@@ -202,7 +213,9 @@ func parseRun(r Request, args []string) (Request, error) {
 			return r, errors.New("--user requires a numeric UID[:GID]")
 		}
 	}
-	if r.Config.Workdir == "" {
+	workdirSpecified := false
+	fs.Visit(func(f *flag.Flag) { workdirSpecified = workdirSpecified || f.Name == "workdir" })
+	if workdirSpecified && r.Config.Workdir == "" {
 		return r, errors.New("--workdir must be an absolute path")
 	}
 	if r.Config.Seccomp == "" {
@@ -220,9 +233,13 @@ func parseRun(r Request, args []string) (Request, error) {
 	if r.Config.UserNS && r.Detach {
 		return r, errors.New("user namespaces currently support foreground runs only")
 	}
-	if err := r.Config.ValidateExecution(); err != nil {
+	if err := r.Config.ValidateRunRequest(); err != nil {
 		return r, err
 	}
-	r.Config.Workdir = path.Clean(r.Config.Workdir)
+	if r.Config.Workdir != "" {
+		r.Config.Workdir = path.Clean(r.Config.Workdir)
+	} else if r.Config.Image == "" {
+		r.Config.Workdir = "/"
+	}
 	return r, nil
 }

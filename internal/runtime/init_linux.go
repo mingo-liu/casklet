@@ -106,7 +106,7 @@ func Init() int {
 			return fail(fmt.Errorf("send terminal: %w", err))
 		}
 	}
-	if err := reducePrivileges(cfg.User); err != nil {
+	if err := reducePrivileges(cfg.User, cfg.OCI); err != nil {
 		return fail(err)
 	}
 	if err := installSeccomp(cfg.SeccompProfile()); err != nil {
@@ -291,7 +291,7 @@ func enableLoopback() error {
 
 // Apply restrictions to every Go thread so fork/exec cannot select an
 // unrestricted thread. The runtime is built with CGO_ENABLED=0.
-func reducePrivileges(user *config.User) error {
+func reducePrivileges(user *config.User, image ...bool) error {
 	data, err := os.ReadFile("/proc/sys/kernel/cap_last_cap")
 	if err != nil {
 		return err
@@ -313,7 +313,14 @@ func reducePrivileges(user *config.User) error {
 	if err := prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL); err != nil {
 		return err
 	}
+	mask := uint64(0)
+	if len(image) > 0 && image[0] && (user == nil || user.UID == 0) {
+		mask = imageRootCapabilities()
+	}
 	for capability := 0; capability <= last; capability++ {
+		if mask&(uint64(1)<<capability) != 0 {
+			continue
+		}
 		if err := prctl(unix.PR_CAPBSET_DROP, uintptr(capability)); err != nil {
 			return fmt.Errorf("drop capability %d: %w", capability, err)
 		}
@@ -341,10 +348,21 @@ func reducePrivileges(user *config.User) error {
 		}
 	}
 	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
-	capabilities := [2]unix.CapUserData{}
+	capabilities := [2]unix.CapUserData{{Effective: uint32(mask), Permitted: uint32(mask)}, {Effective: uint32(mask >> 32), Permitted: uint32(mask >> 32)}}
 	_, _, errno := syscall.AllThreadsSyscall(unix.SYS_CAPSET, uintptr(unsafe.Pointer(&header)), uintptr(unsafe.Pointer(&capabilities[0])), 0)
 	if errno != 0 {
-		return fmt.Errorf("clear capabilities on all threads: %w", errno)
+		return fmt.Errorf("reduce capabilities on all threads: %w", errno)
 	}
 	return nil
+}
+
+// Entrypoints commonly initialize data ownership, switch to application users,
+// and bind HTTP ports. No namespace, mount, device, or network-admin capability
+// is retained. Non-root workloads and directory templates receive no capabilities.
+func imageRootCapabilities() uint64 {
+	var mask uint64
+	for _, capability := range []uint{unix.CAP_CHOWN, unix.CAP_DAC_OVERRIDE, unix.CAP_FOWNER, unix.CAP_SETUID, unix.CAP_SETGID, unix.CAP_SETPCAP, unix.CAP_KILL, unix.CAP_NET_BIND_SERVICE} {
+		mask |= uint64(1) << capability
+	}
+	return mask
 }

@@ -19,7 +19,7 @@ Commands:
   start     Start a stopped container with its retained files
   restart   Stop and start a container with its retained files
   rm        Remove a stopped container
-  image     Import, list, or remove local images
+  image     Pull, import, list, or remove images
   doctor    Check runtime prerequisites and a rootfs template
   help      Show command help
 `
@@ -30,16 +30,17 @@ const runOptions = `Options:
   -t, --tty      Allocate a terminal; combine with -i as -it for input
   --name         Unique detached name: 1-63 letters, digits, underscores,
                  periods, or hyphens; start alphanumeric; not a full ID
-  --rootfs       BusyBox filesystem template (exclusive with --image)
-  --image        Full sha256: image ID from the local image store
+  --rootfs       Linux filesystem template (exclusive with --image)
+  --image        Registry NAME[:TAG], NAME@sha256:DIGEST, or local sha256: ID
+  --entrypoint   Replace the image entrypoint; empty clears it and its default Cmd
   --hostname     Container hostname: 1-63 alphanumeric/hyphen characters,
                  start and end alphanumeric (default: mini)
   --memory       Positive bytes or binary k/m/g units (default: 128m)
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
   --env          KEY=VALUE; repeat; no host environment inheritance
-  --workdir      Existing absolute working directory (default: /)
-  --user         Numeric UID[:GID]; GID defaults to UID (default: 0:0)
+  --workdir      Absolute working directory (image default, otherwise /)
+  --user         Numeric UID[:GID]; overrides image User (otherwise 0:0)
   --mount        type=bind,source=/HOST,target=/PATH[,readonly]
                  Repeat for up to 32 existing directories; targets cannot overlap
   --network      none (loopback only, default) or bridge (IPv4 connectivity)
@@ -60,9 +61,13 @@ const runOptions = `Options:
 
 Notes:
   Put -- before COMMAND; options after -- belong to the workload.
+  With --image, COMMAND is optional and replaces image Cmd; Entrypoint is retained.
+  Missing cached registry images are pulled for the native Linux architecture.
+  Image Env, WorkingDir, and User apply unless overridden.
+  OCI images require execution without user namespaces; rootless uses directories.
   Terminal options require a foreground run; -it requires a terminal on stdin.
   Detached containers receive no input; stdout and stderr share a retained log.
-  Rootfs templates must contain static Linux BusyBox for the native architecture.
+  Rootfs programs and libraries must match the native Linux architecture.
   Bind sources must not overlap the template or protected runtime paths.
   User namespaces require --network none; maps must include container ID 0,
   contain non-overlapping ranges, and cover the configured container user.
@@ -210,17 +215,37 @@ Examples:
 	"image": `Usage: mdocker image COMMAND
 
 Commands:
-  import DIRECTORY  Copy a BusyBox template into the local image store
-  ls [--json]       List imported images
+  pull REFERENCE    Download or refresh a native Linux OCI/Docker image
+  import DIRECTORY  Copy a Linux rootfs into the local image store
+  ls [--json]       List cached images and registry references
   rm ID             Remove an unused image
 
 Notes:
-  Images are local snapshots without registry or layer support.
+  run --image uses cached names or IDs; an uncached name is pulled automatically.
+  image pull explicitly refreshes a mutable tag. Public registries are supported.
   Run mdocker image COMMAND --help for the command's options and examples.
 
 Examples:
+  mdocker image pull redis:8
   mdocker image import ./rootfs/busybox
   mdocker image ls
+`,
+	"image pull": `Usage: mdocker image pull REFERENCE
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Downloads an anonymous-access OCI/Docker image for the native Linux architecture.
+  Accepts NAME[:TAG] or NAME@sha256:DIGEST; Docker Hub and latest are defaults.
+  Verifies layer digests and publishes an immutable filesystem with startup defaults.
+  Refreshes the cached name and prints its full local sha256: identity.
+  Local IDs describe the unpacked rootfs, ownership, and execution defaults;
+  they differ from registry manifest digests. No Docker Engine is required.
+
+Examples:
+  mdocker image pull redis:8
+  mdocker run -d --name redis --image redis:8
 `,
 	"image import": `Usage: mdocker image import DIRECTORY
 
@@ -228,7 +253,8 @@ Options:
   -h, --help  Show this help
 
 Notes:
-  Copies a native-architecture static BusyBox template into an immutable image.
+  Copies a Linux filesystem into an immutable image; no BusyBox is required.
+  Directory imports have no startup defaults; supply a command with run.
   Prints a full sha256: ID; later source changes do not modify the image.
 
 Examples:
@@ -241,7 +267,7 @@ Options:
   --json  Print JSON image records
 
 Notes:
-  Lists local imported images. Use their full sha256: IDs with run --image.
+  Lists cached images and registry references. Use names or full IDs with run --image.
 
 Examples:
   mdocker image ls
@@ -300,7 +326,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 		return text + "\nRun mdocker COMMAND --help or mdocker help COMMAND for syntax and examples.\n", nil
 	}
 	if topic == "run" {
-		syntax := "mdocker run (--rootfs DIRECTORY | --image ID) [OPTIONS] -- COMMAND [ARGS...]"
+		syntax := "mdocker run (--rootfs DIRECTORY | --image REFERENCE) [OPTIONS] [-- COMMAND [ARGS...]]"
 		platformNotes := `  Containers require Linux and a delegated cgroups v2 scope.
   Other than rootless mode, the engine uses sudo and creates a delegated scope.
 `
@@ -308,7 +334,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
   mdocker run -d --name worker --rootfs ./rootfs/busybox -- /bin/sleep 300
 `
 		if macOS {
-			syntax = "mdocker run [--rootfs DIRECTORY | --image ID] [OPTIONS] -- COMMAND [ARGS...]"
+			syntax = "mdocker run [--rootfs DIRECTORY | --image REFERENCE] [OPTIONS] [-- COMMAND [ARGS...]]"
 			platformNotes = `  The default is builtin:busybox; explicit rootfs and bind sources are Mac paths.
   Run as your regular Mac user; requires macOS 13.5+ and Lima 2.0+.
   Install Lima with brew install lima. The client creates or starts its VM as needed.
@@ -319,6 +345,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 			examples = `  mdocker run -- /bin/echo hello
   mdocker run -d --name worker -- /bin/sleep 300
   mdocker run -it -- /bin/sh
+  mdocker run -d --name redis --network bridge -p 127.0.0.1:6379:6379 --image redis:8
 `
 		}
 		return "Usage: " + syntax + "\n\n" + runOptions + platformNotes + "\nExamples:\n" + examples, nil
@@ -332,7 +359,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 			notes = "  Uses builtin:busybox by default. Explicit rootfs paths refer to Mac directories.\n  Creates or starts the product VM and checks runtime capabilities inside it.\n  Run as your regular Mac user; install Lima with brew install lima.\n"
 			examples = "  mdocker doctor\n  mdocker doctor --rootfs ./rootfs/busybox\n"
 		}
-		return "Usage: " + syntax + "\n\nOptions:\n  --rootfs  Static BusyBox template for the native Linux architecture\n\nNotes:\n" + notes + "\nExamples:\n" + examples, nil
+		return "Usage: " + syntax + "\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n\nNotes:\n" + notes + "\nExamples:\n" + examples, nil
 	}
 	if text, exists := commandHelp[topic]; exists {
 		if macOS {

@@ -45,13 +45,17 @@ func acquireRunTemplate(ctx context.Context, cfg config.Config, retainedRoot str
 
 // prepareRunRootFS owns filesystem publication only. The run supervisor owns
 // transient directory cleanup and the container store owns retained roots.
-func prepareRunRootFS(ctx context.Context, source, runPath, retainedRoot string, retainedReady bool) (string, error) {
+func prepareRunRootFS(ctx context.Context, source, runPath, retainedRoot string, retainedReady bool, ownership ...bool) (string, error) {
+	copyRoot := rootfs.Copy
+	if len(ownership) > 0 && ownership[0] {
+		copyRoot = rootfs.CopyOwned
+	}
 	if retainedRoot == "" {
 		path := filepath.Join(runPath, "rootfs")
 		if err := os.Mkdir(path, 0700); err != nil {
 			return "", err
 		}
-		if err := rootfs.Copy(ctx, source, path); err != nil {
+		if err := copyRoot(ctx, source, path); err != nil {
 			return "", fmt.Errorf("prepare rootfs: %w", err)
 		}
 		return path, nil
@@ -64,7 +68,7 @@ func prepareRunRootFS(ctx context.Context, source, runPath, retainedRoot string,
 		return "", err
 	}
 	defer os.RemoveAll(stage)
-	if err := rootfs.Copy(ctx, source, stage); err != nil {
+	if err := copyRoot(ctx, source, stage); err != nil {
 		return "", fmt.Errorf("prepare retained rootfs: %w", err)
 	}
 	if err := rootfs.SyncTree(ctx, stage); err != nil {

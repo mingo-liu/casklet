@@ -23,6 +23,7 @@ type Request struct {
 	Follow      bool
 	StopTimeout *time.Duration
 	Interval    time.Duration
+	Entrypoint  *string
 }
 
 func Parse(args []string) (request Request, err error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/mingo-liu/mini-docker/internal/container"
 	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
+	"github.com/mingo-liu/mini-docker/internal/template"
 )
 
 func Execute(args []string, stdin, stdout, stderr *os.File) int {
@@ -47,7 +48,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
-	case "image-import", "image-ls", "image-rm", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
+	case "image-import", "image-pull", "image-ls", "image-rm", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)
@@ -62,6 +63,23 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		return code
 	case "run":
+		if r.Config.Image != "" {
+			var lease interface{ Close() error }
+			// Pulls have their own bounded, cancelable preparation period, before
+			// the shorter detached workload startup deadline begins.
+			code := manageOperation(Request{Action: "image-pull", Reference: r.Config.Image}, stderr, func(ctx context.Context) (int, error) {
+				var err error
+				fmt.Fprintf(stderr, "Preparing image %s\n", r.Config.Image)
+				r.Config, lease, err = template.ResolveExecution(ctx, r.Config, r.Entrypoint)
+				return 0, err
+			})
+			if lease != nil {
+				defer lease.Close()
+			}
+			if code != 0 {
+				return code
+			}
+		}
 		if r.Detach {
 			return executeManagement(r, stdout, stderr)
 		}

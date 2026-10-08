@@ -439,7 +439,7 @@ func ExecInit() int {
 	}
 	_ = unix.Close(3)
 	_ = unix.Close(4)
-	if err := reducePrivileges(cfg.User); err != nil {
+	if err := reducePrivileges(cfg.User, cfg.OCI); err != nil {
 		return fail(err)
 	}
 	if err := installSeccomp(cfg.SeccompProfile()); err != nil {

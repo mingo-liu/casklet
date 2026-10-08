@@ -15,6 +15,12 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer) (int, error)
 		return 125, err
 	}
 	switch r.Action {
+	case "image-pull":
+		var record image.Record
+		record, err = store.Pull(ctx, r.Reference)
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, record.ID)
+		}
 	case "image-import":
 		var record image.Record
 		record, err = store.Import(ctx, r.Reference)

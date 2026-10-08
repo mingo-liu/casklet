@@ -11,7 +11,7 @@ func TestScopedHelpMatchesNamedHelp(t *testing.T) {
 	for _, topic := range [][]string{
 		{"run"}, {"exec"}, {"doctor"}, {"ps"}, {"inspect"}, {"stats"},
 		{"wait"}, {"start"}, {"restart"}, {"stop"}, {"logs"}, {"rm"},
-		{"image"}, {"image", "import"}, {"image", "ls"}, {"image", "rm"},
+		{"image"}, {"image", "pull"}, {"image", "import"}, {"image", "ls"}, {"image", "rm"},
 		{"machine"}, {"machine", "init"}, {"machine", "start"}, {"machine", "stop"},
 		{"machine", "status"}, {"machine", "share"}, {"rootfs"},
 	} {

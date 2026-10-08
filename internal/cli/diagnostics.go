@@ -17,7 +17,7 @@ func argumentError(args []string, err error) error {
 			topic = args[0]
 		case "image":
 			topic = "image"
-			if len(args) > 1 && (args[1] == "import" || args[1] == "ls" || args[1] == "rm") {
+			if len(args) > 1 && (args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm") {
 				topic += " " + args[1]
 			}
 		}
@@ -46,7 +46,7 @@ func operationError(r Request, err error) error {
 	case errors.Is(err, container.ErrBusy):
 		hint = "another lifecycle operation is still active; inspect the container with mdocker inspect " + ref + " and retry after it finishes."
 	case errors.Is(err, image.ErrNotFound):
-		hint = "list imported images with mdocker image ls; use the full sha256: ID."
+		hint = "list cached images with mdocker image ls; use a full sha256: ID or pull a registry reference with mdocker image pull NAME."
 	case errors.Is(err, image.ErrInUse):
 		hint = "find referencing containers with mdocker ps -a and mdocker inspect NAME; remove those containers before retrying image deletion."
 	}

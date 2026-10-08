@@ -13,7 +13,7 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer) (int, er
 	var err error
 	returnCode := 0
 	switch r.Action {
-	case "image-import", "image-ls", "image-rm":
+	case "image-import", "image-pull", "image-ls", "image-rm":
 		return executeImage(ctx, r, stdout)
 	case "run":
 		var record container.Record

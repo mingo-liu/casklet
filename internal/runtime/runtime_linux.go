@@ -112,9 +112,14 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("record container preparation: %w", err)
 		}
 	}
-	cfg.RootFS, err = prepareRunRootFS(prepareCtx, source.Path, run.path, retainedRoot, retainedReady)
+	cfg.RootFS, err = prepareRunRootFS(prepareCtx, source.Path, run.path, retainedRoot, retainedReady, cfg.Image != "" && !cfg.UserNS)
 	if err != nil {
 		return preparationError(err, signals)
+	}
+	if cfg.OCI {
+		if err := rootfs.PrepareImageWorkdir(cfg.RootFS, cfg); err != nil {
+			return code, err
+		}
 	}
 	if err := source.ReleaseCopyLease(); err != nil {
 		return code, fmt.Errorf("release template copy lease: %w", err)

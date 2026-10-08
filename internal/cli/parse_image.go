@@ -11,7 +11,7 @@ import (
 
 func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("image requires import, ls, or rm")
+		return r, errors.New("image requires pull, import, ls, or rm")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -25,7 +25,7 @@ func parseImage(r Request, args []string) (Request, error) {
 	switch args[0] {
 	case "ls":
 		fs.BoolVar(&r.JSON, "json", false, "print JSON images")
-	case "import", "rm":
+	case "import", "pull", "rm":
 	default:
 		return r, fmt.Errorf("unknown image command %q", args[0])
 	}
@@ -42,9 +42,14 @@ func parseImage(r Request, args []string) (Request, error) {
 		return r, nil
 	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		return r, errors.New("image import and rm require exactly one argument")
+		return r, errors.New("image pull, import, and rm require exactly one argument")
 	}
 	r.Reference = fs.Arg(0)
+	if args[0] == "pull" {
+		if _, err := image.NormalizeReference(r.Reference); err != nil {
+			return r, err
+		}
+	}
 	if args[0] == "rm" {
 		if err := image.ValidateID(r.Reference); err != nil {
 			return r, err

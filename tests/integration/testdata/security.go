@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -71,4 +73,34 @@ func securityProbe(filtered bool) {
 		os.Exit(1)
 	}
 	fmt.Println("security-ok")
+}
+
+// Match setpriv-based entrypoints: drop the bounding set before switching IDs.
+func imagePrivilegeDrop() {
+	fail := func(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+	data, err := os.ReadFile("/proc/sys/kernel/cap_last_cap")
+	if err != nil {
+		fail(err)
+	}
+	last, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		fail(err)
+	}
+	for capability := 0; capability <= last; capability++ {
+		_, _, errno := syscall.AllThreadsSyscall6(unix.SYS_PRCTL, unix.PR_CAPBSET_DROP, uintptr(capability), 0, 0, 0, 0)
+		if errno != 0 {
+			fail(fmt.Errorf("drop bounding capability %d: %w", capability, errno))
+		}
+	}
+	if err := syscall.Setgroups(nil); err != nil {
+		fail(err)
+	}
+	if err := syscall.Setresgid(456, 456, 456); err != nil {
+		fail(err)
+	}
+	if err := syscall.Setresuid(123, 123, 123); err != nil {
+		fail(err)
+	}
+	securityProbe(true)
+	fmt.Println("image-drop-ok")
 }

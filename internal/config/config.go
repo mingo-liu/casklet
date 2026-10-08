@@ -39,6 +39,7 @@ type Config struct {
 	Publish     []PortMapping  `json:"publish,omitempty"`
 	StopTimeout *time.Duration `json:"stop_timeout,omitempty"`
 	Image       string         `json:"image,omitempty"`
+	OCI         bool           `json:"oci,omitempty"`
 	Mounts      []BindMount    `json:"mounts,omitempty"`
 	RootFS      string         `json:"rootfs"`
 	Hostname    string         `json:"hostname"`
@@ -57,9 +58,25 @@ type Config struct {
 
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// ValidateRunRequest checks user options before image defaults are available.
+// The CLI validates the reference separately; execution still requires a pinned
+// local identity and a complete command through ValidateExecution.
+func (c Config) ValidateRunRequest() error {
+	if c.Image != "" {
+		c.Image = "sha256:" + strings.Repeat("0", 64)
+	}
+	if len(c.Command) == 0 {
+		c.Command = []string{"/image-default-command"}
+	}
+	return c.ValidateExecution()
+}
+
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if c.OCI && (c.Image == "" || c.UserNS || c.Rootless) {
+		return errors.New("OCI execution requires a pinned image without user namespaces")
+	}
 	if err := c.ValidateLogs(); err != nil {
 		return err
 	}

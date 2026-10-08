@@ -18,6 +18,8 @@ func main() {
 		securityProbe(true)
 	case "security-unconfined":
 		securityProbe(false)
+	case "image-privilege-drop":
+		imagePrivilegeDrop()
 	case "network-server":
 		networkServer(true)
 	case "network-service":

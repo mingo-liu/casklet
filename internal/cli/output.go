@@ -78,11 +78,11 @@ func writeImages(out io.Writer, records []image.Record, asJSON bool) error {
 		return json.NewEncoder(out).Encode(records)
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tARCHITECTURE\tSIZE (BYTES)\tCREATED"); err != nil {
+	if _, err := fmt.Fprintln(w, "ID\tARCHITECTURE\tSIZE (BYTES)\tCREATED\tREFERENCES"); err != nil {
 		return err
 	}
 	for _, record := range records {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", record.ID, record.Architecture, record.SizeBytes, record.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", record.ID, record.Architecture, record.SizeBytes, record.CreatedAt.UTC().Format(time.RFC3339), strings.Join(record.References, ", ")); err != nil {
 			return err
 		}
 	}
