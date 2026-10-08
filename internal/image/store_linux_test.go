@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -63,15 +64,15 @@ func TestStoreImportDeduplicatesAndPreservesSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := store.Import(ctx, source)
-	if err != nil || again != record {
+	if err != nil || !reflect.DeepEqual(again, record) {
 		t.Fatalf("duplicate import=%+v error=%v", again, err)
 	}
 	records, err := store.List(ctx)
-	if err != nil || len(records) != 1 || records[0] != record {
+	if err != nil || len(records) != 1 || !reflect.DeepEqual(records[0], record) {
 		t.Fatalf("list=%v error=%v", records, err)
 	}
 	first, tree, lease, err := store.Acquire(ctx, record.ID)
-	if err != nil || first != record {
+	if err != nil || !reflect.DeepEqual(first, record) {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(tree, store.root+"/") {

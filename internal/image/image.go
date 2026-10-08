@@ -1,4 +1,4 @@
-// Package image stores immutable, content-addressed root filesystem snapshots.
+// Package image pulls OCI/Docker images and stores immutable filesystem snapshots.
 package image
 
 import (
@@ -15,17 +15,21 @@ import (
 	"time"
 
 	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/mini-docker/internal/rootfs"
 )
 
 var ErrNotFound = errors.New("image not found")
 var ErrInUse = errors.New("image is referenced; remove its containers before deleting it")
 
-// Record is the public metadata for an imported image.
+// Record is the public metadata for an imported or pulled image.
 type Record struct {
-	ID           string    `json:"id"`
-	Architecture string    `json:"architecture"`
-	CreatedAt    time.Time `json:"created_at"`
-	SizeBytes    int64     `json:"size_bytes"`
+	ID             string        `json:"id"`
+	Architecture   string        `json:"architecture"`
+	CreatedAt      time.Time     `json:"created_at"`
+	SizeBytes      int64         `json:"size_bytes"`
+	Config         *LaunchConfig `json:"config,omitempty"`
+	ManifestDigest string        `json:"manifest_digest,omitempty"`
+	References     []string      `json:"references,omitempty"`
 }
 
 // ReferenceCheck runs under the image store lock. It must not acquire image locks.
@@ -34,8 +38,10 @@ type ReferenceCheck func(context.Context, string) (bool, error)
 func ValidateID(id string) error { return config.ValidateImageID(id) }
 
 // Identity hashes sorted paths, copied modes, link targets and regular contents.
-// Ownership and timestamps are excluded because the runtime does not copy them.
-func Identity(ctx context.Context, path, architecture string) (string, int64, error) {
+// Directory imports retain their original identity format without ownership.
+// OCI identities additionally cover launch defaults and numeric ownership.
+// Timestamps are excluded because the runtime does not copy them.
+func Identity(ctx context.Context, path, architecture string, launch ...*LaunchConfig) (string, int64, error) {
 	root, err := os.OpenRoot(path)
 	if err != nil {
 		return "", 0, err
@@ -43,6 +49,12 @@ func Identity(ctx context.Context, path, architecture string) (string, int64, er
 	defer root.Close()
 	hash := sha256.New()
 	encoder := json.NewEncoder(hash)
+	owned := len(launch) > 0 && launch[0] != nil
+	if owned {
+		if err := encoder.Encode(launch[0]); err != nil {
+			return "", 0, err
+		}
+	}
 	if err := encoder.Encode(struct {
 		Version      int
 		Architecture string
@@ -68,7 +80,13 @@ func Identity(ctx context.Context, path, architecture string) (string, int64, er
 			Size    int64
 			Link    string
 			Content string
+			UID     *uint32 `json:",omitempty"`
+			GID     *uint32 `json:",omitempty"`
 		}{Name: filepath.ToSlash(name), Mode: uint32(info.Mode())}
+		if owned {
+			uid, gid := rootfs.Ownership(info)
+			item.UID, item.GID = &uid, &gid
+		}
 		switch {
 		case info.IsDir():
 		case info.Mode()&os.ModeSymlink != 0:

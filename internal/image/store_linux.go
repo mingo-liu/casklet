@@ -152,11 +152,11 @@ func (store *Store) read(id string) (Record, error) {
 		return Record{}, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, 4097))
+	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
 	if err != nil {
 		return Record{}, err
 	}
-	if len(data) > 4096 {
+	if len(data) > 1<<20 {
 		return Record{}, errors.New("image metadata exceeds its size limit")
 	}
 	var record Record
@@ -165,6 +165,14 @@ func (store *Store) read(id string) (Record, error) {
 	}
 	if record.ID != id || record.CreatedAt.IsZero() || record.SizeBytes < 0 || (record.Architecture != "arm64" && record.Architecture != "amd64") {
 		return Record{}, errors.New("invalid image metadata identity")
+	}
+	if record.Config != nil {
+		if err := ValidateID(record.ManifestDigest); err != nil {
+			return Record{}, err
+		}
+		if err := validateLaunch(record.Config); err != nil {
+			return Record{}, err
+		}
 	}
 	return record, nil
 }
@@ -270,6 +278,17 @@ func (store *Store) recoverLocked() error {
 		return err
 	}
 	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".ref-stage-") {
+			file, err := store.openFile(filepath.Join(store.root, entry.Name()), unix.O_RDONLY)
+			if err != nil {
+				return err
+			}
+			file.Close()
+			if err := os.Remove(filepath.Join(store.root, entry.Name())); err != nil {
+				return err
+			}
+			continue
+		}
 		if !strings.HasPrefix(entry.Name(), ".import-") && !strings.HasPrefix(entry.Name(), ".remove-") {
 			continue
 		}
@@ -298,6 +317,17 @@ func (store *Store) List(ctx context.Context) ([]Record, error) {
 		return nil, err
 	}
 	records := make([]Record, 0)
+	references := map[string][]string{}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".ref-") || strings.HasPrefix(entry.Name(), ".ref-stage-") {
+			continue
+		}
+		cached, err := store.readReference(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		references[cached.ID] = append(references[cached.ID], cached.Reference)
+	}
 	for _, entry := range entries {
 		id := "sha256:" + entry.Name()
 		if ValidateID(id) != nil {
@@ -308,6 +338,7 @@ func (store *Store) List(ctx context.Context) ([]Record, error) {
 			return nil, err
 		}
 		records = append(records, record)
+		records[len(records)-1].References = references[record.ID]
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
 	return records, nil
@@ -356,7 +387,7 @@ func (store *Store) verify(ctx context.Context, record Record) error {
 	if err := rootfs.CheckUnmounted(store.path(record.ID)); err != nil {
 		return err
 	}
-	digest, size, err := Identity(ctx, tree, record.Architecture)
+	digest, size, err := Identity(ctx, tree, record.Architecture, record.Config)
 	if err != nil {
 		return fmt.Errorf("verify image content: %w", err)
 	}
