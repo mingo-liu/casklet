@@ -50,6 +50,7 @@ func Identity(ctx context.Context, path, architecture string) (string, int64, er
 		return "", 0, err
 	}
 	var size int64
+	buffer := make([]byte, 32*1024)
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -81,7 +82,7 @@ func Identity(ctx context.Context, path, architecture string) (string, int64, er
 				return err
 			}
 			digest := sha256.New()
-			count, copyErr := io.Copy(digest, contextReader{ctx: ctx, r: file})
+			count, copyErr := io.CopyBuffer(digest, contextReader{ctx: ctx, r: file}, buffer)
 			closeErr := file.Close()
 			if err := errors.Join(copyErr, closeErr); err != nil {
 				return err

@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Reuse image identity read buffers
+
+Image identity hashing uses one 32 KiB buffer per traversal across regular
+files. Concurrent traversals own separate buffers. The version-1 digest format,
+sorted traversal, content/mode checks, and cancellation checks are preserved.
+
+`TestIdentityPreservesPersistedDigestAcrossFileSizes` pins the pre-optimization
+digest for empty, small, and multi-buffer files with explicit permissions.
+Existing identity, import integrity, lease, rollback, and concurrent image
+tests also passed. `BenchmarkIdentitySmallFiles` measures 256 files of 1 KiB:
+Linux arm64 allocations fell from about 8.72 MB to 0.35 MB per traversal (96%);
+macOS arm64 showed the same allocation reduction. Three ten-iteration samples
+were run before and after; elapsed timings are environment-dependent.
+
+Validation: formatting and relevant unit, vet, and race checks passed on macOS
+and Linux arm64. Seven privileged Linux image tests and the macOS local-image
+and live-bind end-to-end test passed.
+
 ## 2026-10-08: Verify installed engine content before reuse
 
 The engine reuse check verifies actual executable content against the bundled
