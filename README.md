@@ -132,6 +132,11 @@ you can choose resources and additional shared directories:
 casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 ```
 
+Back up a stopped volume with `casklet volume export app-data > app-data.tar`,
+then restore to a new name with `casklet volume restore app-restored < app-data.tar`.
+The tar stream also supports migration to another Mac. See
+[volume backups](guides/usage.md#volume-backup-restore-and-migration) for limits and consistency.
+
 Named volumes keep data on the VM disk independently of containers:
 
 ```sh

@@ -131,6 +131,10 @@ casklet volume ls
 新卷为空且属于 root，容器删除后数据仍保留，目前不支持用户命名空间。
 移除所有引用该卷的容器后，`casklet volume rm app-data` 才能删除卷和数据。
 
+停止使用卷的工作负载后，可用 `casklet volume export app-data > app-data.tar` 备份，
+再用 `casklet volume restore app-restored < app-data.tar` 恢复到新卷。tar 流也可迁移到
+另一台 Mac。限制与一致性说明见[卷备份指南](guides/usage.md#volume-backup-restore-and-migration)（英文）。
+
 查看 VM 磁盘占用，预览或清理未使用的缓存镜像：
 
 ```sh

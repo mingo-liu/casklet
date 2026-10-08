@@ -10,7 +10,7 @@ import (
 
 func parseVolume(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("volume requires create, ls, inspect, or rm")
+		return r, errors.New("volume requires create, ls, inspect, rm, export, or restore")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -24,7 +24,7 @@ func parseVolume(r Request, args []string) (Request, error) {
 	switch args[0] {
 	case "ls":
 		fs.BoolVar(&r.JSON, "json", false, "print JSON volumes")
-	case "create", "inspect", "rm":
+	case "create", "inspect", "rm", "export", "restore":
 	default:
 		return r, fmt.Errorf("unknown volume command %q", args[0])
 	}

@@ -161,6 +161,26 @@ func (s *Store) recover(ctx context.Context) error {
 		if err := checkDirectory(p, s.owner, true); err != nil {
 			return err
 		}
+		// A restore releases the global lock while extracting, retaining its lease.
+		leasePath := filepath.Join(p, ".lease")
+		if _, err := os.Lstat(leasePath); err == nil {
+			lease, err := s.openLock(leasePath)
+			if err != nil {
+				return err
+			}
+			err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+			if errors.Is(err, unix.EWOULDBLOCK) {
+				lease.Close()
+				continue
+			}
+			if err != nil {
+				lease.Close()
+				return err
+			}
+			defer lease.Close()
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		if err := rootfs.CheckUnmounted(p); err != nil {
 			return err
 		}

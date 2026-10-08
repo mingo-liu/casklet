@@ -239,3 +239,9 @@ candidate under the existing deletion lock/lease/reference protocol. The CLI own
 preview selection and presentation; disk reporting never deletes workloads or
 volumes. Filesystem availability covers the guest OS disk, while category totals
 cover only casklet storage and exclude host shares.
+
+Volume tar export holds an exclusive usage lease without requiring retained
+references to disappear. Restore extracts to leased private staging outside the
+global volume lock, validates a complete bounded archive, fsyncs it, and publishes
+a new name under that lock. Transaction recovery skips leased staging. The CLI
+uses stdout/stdin streams, so macOS archives need no filesystem share.

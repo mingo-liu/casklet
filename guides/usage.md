@@ -505,3 +505,37 @@ supported. Precedence is image defaults, env-files in order, config `env`, then 
 `--env`, regardless of where env-file flags appear. Restart uses the saved merged
 configuration, so it does not reopen these files. Keep files containing credentials
 out of version control and restrict their permissions.
+
+## Volume backup, restore, and migration
+
+Stop every workload using the volume and arrange an application-consistent shutdown
+before backup. An exclusive volume lease rejects active containers, including
+readonly users, while allowing stopped retained containers to reference the volume.
+Export writes an uncompressed tar stream to stdout; diagnostics use stderr. Restore
+reads tar on stdin, validates it in private staging, and publishes a **new** volume
+atomically. It never merges into or overwrites an existing volume.
+
+```sh
+casklet stop database
+casklet volume export db-data > db-data.tar
+# Check that export succeeded before restoring or moving the archive.
+casklet volume restore db-restored < db-data.tar
+casklet volume export db-data | casklet volume restore db-copy
+casklet run --mount type=volume,source=db-restored,target=/data -- /bin/ls /data
+```
+
+Copy the archive to another Mac and run `volume restore` there to migrate data.
+The stream goes through SSH; archive paths need no VM share. Shell redirection
+creates the host file, so delete a partial file after failed export and use
+`set -o pipefail` when piping. gzip can wrap the stream externally.
+Backups preserve numeric Linux UID/GID, permission bits, file modification times,
+symlinks, hardlinks, and regular file contents. They exclude container/image metadata,
+extended attributes, ACLs, and sparse allocation (holes become ordinary zero bytes).
+Special files and mounted descendants fail export. Restore rejects path traversal,
+writes through symlink parents, duplicate entries, unresolved/unsafe hardlinks,
+special files, truncation, and nonzero data after the tar terminator. Limits are
+16 GiB of archive bytes and 1 million entries. Interrupted restores leave no
+published volume; abandoned private staging is reclaimed by the next store operation.
+Restore runs independently of other volume operations and rechecks the destination
+name before publication. Retarget a replacement container's volume mount to use the
+restored data; retained container configuration is immutable.

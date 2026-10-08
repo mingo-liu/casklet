@@ -35,7 +35,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, topic := range []string{
 		"run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm",
-		"volume", "volume create", "volume ls", "volume inspect", "volume rm",
+		"volume", "volume create", "volume ls", "volume inspect", "volume rm", "volume export", "volume restore",
 		"system", "system df", "image prune",
 		"image", "image pull", "image import", "image ls", "image rm", "help",
 		"machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "rootfs",

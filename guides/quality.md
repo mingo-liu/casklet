@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Atomic named-volume backups and restores
+
+Added stdout tar export and stdin restore, including transport through the Mac
+client. Export requires an exclusive usage lease and rejects mounted/special
+files; stopped retained references are allowed. Restore creates a new name using
+leased private staging, validates paths/types/links and complete tar termination,
+fsyncs data and metadata, and rechecks the name before atomic publication.
+Concurrent operations skip a live restore's lease; failed and abandoned staging
+is reclaimed without replacing an existing volume. Streams preserve numeric
+ownership, permissions, modification times, symlinks, hardlinks, and file bytes.
+Limits, exclusions, consistency, migration, and shell failure handling are documented.
+
+Validation: Darwin arm64 build, unit tests, vet, and formatting passed. Linux
+arm64 volume/CLI race tests and vet passed. Privileged volume regressions passed,
+including numeric ownership, retained references, active leases, and mounted-tree
+refusal. Real macOS tar transport/restore/readonly reuse passed. Intel execution
+was not run.
+
 ## 2026-10-08: Repeatable run configuration and environment files
 
 Added strict JSON `run --config` and repeatable `run/exec --env-file` options.

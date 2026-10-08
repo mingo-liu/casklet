@@ -131,6 +131,8 @@ Commands:
   create NAME   Create an empty named volume (idempotent)
   ls [--json]   List named volumes
   inspect NAME  Show volume metadata as JSON
+  export NAME   Write an unused volume as a tar archive to stdout
+  restore NAME  Create a new volume from a tar archive on stdin
   rm NAME       Delete an unused volume and its data
 
 Notes:
@@ -141,6 +143,36 @@ Notes:
 Examples:
   casklet volume create app-data
   casklet run --mount type=volume,source=app-data,target=/data -- /bin/ls /data
+`,
+	"volume export": `Usage: casklet volume export NAME > ARCHIVE.tar
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Stop all containers using this volume first; retained references are allowed.
+  Writes an uncompressed tar stream to stdout, preserving Linux ownership,
+  permissions, timestamps, symlinks, and hardlinks. Special files and mounts fail.
+  Check the exit status before using the archive. Limit: 16 GiB and 1 million entries.
+
+Examples:
+  casklet stop database
+  casklet volume export db-data > db-data.tar
+`,
+	"volume restore": `Usage: casklet volume restore NEW_NAME < ARCHIVE.tar
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Requires a new name; existing volumes are never overwritten.
+  Reads an uncompressed tar stream from stdin and atomically publishes the new
+  volume after validation. Failure removes staging; unsafe paths and types fail.
+  Prints the volume name on success. Limit: 16 GiB and 1 million entries.
+
+Examples:
+  casklet volume restore db-restored < db-data.tar
+  casklet volume export db-data | casklet volume restore db-copy
 `,
 	"volume create": `Usage: casklet volume create NAME
 

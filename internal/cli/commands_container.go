@@ -9,14 +9,14 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func executeOperation(ctx context.Context, r Request, stdout io.Writer) (int, error) {
+func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ...io.Reader) (int, error) {
 	var err error
 	returnCode := 0
 	switch r.Action {
 	case "system-df":
 		return executeSystem(ctx, r, stdout)
-	case "volume-create", "volume-ls", "volume-inspect", "volume-rm":
-		return executeVolume(ctx, r, stdout)
+	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
+		return executeVolume(ctx, r, stdout, input...)
 	case "image-import", "image-pull", "image-ls", "image-rm", "image-prune":
 		return executeImage(ctx, r, stdout)
 	case "run":

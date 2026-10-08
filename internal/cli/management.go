@@ -12,13 +12,13 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
-func executeManagement(r Request, stdout, stderr io.Writer) int {
+func executeManagement(r Request, stdout, stderr io.Writer, input ...io.Reader) int {
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {
 		if r.Action == "image-pull" {
 			progress := newPullProgress(stderr, r.Progress)
 			ctx = image.WithProgress(ctx, progress.observe)
 		}
-		return executeOperation(ctx, r, stdout)
+		return executeOperation(ctx, r, stdout, input...)
 	})
 }
 
