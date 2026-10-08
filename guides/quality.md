@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Guest-local named data volumes
+
+Added explicit `volume create/ls/inspect/rm` commands and named/readonly mounts.
+Volumes start empty on the VM disk, survive container removal, and are protected
+by shared runtime leases plus references from every retained container. Init
+inherits close-on-exec leases so supervisor loss cannot immediately authorize
+volume deletion. Private metadata, no-follow paths, atomic staging/publication,
+and mounted-tree refusal protect creation and removal. Existing bind mounts and
+Mac path translation remain compatible. User namespaces are explicitly excluded.
+
+Validation: Darwin arm64 build, formatting, unit tests, vet, and relevant race tests
+passed. Linux arm64 unit tests, vet, volume/config/container/runtime race tests,
+and the full privileged integration suite passed, including foreground leases,
+retained references, readonly reuse, and replacement-container data retention.
+The real macOS named-volume end-to-end test passed. Intel execution was not run.
+
 ## 2026-10-08: Synchronize bilingual README application workflows
 
 The English and Chinese READMEs now cover the same OCI application and progress

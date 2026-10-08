@@ -219,6 +219,28 @@ protected host paths and the template. Targets must not overlap or replace
 Host data survives container removal. Set source permissions for the workload's
 host identity; bind ownership is not remapped.
 
+### Named volumes
+
+Named volumes live at `/var/lib/casklet/volumes` on the VM disk, outside container
+roots. Create them explicitly before mounting. New volumes are empty and owned by
+root; image files are not copied into the volume. Applications running as another
+UID/GID need matching permissions, which can be initialized by a trusted root
+container. Named volumes currently require execution without user namespaces.
+
+```sh
+casklet volume create app-data
+casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
+casklet run --mount type=volume,source=app-data,target=/data,readonly -- /bin/cat /data/message
+casklet volume ls --json
+casklet volume inspect app-data
+casklet volume rm app-data
+```
+
+Data survives `stop`, `restart`, and container removal. `volume rm` deletes the
+data and refuses active foreground leases or references from any retained
+container, including stopped ones. Remove those containers first. Volumes are
+never translated to Mac paths and do not require a host filesystem share.
+
 ## Terminals and exec
 
 ```sh

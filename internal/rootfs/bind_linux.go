@@ -50,7 +50,7 @@ func openMountSources(mounts []config.BindMount, root string) ([]*os.File, error
 	}
 	files := make([]*os.File, 0, len(mounts))
 	for _, mount := range mounts {
-		file, err := openDirectory(mount.Source, false)
+		file, err := openDirectory(mount.SourcePath(), false)
 		if err != nil {
 			closeMountSources(files)
 			return nil, fmt.Errorf("mount source: %w", err)

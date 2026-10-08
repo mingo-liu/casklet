@@ -75,6 +75,9 @@ func localPreflight(args []string) error {
 			if err != nil {
 				return err
 			}
+			if mount.Type == "volume" {
+				return nil
+			}
 			mount.Source, err = sharedDirectory(mount.Source)
 			if err != nil {
 				return fmt.Errorf("bind source: %w; create the source directory before using --mount", err)

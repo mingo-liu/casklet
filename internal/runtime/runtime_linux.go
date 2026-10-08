@@ -18,6 +18,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/ipc"
 	"github.com/mingo-liu/casklet/internal/network"
 	"github.com/mingo-liu/casklet/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/volume"
 	"golang.org/x/sys/unix"
 )
 
@@ -81,6 +82,11 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if cfg.UserNS && (executor != nil || retainedRoot != "") {
 		return code, errors.New("user namespaces currently support foreground runs only")
 	}
+	volumes, err := volume.AcquireMounts(prepareCtx, cfg.Mounts)
+	if err != nil {
+		return preparationError(err, signals)
+	}
+	defer volumes.Close()
 	source, retainedReady, err := acquireRunTemplate(prepareCtx, cfg, retainedRoot)
 	if err != nil {
 		return preparationError(err, signals)
@@ -231,6 +237,8 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		cmd.ExtraFiles = append(cmd.ExtraFiles, binary)
 		cmd.Path = fmt.Sprintf("/proc/self/fd/%d", 2+len(cmd.ExtraFiles))
 	}
+	// Init retains leases even if the supervisor dies; workloads never inherit them.
+	cmd.ExtraFiles = append(cmd.ExtraFiles, volumes.Files...)
 	cmd.SysProcAttr = namespaceAttributes(cfg)
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start container init: %w", err)

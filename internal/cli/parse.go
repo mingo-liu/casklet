@@ -52,6 +52,9 @@ func Parse(args []string) (request Request, err error) {
 		return helpRequest(args[:len(args)-1])
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "volume" {
+		return parseVolume(r, args[1:])
+	}
 	if r.Action == "image" {
 		return parseImage(r, args[1:])
 	}

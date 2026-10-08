@@ -74,6 +74,9 @@ func (c Config) ValidateRunRequest() error {
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if c.UserNS && len(VolumeNames(c.Mounts)) > 0 {
+		return errors.New("named volumes require execution without user namespaces")
+	}
 	if c.OCI && (c.Image == "" || c.UserNS || c.Rootless) {
 		return errors.New("OCI execution requires a pinned image without user namespaces")
 	}

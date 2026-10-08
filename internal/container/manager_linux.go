@@ -15,6 +15,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
 	"github.com/mingo-liu/casklet/internal/template"
+	"github.com/mingo-liu/casklet/internal/volume"
 )
 
 const (
@@ -39,6 +40,11 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
+	volumes, err := volume.AcquireMounts(ctx, cfg.Mounts)
+	if err != nil {
+		return Record{}, err
+	}
+	defer volumes.Close()
 	source, err := template.Acquire(ctx, cfg)
 	if err != nil {
 		return Record{}, err

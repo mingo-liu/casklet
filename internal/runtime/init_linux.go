@@ -52,6 +52,15 @@ func Init() int {
 		return fail(errors.New("invalid init configuration"))
 	}
 	cfg := prepare.Config
+	volumeFD := 5
+	if cfg.TTY || prepare.ExecEnabled {
+		volumeFD = 6
+	}
+	for i := range config.VolumeNames(cfg.Mounts) {
+		fd := volumeFD + i
+		unix.CloseOnExec(fd)
+		defer unix.Close(fd)
+	}
 	if err := cfg.ValidateExecution(); err != nil {
 		return fail(err)
 	}

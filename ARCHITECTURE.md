@@ -205,3 +205,15 @@ copy, creates a missing working directory, mounts private shared memory, and app
 the bounded OCI root capability policy needed by application entrypoints. Builtin
 BusyBox health checks remain strict; generic filesystem validation requires neither
 BusyBox nor static linking. Restart uses the retained root and saved configuration.
+
+## Named data volumes
+
+`volume` owns private metadata, data directories, creation/removal transactions,
+and shared usage leases. Mount configuration stores volume names rather than host
+paths. `rootfs` pins the corresponding guest data directory for bind installation.
+Runtime holds a usage lease through cleanup and passes it to init with close-on-exec,
+so abrupt supervisor death does not release an active namespace's lease. Detached
+creation holds leases until records provide durable references. Removal acquires
+an exclusive lease and checks all container configurations. Lock order is volume
+store then container store; lifecycle operations never acquire volume locks while
+holding container metadata locks. User namespaces are currently excluded.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
+	"github.com/mingo-liu/casklet/internal/volume"
 )
 
 func argumentError(args []string, err error) error {
@@ -15,6 +16,11 @@ func argumentError(args []string, err error) error {
 		switch args[0] {
 		case "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm":
 			topic = args[0]
+		case "volume":
+			topic = "volume"
+			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm") {
+				topic += " " + args[1]
+			}
 		case "image":
 			topic = "image"
 			if len(args) > 1 && (args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm") {
@@ -47,6 +53,8 @@ func operationError(r Request, err error) error {
 		hint = "another lifecycle operation is still active; inspect the container with casklet inspect " + ref + " and retry after it finishes."
 	case errors.Is(err, image.ErrNotFound):
 		hint = "list cached images with casklet image ls; use a full sha256: ID or pull a registry reference with casklet image pull NAME."
+	case errors.Is(err, volume.ErrInUse):
+		hint = "remove referencing containers before retrying volume deletion; active foreground runs must also finish."
 	case errors.Is(err, image.ErrInUse):
 		hint = "find referencing containers with casklet ps -a and casklet inspect NAME; remove those containers before retrying image deletion."
 	}

@@ -114,6 +114,17 @@ casklet machine start
 casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 ```
 
+命名数据卷将数据保存在 VM 磁盘上，独立于容器：
+
+```sh
+casklet volume create app-data
+casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
+casklet volume ls
+```
+
+新卷为空且属于 root，容器删除后数据仍保留，目前不支持用户命名空间。
+移除所有引用该卷的容器后，`casklet volume rm app-data` 才能删除卷和数据。
+
 ## 文档与开发
 
 - [使用指南](guides/usage.md)：文件、镜像、网络、安全与生命周期管理（英文）。

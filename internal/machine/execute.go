@@ -69,6 +69,9 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
+			if mount.Type == "volume" {
+				continue
+			}
 			mount.Source, err = instance.hostPath(mount.Source)
 			if err != nil {
 				return nil, err

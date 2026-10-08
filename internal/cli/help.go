@@ -19,6 +19,7 @@ Commands:
   start     Start a stopped container with its retained files
   restart   Stop and start a container with its retained files
   rm        Remove a stopped container
+  volume    Create, list, inspect, or remove named data volumes
   image     Pull, import, list, or remove images
   doctor    Check runtime prerequisites and a rootfs template
   help      Show command help
@@ -43,7 +44,9 @@ const runOptions = `Options:
   --workdir      Absolute working directory (image default, otherwise /)
   --user         Numeric UID[:GID]; overrides image User (otherwise 0:0)
   --mount        type=bind,source=/HOST,target=/PATH[,readonly]
-                 Repeat for up to 32 existing directories; targets cannot overlap
+                 or type=volume,source=NAME,target=/PATH[,readonly]
+                 Repeat for up to 32 mounts; targets cannot overlap
+                 Create named volumes first; volumes do not support user namespaces
   --network      none (loopback only, default) or bridge (IPv4 connectivity)
   --dns          Unicast, non-loopback IPv4 DNS; repeat up to 3 times (bridge only)
   -p, --publish  [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp] (bridge only)
@@ -76,6 +79,56 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"volume": `Usage: casklet volume COMMAND
+
+Commands:
+  create NAME   Create an empty named volume (idempotent)
+  ls [--json]   List named volumes
+  inspect NAME  Show volume metadata as JSON
+  rm NAME       Delete an unused volume and its data
+
+Notes:
+  Data lives on the VM disk and survives container removal.
+  Volume removal refuses active leases and references from retained containers.
+  Volumes start empty with root ownership; image contents are not copied into them.
+
+Examples:
+  casklet volume create app-data
+  casklet run --mount type=volume,source=app-data,target=/data -- /bin/ls /data
+`,
+	"volume create": `Usage: casklet volume create NAME
+
+Notes:
+  Creates an empty VM-local volume; an existing healthy volume is reused.
+
+Examples:
+  casklet volume create app-data
+`,
+	"volume ls": `Usage: casklet volume ls [--json]
+
+Options:
+  --json  Print JSON volume metadata
+
+Examples:
+  casklet volume ls --json
+`,
+	"volume inspect": `Usage: casklet volume inspect NAME
+
+Notes:
+  Shows the name and creation time as JSON.
+
+Examples:
+  casklet volume inspect app-data
+`,
+	"volume rm": `Usage: casklet volume rm NAME
+
+Notes:
+  Deletes the data. Refuses volumes referenced by any retained container or active run.
+  Remove referencing containers first; stopping them does not release references.
+
+Examples:
+  casklet volume rm app-data
+`,
 	"exec": `Usage: casklet exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
 
 Options:

@@ -13,6 +13,8 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer) (int, er
 	var err error
 	returnCode := 0
 	switch r.Action {
+	case "volume-create", "volume-ls", "volume-inspect", "volume-rm":
+		return executeVolume(ctx, r, stdout)
 	case "image-import", "image-pull", "image-ls", "image-rm":
 		return executeImage(ctx, r, stdout)
 	case "run":

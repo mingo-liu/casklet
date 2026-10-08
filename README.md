@@ -126,6 +126,18 @@ you can choose resources and additional shared directories:
 casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 ```
 
+Named volumes keep data on the VM disk independently of containers:
+
+```sh
+casklet volume create app-data
+casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
+casklet volume ls
+```
+
+Volumes start empty with root ownership, survive container removal, and require
+execution without user namespaces. `casklet volume rm app-data` deletes the data
+only after all referencing containers are removed.
+
 ## Documentation and development
 
 - [Usage guide](guides/usage.md): files, images, networking, security, and lifecycle.

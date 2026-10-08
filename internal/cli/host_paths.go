@@ -57,6 +57,9 @@ func hostPathArguments(args []string, action string) ([]string, error) {
 			if err != nil {
 				return nil, err
 			}
+			if mount.Type == "volume" {
+				continue
+			}
 			mount.Source, err = filepath.EvalSymlinks(mount.Source)
 			if err != nil {
 				return nil, err

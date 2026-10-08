@@ -21,6 +21,26 @@ func ImageReferenced(ctx context.Context, id string) (bool, error) {
 }
 
 func (store *Store) imageReferenced(ctx context.Context, id string) (bool, error) {
+	return store.configReferenced(ctx, func(cfg config.Config) bool { return cfg.Image == id })
+}
+
+// VolumeReferenced includes stopped containers; lock order is volume then container.
+func VolumeReferenced(ctx context.Context, name string) (bool, error) {
+	store, err := OpenStore()
+	if err != nil {
+		return false, err
+	}
+	return store.configReferenced(ctx, func(cfg config.Config) bool {
+		for _, m := range cfg.Mounts {
+			if m.Type == "volume" && m.Source == name {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (store *Store) configReferenced(ctx context.Context, matches func(config.Config) bool) (bool, error) {
 	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return false, err
@@ -41,7 +61,7 @@ func (store *Store) imageReferenced(ctx context.Context, id string) (bool, error
 		if err := cfg.ValidateExecution(); err != nil {
 			return false, errors.New("invalid stored container configuration")
 		}
-		if cfg.Image == id {
+		if matches(cfg) {
 			return true, nil
 		}
 	}
