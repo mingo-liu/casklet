@@ -1,5 +1,7 @@
 # mini-docker
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 一个面向 macOS 的命令行容器工具，使用自行实现的 Go 容器引擎。`mdocker`
 自动管理专用的 Lima Linux 虚拟机，容器通过 mini-docker 的命名空间、cgroups v2
 和进程监督机制在虚拟机中运行。无需 Docker Engine 或 containerd。
@@ -9,6 +11,8 @@
 请运行可信工作负载；这个学习用途的运行时不为不可信代码提供安全保证。
 
 ## 快速开始
+
+从源码构建需要 Go 1.27.1 及以上版本和 Make。请在仓库目录中执行：
 
 ```sh
 brew install lima
@@ -23,7 +27,48 @@ mdocker run -it -- /bin/sh
 也可以直接使用 `./bin/mdocker`，无需安装。运行时使用普通 Mac 用户，不要加 `sudo`。
 首次执行需要容器引擎的命令时，会自动创建 `mini-docker-runtime` 虚拟机、安装随程序
 打包的引擎，并准备静态 BusyBox 文件系统。首次初始化需要联网，后续运行会使用已有
-虚拟机及其本地数据。容器选项放在必需的 `--` 分隔符之前。
+虚拟机及其本地数据。指定容器命令时，选项放在 `--` 分隔符之前。仓库镜像提供默认
+启动命令，缓存未命中时会自动下载；使用镜像默认命令时不需要 `--`。
+
+更新源码后，再执行 `make build` 和 `sudo make install` 更新已安装的客户端。
+下次执行需要引擎的命令时，会自动更新其内置的虚拟机引擎，保留现有容器和镜像。
+
+## 运行应用镜像
+
+```sh
+mdocker run -d --name redis --image redis:8
+# Publish to localhost on your Mac:
+mdocker run -d --name redis-local --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+```
+
+OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会选择匹配的 Linux 架构，
+校验并解包镜像各层，再通过 mini-docker 自身的引擎运行。缓存的镜像可以离线使用。
+使用 `--env` 提供应用配置、`--mount` 绑定持久化目录，在 `--` 后指定命令参数。
+这些参数会替换镜像的 `Cmd`，保留 `Entrypoint`；使用 `--entrypoint` 可以覆盖入口。
+目前支持允许匿名访问的仓库，暂不支持私有仓库登录和 OCI 镜像的 rootless 运行。
+详细说明见[镜像指南](guides/usage.md#ocidocker-images)（英文）。
+
+## 拉取进度与镜像管理
+
+自动拉取和显式 `image pull` 都会在 stderr 显示逐层下载、校验和解包进度。
+`--progress=auto`（默认）在终端中动态刷新进度条，重定向时输出纯文本；`plain` 和
+`tty` 可以强制选择对应模式。镜像 ID、容器 ID 和应用输出保留在 stdout。
+缓存命中时显示 `Using cached image`；显式拉取未变化的镜像时显示 `Image is up to date`。
+
+```sh
+mdocker image pull redis:8
+mdocker image pull --progress=plain redis:8
+mdocker image ls
+mdocker image ls --json
+```
+
+标签会继续使用缓存版本，直到执行 `image pull` 刷新。使用仓库摘要可以固定镜像来源。
+删除镜像时，将下面的 `IMAGE_ID` 替换为 `image ls` 中的完整本地 `sha256:` ID。
+需要先停止并删除所有引用该镜像的容器；删除命令接受本地 ID，不接受 `redis:8` 等仓库名称。
+
+```sh
+mdocker image rm IMAGE_ID
+```
 
 ## 常用操作
 
@@ -32,16 +77,24 @@ mdocker run -d --name worker --memory 128m --pids-limit 64 --cpus 0.5 \
   -- /bin/sleep 300
 mdocker ps
 mdocker exec worker -- /bin/sh -c 'hostname; id'
+mdocker exec -it worker -- /bin/sh
 mdocker logs --tail 20 worker
 mdocker inspect worker
 mdocker stats worker
 mdocker stop worker
+mdocker start worker
+mdocker restart worker
+mdocker stop worker
 mdocker rm worker
 ```
 
+输入 `exit` 可以退出 exec 终端，容器主进程继续运行。停止后启动及重启都会保留容器
+内部文件；`rm` 会删除这些文件。绑定挂载的宿主机数据在删除容器后仍然保留。
+
 Mac 用户主目录会共享给虚拟机，用于导入 rootfs 和绑定挂载。容器及导入的镜像保存在
-虚拟机的 Linux 磁盘中。发布的 TCP 和 UDP 端口会转发到 Mac。默认网络仅启用回环接口；
-需要网络连接和端口发布时，使用 `--network bridge`。
+虚拟机的 Linux 磁盘中。镜像缓存位于虚拟机内的 `/var/lib/mini-docker/images`，容器记录
+及独立文件系统位于 `/var/lib/mini-docker/containers`。发布的 TCP 和 UDP 端口会转发到
+Mac。默认网络仅启用回环接口；需要网络连接和端口发布时，使用 `--network bridge`。
 
 ```sh
 mdocker run --mount "type=bind,source=$PWD,target=/work" --workdir /work \
@@ -50,6 +103,9 @@ mdocker machine status
 mdocker machine stop
 mdocker machine start
 ```
+
+停止虚拟机会停止其中的工作负载，但保留其数据。启动虚拟机后，可以用
+`mdocker start NAME` 再次启动保留的容器。
 
 虚拟机默认配置为 4 个 CPU、4 GiB 内存和 20 GiB 磁盘。首次使用前，可以自定义资源
 配置并添加共享目录：
@@ -72,4 +128,4 @@ make test-macos # 在运行时虚拟机中执行真实命令；需要时会自�
 
 内部 Linux 引擎保留了需要特权的集成测试，在另一台专用开发虚拟机中运行。
 生成的二进制文件、文件系统模板、运行时状态以及本地 `docs/` 笔记不纳入版本控制。
-许可证见 [LICENSE](LICENSE)。英文版见 [README.md](README.md)。
+许可证见 [LICENSE](LICENSE)。

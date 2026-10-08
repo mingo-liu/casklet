@@ -6,6 +6,21 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Synchronize bilingual README application workflows
+
+The English and Chinese READMEs now cover the same OCI application and progress
+workflows, image cache/refresh/removal, interactive exec, retained data, VM storage
+paths, build prerequisites, and client/engine upgrades. The Chinese README's stale
+mandatory-separator statement is corrected: image defaults need neither a command
+nor `--`. The usage guide makes that condition explicit too. Language navigation
+and corresponding shell examples are aligned. Repository guidelines require
+bilingual README updates and focused help/documentation updates for CLI changes.
+
+Validation: both READMEs have five corresponding sections and eight matching shell
+example blocks (ignoring translated comments). Shell syntax, local Markdown links
+and anchors, shared feature details, and diff whitespace checks passed. This change
+only updates documentation; runtime and application tests were not repeated.
+
 ## 2026-10-08: OCI pull progress through the macOS client
 
 Automatic image preparation and explicit image pulls now expose operation-scoped

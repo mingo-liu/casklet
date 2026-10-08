@@ -14,7 +14,8 @@ mdocker machine share --help
 `mdocker help COMMAND` and `mdocker COMMAND --help` show the same reference,
 including options, defaults, constraints, and examples. Help works without Lima
 and does not create or start the VM. Management flags precede
-the container ID or exact name; `run` and `exec` require `--` before the command.
+the container ID or exact name. Put `--` before an explicit `run` or `exec` command;
+`run --image` can omit the command and separator to use image startup defaults.
 Host environment variables are never inherited by workloads.
 Local rootfs structure, bind sources, supported published addresses, and occupied
 Mac ports are checked before VM startup. Unshared paths are rejected before

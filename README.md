@@ -1,5 +1,7 @@
 # mini-docker
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 A macOS command-line container tool with its own Go container engine. `mdocker`
 automatically manages a dedicated Lima Linux VM; containers run in that VM using
 mini-docker's namespaces, cgroups v2, and process supervision. Docker Engine and
@@ -11,6 +13,9 @@ host product. Use trusted workloads; this learning runtime does not provide a
 security guarantee for untrusted code.
 
 ## Quick start
+
+Building from source requires Go 1.27.1+ and Make. Run these commands from the
+repository directory:
 
 ```sh
 brew install lima
@@ -26,24 +31,54 @@ You can use `./bin/mdocker` without installing. Run it as your regular Mac user,
 without sudo. The first command that needs the engine creates the
 `mini-docker-runtime` VM, installs the bundled engine, and prepares a static
 BusyBox filesystem. Initial setup needs internet access; subsequent runs use
-the existing VM and its local data. Container options precede `--` when supplying a command. Registry images provide
-their own default command and are downloaded automatically on a cache miss.
+the existing VM and its local data. Container options precede `--` when supplying
+a command. Registry images provide their own default command and are downloaded
+automatically on a cache miss; `--` is unnecessary when using that default.
+
+After updating the source, run `make build` and `sudo make install` again to update
+the installed client. Its bundled guest engine updates automatically on the next
+engine command, preserving existing containers and images.
 
 ## Run an application image
 
 ```sh
 mdocker run -d --name redis --image redis:8
 # Publish to localhost on your Mac:
-mdocker run -d --name redis-web --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+mdocker run -d --name redis-local --network bridge -p 127.0.0.1:6379:6379 --image redis:8
 ```
 
 OCI/Docker images include programs, dependencies, and startup defaults. The guest
 pulls the matching Linux architecture, verifies and unpacks its layers, and runs
-it with mini-docker's engine. Cached images work offline. Pulls show per-layer download and extraction progress on stderr,
-with dynamic bars in a terminal and plain text when redirected. Use `--progress=plain`
-for log-friendly output. Use `mdocker image pull redis:8` to refresh a tag, or a registry digest to pin its source. Supply application
+it with mini-docker's engine. Cached images work offline. Supply application
 settings with `--env`, persistent directories with `--mount`, and command arguments
-after `--`. See the [image guide](guides/usage.md#ocidocker-images).
+after `--`. Arguments replace image `Cmd` and retain `Entrypoint`; use `--entrypoint`
+to override it. Anonymous-access registries are supported; private-registry login
+and OCI rootless execution are not currently supported. See the
+[image guide](guides/usage.md#ocidocker-images).
+
+## Pull progress and image management
+
+Automatic pulls and explicit `image pull` show per-layer download, verification,
+and extraction progress on stderr. `--progress=auto` (default) uses dynamic bars
+in a terminal and plain text when redirected; `plain` and `tty` force either mode.
+Image/container IDs and application output stay on stdout. Cached runs show
+`Using cached image`; an unchanged explicit pull shows `Image is up to date`.
+
+```sh
+mdocker image pull redis:8
+mdocker image pull --progress=plain redis:8
+mdocker image ls
+mdocker image ls --json
+```
+
+Tags keep their cached version until `image pull` refreshes them. Use a registry
+digest to pin the source. To delete an image, replace `IMAGE_ID` below with the full
+local `sha256:` ID from `image ls`. Stop and remove all referencing containers first;
+image removal accepts local IDs rather than registry names such as `redis:8`.
+
+```sh
+mdocker image rm IMAGE_ID
+```
 
 ## Common operations
 
@@ -52,17 +87,26 @@ mdocker run -d --name worker --memory 128m --pids-limit 64 --cpus 0.5 \
   -- /bin/sleep 300
 mdocker ps
 mdocker exec worker -- /bin/sh -c 'hostname; id'
+mdocker exec -it worker -- /bin/sh
 mdocker logs --tail 20 worker
 mdocker inspect worker
 mdocker stats worker
 mdocker stop worker
+mdocker start worker
+mdocker restart worker
+mdocker stop worker
 mdocker rm worker
 ```
 
+Use `exit` to leave the exec shell; the main container continues running.
+Stop/start and restart preserve the container's private files; `rm` deletes them.
+Bind-mounted host data survives container removal.
+
 Your Mac home directory is shared with the VM for rootfs imports and bind mounts.
-Containers and imported images remain on the VM's Linux disk. Published TCP and
-UDP ports are forwarded back to the Mac. The default network is loopback only;
-use `--network bridge` for connectivity and port publishing.
+The image cache is at `/var/lib/mini-docker/images`, and container records and
+private roots are at `/var/lib/mini-docker/containers`, inside the VM. Published
+TCP and UDP ports are forwarded back to the Mac. The default network is loopback
+only; use `--network bridge` for connectivity and port publishing.
 
 ```sh
 mdocker run --mount "type=bind,source=$PWD,target=/work" --workdir /work \
@@ -71,6 +115,9 @@ mdocker machine status
 mdocker machine stop
 mdocker machine start
 ```
+
+Stopping the VM stops its workloads and preserves their data. After starting the
+VM, use `mdocker start NAME` to start a retained container again.
 
 The VM defaults to 4 CPUs, 4 GiB memory, and a 20 GiB disk. Before its first use,
 you can choose resources and additional shared directories:
