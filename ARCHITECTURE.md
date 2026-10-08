@@ -56,6 +56,12 @@ loopback addresses. Lima forwards only those addresses using its gRPC forwarder
 for TCP and UDP; the Linux network adapter continues to own NAT and port leases.
 Lima owns host forwarding cleanup. The host checks occupied ports before launch,
 but cannot reserve Lima's eventual socket atomically.
+For retained containers, a private lifecycle handshake checks saved published
+ports after the guest stops the old execution. The guest holds the immutable
+container's operation lock throughout stopping, host authorization, and startup.
+The host briefly waits for Lima to release old sockets, checking wildcard ports
+against local IPv4 addresses too. Refusal, disconnection, or cancellation leaves
+the stopped generation intact. An already running `start` needs no check.
 
 ## Module boundaries
 

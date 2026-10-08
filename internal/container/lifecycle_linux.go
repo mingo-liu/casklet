@@ -69,6 +69,14 @@ func Remove(ctx context.Context, ref string) error {
 // StartExisting is idempotent for running containers. Stopped containers resume
 // their retained rootfs with a new execution receipt and transient resources.
 func StartExisting(ctx context.Context, ref string) (Record, error) {
+	return StartExistingWithPreflight(ctx, ref, nil)
+}
+
+// StartPreflight checks external resources while the immutable container's
+// operation lock is held. A failed check must not publish a new generation.
+type StartPreflight func(context.Context, []config.PortMapping) error
+
+func StartExistingWithPreflight(ctx context.Context, ref string, preflight StartPreflight) (Record, error) {
 	store, record, operation, err := lockReference(ctx, ref)
 	if err != nil {
 		return record, err
@@ -84,10 +92,14 @@ func StartExisting(ctx context.Context, ref string) (Record, error) {
 	if !record.Terminal() {
 		return record, errors.New("container is still starting or stopping")
 	}
-	return startStopped(ctx, store, record)
+	return startStopped(ctx, store, record, preflight)
 }
 
 func Restart(ctx context.Context, ref string, timeout *time.Duration) (Record, error) {
+	return RestartWithPreflight(ctx, ref, timeout, nil)
+}
+
+func RestartWithPreflight(ctx context.Context, ref string, timeout *time.Duration, preflight StartPreflight) (Record, error) {
 	if timeout != nil {
 		if err := config.ValidateStopTimeout(*timeout); err != nil {
 			return Record{}, err
@@ -102,10 +114,10 @@ func Restart(ctx context.Context, ref string, timeout *time.Duration) (Record, e
 	if err != nil {
 		return record, err
 	}
-	return startStopped(ctx, store, record)
+	return startStopped(ctx, store, record, preflight)
 }
 
-func startStopped(ctx context.Context, store *Store, record Record) (Record, error) {
+func startStopped(ctx context.Context, store *Store, record Record, preflight StartPreflight) (Record, error) {
 	ctx, cancel := context.WithTimeout(ctx, detachedStartupLimit)
 	defer cancel()
 	status, err := inspectUnit(ctx, record.ID, record.Generation)
@@ -163,6 +175,11 @@ func startStopped(ctx context.Context, store *Store, record Record) (Record, err
 	}
 	if err := rootfs.ValidateMountSources(cfg.Mounts, candidate); err != nil {
 		return record, err
+	}
+	if preflight != nil {
+		if err := preflight(ctx, cfg.Publish); err != nil {
+			return record, err
+		}
 	}
 	// The old supervisor lease fences endpoint cleanup and the generation reset.
 	lease, err := store.AcquireLease(ctx, record.ID)

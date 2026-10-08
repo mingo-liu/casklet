@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Retained-container host port preflight
+
+Mac `start` and `restart` check the saved published ports before creating a new
+execution. A private bounded handshake keeps the guest operation lock across
+stop, host authorization, and startup. Rejection, disconnect, and cancellation
+preserve the stopped generation. Running `start` remains idempotent. Checks
+briefly wait for asynchronous Lima socket release and probe local IPv4
+addresses for wildcard bindings, which BSD can otherwise allow alongside an
+existing address-specific TCP listener. Lima's final bind remains asynchronous
+and cannot be reserved atomically by preflight.
+
+Regressions: `TestHostLifecyclePreflightFencesGenerationAndOperations` checks
+both lifecycle actions, lock contention, denial, disconnect, signal cancellation,
+authorization, and retry. `TestLifecycleRejectsOccupiedMacPorts` covers TCP/UDP,
+wildcard/localhost, unchanged rejected generations, retry, idempotent start,
+and active restart. Unit tests cover bounded protocol decoding, guest-to-host
+address translation, fragmented output, malformed messages, port release,
+cancellation, and TCP/UDP conflicts including wildcard shadowing.
+
+Validation: formatting, unit tests, and vet passed on macOS arm64 and in the
+dedicated Linux arm64 VM. Relevant macOS race tests and Linux race checks
+passed. The complete privileged Linux suite and targeted macOS lifecycle and
+TCP/UDP publishing tests passed. Intel Mac and Linux amd64 execution were not
+run.
+
 ## 2026-10-08: Nonterminal signal cleanup
 
 Foreground supervisors and namespace init processes handle HUP and QUIT for

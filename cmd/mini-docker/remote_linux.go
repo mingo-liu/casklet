@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mingo-liu/mini-docker/internal/cli"
 	"github.com/mingo-liu/mini-docker/internal/machine"
 	"github.com/mingo-liu/mini-docker/internal/remote"
 )
@@ -23,6 +24,8 @@ func remoteMode(args []string) (bool, int) {
 		ctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		err = machine.EnsureBuiltinTemplate(ctx)
+	} else if len(args) >= 3 && args[0] == "__host-lifecycle" {
+		return true, cli.ExecuteHostLifecycle(args[1:], os.Stdin, os.Stdout, os.Stderr)
 	} else if len(args) >= 3 && args[0] == "__remote" {
 		code, err = remote.Run(args[1], args[2:])
 	} else if len(args) == 3 && args[0] == "__signal" {

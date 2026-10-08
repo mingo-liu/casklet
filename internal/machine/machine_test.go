@@ -92,8 +92,10 @@ func TestPortPreflightDetectsTCPAndUDPConflicts(t *testing.T) {
 	}
 	defer udp.Close()
 	for _, mapping := range []string{strconv.Itoa(tcp.Addr().(*net.TCPAddr).Port) + ":80/tcp", strconv.Itoa(udp.LocalAddr().(*net.UDPAddr).Port) + ":53/udp"} {
-		if err := checkPorts([]string{"run", "-p", "127.0.0.1:" + mapping, "--", "true"}); err == nil {
-			t.Fatal("accepted occupied host port")
+		for _, hostIP := range []string{"127.0.0.1", "0.0.0.0"} {
+			if err := checkPorts([]string{"run", "-p", hostIP + ":" + mapping, "--", "true"}); err == nil {
+				t.Fatalf("accepted occupied host port for %s", hostIP)
+			}
 		}
 	}
 	if err := checkPorts([]string{"run", "--env", "VALUE=-p", "--", "echo", "-p", "invalid"}); err != nil {

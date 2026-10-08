@@ -197,6 +197,13 @@ code for the execution it observed. `start` and `restart` keep the private rootf
 but recreate transient namespaces, cgroups, and temporary storage. `rm` requires
 a stopped container and removes its private files, metadata, and logs.
 
+`start` and `restart` check saved published ports on the Mac before creating a
+new execution. They briefly wait for Lima to release old forwarding sockets.
+If a port remains occupied, the command returns 125 and keeps the stopped
+generation and its files. A failed `restart` can therefore leave the container
+stopped; release the port and retry `start` or `restart`. `start` on an already
+running container remains idempotent.
+
 Detached stdout/stderr share rotating logs, defaulting to four files of 4 MiB.
 Set `--log-max-size` and `--log-max-files` on detached `run`; retained logs are
 limited to 64 MiB total. `logs -f` follows output; `--tail` accepts 0–1000000.

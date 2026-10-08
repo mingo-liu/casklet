@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -124,19 +123,10 @@ func checkPorts(args []string) error {
 		if err := validateMacPort(mapping); err != nil {
 			return err
 		}
-		address := net.JoinHostPort(mapping.HostIP, strconv.Itoa(int(mapping.HostPort)))
-		if mapping.Protocol == "udp" {
-			listener, err := net.ListenPacket("udp4", address)
-			if err != nil {
-				return fmt.Errorf("macOS host port unavailable: %w; choose another host port with -p HOST_PORT:CONTAINER_PORT, or stop the process using this port", err)
-			}
-			return listener.Close()
-		}
-		listener, err := net.Listen("tcp4", address)
-		if err != nil {
+		if err := probePort(mapping); err != nil {
 			return fmt.Errorf("macOS host port unavailable: %w; choose another host port with -p HOST_PORT:CONTAINER_PORT, or stop the process using this port", err)
 		}
-		return listener.Close()
+		return nil
 	})
 }
 
@@ -185,11 +175,25 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		return 125, err
 	}
 	defer finishWatchdog()
+	lifecycle := len(args) > 0 && (args[0] == "start" || args[0] == "restart")
+	if lifecycle {
+		args = append([]string{"__host-lifecycle"}, args...)
+	}
 	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
 	// SSH owns terminal raw mode and resizing. Explicit control messages also
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
 	cmd := sshCommand(context.Background(), *instance, invocation.TTY, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if lifecycle {
+		input, response, err := os.Pipe()
+		if err != nil {
+			return 125, err
+		}
+		defer input.Close()
+		defer response.Close()
+		cmd.Stdin = input
+		cmd.Stdout = &portCheckOutput{ctx: ctx, response: response, stdout: stdout}
+	}
 	var inspection *inspectionOutput
 	if len(invocation.Args) > 0 && invocation.Args[0] == "inspect" {
 		inspection = &inspectionOutput{}
