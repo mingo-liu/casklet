@@ -37,6 +37,8 @@ corrupt executable content with the correct marker. The macOS
 an executable failure script, checks automatic repair and a surviving running
 container, and confirms healthy installations are reused. Both tests reproduced
 the gap before the fix.
+Fault-test cleanup restores the engine before stopping and removing its
+container, so a failed repair assertion can still release the test workload.
 
 Validation: `make build fmt-check test vet` passed on macOS arm64. The guest
 check's unit tests and vet passed in the Linux arm64 VM. macOS end-to-end tests

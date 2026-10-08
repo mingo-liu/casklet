@@ -9,6 +9,7 @@ import (
 
 func TestMachineRepairsCorruptExecutableEngine(t *testing.T) {
 	success(t, "doctor")
+	id := detached(t, "--", "/bin/sleep", "300")
 	const engine = "/usr/local/bin/mdocker"
 	backup, err := guestRootCommand(t, "mktemp", "/usr/local/bin/.mdocker-integrity-test-XXXXXXXX")
 	if err != nil {
@@ -31,7 +32,6 @@ rm -f -- "$1" "$1.corrupt"`, "restore-engine", backup, engine); err != nil {
 	if _, err := guestRootCommand(t, "cp", "--", engine, backup); err != nil {
 		t.Fatal(err)
 	}
-	id := detached(t, "--", "/bin/sleep", "300")
 	// Leave the matching installation marker intact. Atomic replacement also
 	// preserves the executable pinned by the running container's supervisor.
 	if _, err := guestRootCommand(t, "/bin/sh", "-c", `set -eu
