@@ -337,17 +337,20 @@ func (call *invocation) supervisor(t *testing.T) int {
 }
 
 func TestSignals(t *testing.T) {
-	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+	require(t)
+	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		t.Run(signal.String(), func(t *testing.T) {
-			call := start(t, "", "run", "--rootfs", template, "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 0' INT TERM; echo ready; while :; do sleep 1; done")
+			before := networkSnapshot(t)
+			call := start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 9' INT TERM HUP QUIT; echo ready; while :; do sleep 1; done")
 			pid := call.supervisor(t)
 			if err := syscall.Kill(pid, signal); err != nil {
 				t.Fatal(err)
 			}
 			code, out, stderr := call.wait(t)
-			if code != 0 || !strings.Contains(out, "interrupted") {
+			if code != 9 || !strings.Contains(out, "interrupted") {
 				t.Fatalf("signal exit=%d stdout=%q stderr=%q", code, out, stderr)
 			}
+			assertNetworkSnapshot(t, before)
 		})
 	}
 }
@@ -500,6 +503,13 @@ func TestSignalDuringPreparation(t *testing.T) {
 }
 
 func TestSignalWhileWaitingForStateLock(t *testing.T) {
+	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
+		t.Run(signal.String(), func(t *testing.T) { testSignalWhileWaitingForStateLock(t, signal) })
+	}
+}
+
+func testSignalWhileWaitingForStateLock(t *testing.T, signal syscall.Signal) {
+	t.Helper()
 	require(t)
 	// Publish the production coordination lock through a completed runtime run.
 	success(t, nil, "/bin/true")
@@ -540,11 +550,11 @@ func TestSignalWhileWaitingForStateLock(t *testing.T) {
 		t.Fatal("supervisor did not reach the held state coordination lock")
 	}
 	started := time.Now()
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := syscall.Kill(pid, signal); err != nil {
 		t.Fatal(err)
 	}
 	code, out, stderr := call.wait(t)
-	if code != 128+int(syscall.SIGTERM) || strings.Contains(out, "command-must-not-start") {
+	if code != 128+int(signal) || strings.Contains(out, "command-must-not-start") {
 		t.Fatalf("state lock interruption exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	if elapsed := time.Since(started); elapsed > 2*time.Second {

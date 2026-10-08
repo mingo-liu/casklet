@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Nonterminal signal cleanup
+
+Foreground supervisors and namespace init processes handle HUP and QUIT for
+both terminal and nonterminal runs. Signals cancel preparation or reach the
+workload through the existing bounded shutdown path. The macOS watchdog's HUP
+now performs normal resource cleanup after abrupt client loss.
+
+Regressions: `TestSignals` checks all four forwarded signals, trap exit status,
+and bridge/NAT cleanup; `TestSignalWhileWaitingForStateLock` checks cancellation
+before startup for all four signals. `TestNonTTYHangupAndQuitCleanup` verifies
+the macOS transport, and `TestAbruptClientLossCleansForegroundSession` now checks
+the invocation's run directory, cgroup, and NAT table as well as its processes.
+
+Validation: formatting, unit tests, and vet passed on macOS arm64 and in the
+dedicated Linux arm64 VM. Linux race checks and the complete privileged
+integration suite passed. Targeted macOS signal, watchdog, and noninteractive
+TTY end-to-end tests passed. Intel Mac and Linux amd64 execution were not run.
+
 ## 2026-10-07: Capture, cleanup, and transaction recovery
 
 ### Recover log capture after temporary contention

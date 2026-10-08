@@ -3,6 +3,7 @@
 package macos
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -348,7 +349,8 @@ func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	marker := fmt.Sprintf("macos-client-loss-%d", time.Now().UnixNano())
-	cmd := exec.CommandContext(ctx, client(t), "run", "--", "/bin/sh", "-c", "echo "+marker+"; sleep 300")
+	t.Cleanup(func() { command(t, "run", "--", "/bin/true") })
+	cmd := exec.CommandContext(ctx, client(t), "run", "--network", "bridge", "--", "/bin/sh", "-c", "cat /proc/self/cgroup; echo "+marker+"; sleep 300")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -357,11 +359,16 @@ func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	var buffer [256]byte
-	n, err := stdout.Read(buffer[:])
-	if err != nil || !strings.Contains(string(buffer[:n]), marker) {
-		t.Fatalf("readiness: %q %v", buffer[:n], err)
+	reader := bufio.NewReader(stdout)
+	membership, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read cgroup: %v", err)
 	}
+	ready, err := reader.ReadString('\n')
+	if err != nil || strings.TrimSpace(ready) != marker {
+		t.Fatalf("readiness: %q %v", ready, err)
+	}
+	path, cgroup := foregroundRun(t, membership)
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -374,6 +381,7 @@ func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(data), marker) {
+			waitForegroundCleanup(t, path, cgroup)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

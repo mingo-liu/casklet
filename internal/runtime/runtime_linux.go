@@ -53,10 +53,9 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 	incomingSignals := make(chan os.Signal, 8)
 	signals := make(chan os.Signal, 8)
-	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM)
-	if cfg.TTY {
-		signal.Notify(incomingSignals, syscall.SIGHUP, syscall.SIGQUIT)
-	}
+	// Remote clients and their watchdogs forward these signals for every run.
+	// Catch them before preparation so cancellation still performs cleanup.
+	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer signal.Stop(incomingSignals)
 	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), startupLimit)
 	defer cancelPrepare()

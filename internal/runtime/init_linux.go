@@ -56,10 +56,7 @@ func Init() int {
 		return fail(err)
 	}
 	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGCHLD)
-	if cfg.TTY {
-		signal.Notify(signals, syscall.SIGHUP, syscall.SIGQUIT)
-	}
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGCHLD)
 	defer signal.Stop(signals)
 	// The pinned launcher may be outside mapped IDs; discard it before setup.
 	if cfg.UserNS {
