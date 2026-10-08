@@ -104,8 +104,9 @@ casklet machine stop
 casklet machine start
 ```
 
-停止虚拟机会停止其中的工作负载，但保留其数据。启动虚拟机后，可以用
-`casklet start NAME` 再次启动保留的容器。
+停止虚拟机会停止其中的工作负载，但保留其数据。启动虚拟机后，采用 `always`
+或满足条件的 `unless-stopped` 策略的容器会自动恢复；其他保留的容器可以用
+`casklet start NAME` 再次启动。
 
 虚拟机默认配置为 4 个 CPU、4 GiB 内存和 20 GiB 磁盘。首次使用前，可以自定义资源
 配置并添加共享目录：
@@ -138,6 +139,19 @@ casklet image prune
 镜像的 `StopSignal` 会保留用于后台容器关闭，可用 `--stop-signal SIGQUIT` 覆盖。
 停止和重启会先发送该 Linux 信号，超过配置的停止宽限时间后强制终止。
 前台收到的外部信号仍按原信号转发。
+
+后台容器支持自动重启：
+
+```sh
+casklet run -d --name service --restart unless-stopped -- /bin/sleep 300
+casklet run -d --name retry-job --restart on-failure:3 -- /bin/sh -c 'exit 1'
+```
+
+默认为 `no`。`on-failure[:1-1000]` 重试非零或未知的退出状态；`always` 与
+`unless-stopped` 也会在正常退出后重启，并在 VM 启动后恢复。手动停止会暂停自动重启，
+直到再次 start/restart；`always` 在下一次 VM 启动时恢复，`unless-stopped` 则保持停止。
+重试采用从 1 秒到 30 秒的退避。自动重启的端口转发依赖 Lima，无法实时预检 Mac
+端口占用。重试计数与检查字段的详情见使用指南。
 
 ## 文档与开发
 

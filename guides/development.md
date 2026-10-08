@@ -139,5 +139,9 @@ suite does not. Pull staging and caches live on the VM disk.
   dedicated loopback forwarding rules and writable home share.
 - Guest diagnostics are available through `limactl shell casklet-runtime`.
   VM image download and Ubuntu package installation require internet access.
+- Engine installation enables `casklet-restarts.service` for automatic policies.
+  Inspect it with `sudo systemctl status casklet-restarts.service` and
+  `sudo journalctl -u casklet-restarts.service` inside the product VM. Engine
+  upgrades replace this manager independently of active workload supervisors.
 - Report integration checks that could not run. Unit tests and cross-compilation
   alone do not establish terminal, networking, or resource-limit behavior.

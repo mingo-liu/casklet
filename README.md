@@ -117,7 +117,8 @@ casklet machine start
 ```
 
 Stopping the VM stops its workloads and preserves their data. After starting the
-VM, use `casklet start NAME` to start a retained container again.
+VM, `always` and eligible `unless-stopped` containers resume automatically;
+use `casklet start NAME` for other retained containers.
 
 The VM defaults to 4 CPUs, 4 GiB memory, and a 20 GiB disk. Before its first use,
 you can choose resources and additional shared directories:
@@ -152,6 +153,20 @@ refuses images with active leases or references from retained containers.
 Image `StopSignal` is retained for managed shutdown. Override it with
 `--stop-signal SIGQUIT`; stop/restart uses that Linux signal before the configured
 stop timeout forces termination. Foreground external signals remain unchanged.
+
+Detached containers support automatic restarts:
+
+```sh
+casklet run -d --name service --restart unless-stopped -- /bin/sleep 300
+casklet run -d --name retry-job --restart on-failure:3 -- /bin/sh -c 'exit 1'
+```
+
+The default is `no`. `on-failure[:1-1000]` retries nonzero or unknown exits;
+`always` and `unless-stopped` also restart successful exits and resume after VM
+boot. Manual stop suppresses restarts until start/restart; `always` resumes on the
+next VM boot, while `unless-stopped` stays stopped. Retries back off from 1 to 30
+seconds. Automatic published-port forwarding depends on Lima without a live Mac
+port preflight. See the usage guide for retry counters and inspection fields.
 
 ## Documentation and development
 

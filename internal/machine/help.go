@@ -51,8 +51,8 @@ Options:
 
 Notes:
   Creates or starts the product VM and installs the current bundled engine.
-  Repeatable; keeps container and image storage. Containers stopped with the VM
-  stay stopped until casklet start or casklet restart is used.
+  Repeatable; keeps container and image storage. Containers with always/unless-stopped policies
+  resume automatically; other stopped containers require casklet start or restart.
 
 Examples:
   casklet machine start

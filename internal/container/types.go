@@ -31,6 +31,11 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
+	RestartBootID   string           `json:"restart_boot_id,omitempty"`
+	StoppedBootID   string           `json:"stopped_boot_id,omitempty"`
+	StoppedByUser   bool             `json:"stopped_by_user,omitempty"`
+	RestartCount    uint64           `json:"restart_count,omitempty"`
+	RestartAt       *time.Time       `json:"restart_at,omitempty"`
 	LogLocking      bool             `json:"log_locking,omitempty"`
 	CleanupFailures []string         `json:"cleanup_failures,omitempty"`
 	Generation      uint64           `json:"generation"`
@@ -87,6 +92,9 @@ func validateRecord(record Record, id string) error {
 	}
 	if record.StopTimeout != nil && (*record.StopTimeout < 0 || *record.StopTimeout > time.Minute) {
 		return errors.New("invalid recorded stop timeout")
+	}
+	if record.RestartCount > 1000000 || record.StoppedBootID != "" && !bootIDPattern.MatchString(record.StoppedBootID) || record.RestartBootID != "" && !bootIDPattern.MatchString(record.RestartBootID) {
+		return errors.New("invalid recorded restart state")
 	}
 	if record.Version != 1 || record.ID != id {
 		return errors.New("invalid container record version or identity")

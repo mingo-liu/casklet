@@ -142,6 +142,18 @@ the source directory disappears. Temporary mounts and execution resources are
 fresh for each generation. Image acquisition must protect the source until a
 copy or durable reference exists; do not reverse image/container lock ordering.
 
+The boot-enabled `casklet-restarts.service` owns automatic policy reconciliation.
+It uses the same per-container operation lock and start path as manual lifecycle
+commands, with four bounded concurrent operations and fair polling. Workload
+units keep `Restart=no`; every attempt publishes a new durable generation and
+receipt. Retry count, backoff deadline, and manual-stop state survive manager
+replacement. Boot identities distinguish policy restoration from a manual stop
+in the current boot. Manual stop records suppression before signalling, and
+manual start/restart clears it only when an execution is published. Preparation
+failures consume retries without inventing an execution. Guest automatic starts
+have no Mac port preflight; forwarding remains Lima's responsibility. Engine
+installation enables the manager and replaces it independently of workloads.
+
 Log rotation and snapshots use a per-container `.logs` lock. Lookup and lock
 acquisition briefly use the metadata lock; waiting and log I/O do not. Removal
 claims the log lock before hiding a record. A bounded lock timeout discards only

@@ -40,3 +40,6 @@ func Restart(context.Context, string, *time.Duration) (Record, error) {
 	return Record{}, errUnsupportedStore
 }
 func Wait(context.Context, string) (int, error) { return 125, errUnsupportedStore }
+
+func RestartManager() int                              { return 125 }
+func EnsureRestartManager(context.Context, bool) error { return errUnsupportedStore }

@@ -31,7 +31,11 @@ func lockReference(ctx context.Context, ref string) (*Store, Record, *os.File, e
 		return nil, record, nil, err
 	}
 	latest, err := store.Get(ctx, record.ID)
-	if err != nil || latest.Generation != record.Generation {
+	cfg, cfgErr := store.Config(ctx, record.ID)
+	if err == nil && cfgErr != nil {
+		err = cfgErr
+	}
+	if err != nil || latest.Generation != record.Generation && cfg.RestartMode() == "no" {
 		operation.Close()
 		if err == nil {
 			err = errors.New("container execution changed; retry the operation")
@@ -54,6 +58,9 @@ func StopWithTimeout(ctx context.Context, ref string, timeout *time.Duration) (R
 		return record, err
 	}
 	defer operation.Close()
+	if err := markUserStopped(ctx, store, record.ID); err != nil {
+		return record, err
+	}
 	return stopLocked(ctx, store, record, timeout)
 }
 
@@ -87,7 +94,16 @@ func StartExistingWithPreflight(ctx context.Context, ref string, preflight Start
 		return record, err
 	}
 	if record.State == StateRunning {
-		return record, nil
+		if err := store.Update(ctx, record.ID, func(r *Record) error {
+			r.StoppedByUser = false
+			r.StoppedBootID = ""
+			r.RestartCount = 0
+			r.RestartAt = nil
+			return nil
+		}); err != nil {
+			return record, err
+		}
+		return store.Get(ctx, record.ID)
 	}
 	if !record.Terminal() {
 		return record, errors.New("container is still starting or stopping")
@@ -110,6 +126,9 @@ func RestartWithPreflight(ctx context.Context, ref string, timeout *time.Duratio
 		return record, err
 	}
 	defer operation.Close()
+	if err := markUserStopped(ctx, store, record.ID); err != nil {
+		return record, err
+	}
 	record, err = stopLocked(ctx, store, record, timeout)
 	if err != nil {
 		return record, err
@@ -118,6 +137,9 @@ func RestartWithPreflight(ctx context.Context, ref string, timeout *time.Duratio
 }
 
 func startStopped(ctx context.Context, store *Store, record Record, preflight StartPreflight) (Record, error) {
+	return startStoppedWithPolicy(ctx, store, record, preflight, false)
+}
+func startStoppedWithPolicy(ctx context.Context, store *Store, record Record, preflight StartPreflight, automatic bool) (Record, error) {
 	ctx, cancel := context.WithTimeout(ctx, detachedStartupLimit)
 	defer cancel()
 	status, err := inspectUnit(ctx, record.ID, record.Generation)
@@ -191,7 +213,7 @@ func startStopped(ctx context.Context, store *Store, record Record, preflight St
 	if err != nil {
 		return record, err
 	}
-	next, err := store.BeginExecution(ctx, record.ID, record.Generation)
+	next, err := store.BeginExecution(ctx, record.ID, record.Generation, automatic)
 	if err != nil {
 		return record, err
 	}
@@ -265,4 +287,12 @@ func (store *Store) cleanupRootFSStages(id string) error {
 		}
 	}
 	return nil
+}
+
+func markUserStopped(ctx context.Context, store *Store, id string) error {
+	boot, err := currentBootID()
+	if err != nil {
+		return err
+	}
+	return store.Update(ctx, id, func(r *Record) error { r.StoppedByUser = true; r.StoppedBootID = boot; r.RestartAt = nil; return nil })
 }

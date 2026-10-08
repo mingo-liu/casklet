@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/mingo-liu/casklet/internal/cli"
 	"github.com/mingo-liu/casklet/internal/container"
@@ -10,6 +13,19 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "__restart-manager" {
+		os.Exit(container.RestartManager())
+	}
+	if (len(os.Args) == 2 || len(os.Args) == 3 && os.Args[2] == "replace") && os.Args[1] == "__ensure-restarts" {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := container.EnsureRestartManager(ctx, len(os.Args) == 3); err != nil {
+			fmt.Fprintln(os.Stderr, "casklet:", err)
+			os.Exit(125)
+		}
+		return
+	}
+
 	if handled, code := remoteMode(os.Args[1:]); handled {
 		os.Exit(code)
 	}

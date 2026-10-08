@@ -15,6 +15,9 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
+	StoppedByUser      bool             `json:"stopped_by_user"`
+	RestartCount       uint64           `json:"restart_count"`
+	RestartAt          *time.Time       `json:"restart_at"`
 	CleanupFailures    []string         `json:"cleanup_failures"`
 	Generation         uint64           `json:"generation"`
 	PreviousExit       *ExecutionResult `json:"previous_exit"`
@@ -32,6 +35,7 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
+	RestartPolicy    string               `json:"restart_policy"`
 	StopSignal       string               `json:"stop_signal"`
 	LogMaxSize       int64                `json:"log_max_size"`
 	LogMaxFiles      int                  `json:"log_max_files"`
@@ -73,16 +77,21 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	if cfg.User != nil {
 		user = *cfg.User
 	}
+	policy := cfg.RestartPolicy
+	if policy == "" {
+		policy = "no"
+	}
 	rootfs := cfg.RootFS
 	if cfg.Image != "" {
 		rootfs = ""
 	}
 	logSize, logFiles := cfg.LogRetention()
 	return Inspection{
+		StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount, RestartAt: record.RestartAt,
 		CleanupFailures: append([]string{}, record.CleanupFailures...),
 		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

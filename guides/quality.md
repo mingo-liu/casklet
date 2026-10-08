@@ -6,6 +6,30 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Durable automatic restart policies
+
+Detached containers now accept `--restart no|on-failure[:1-1000]|always|unless-stopped`.
+The boot-enabled guest manager uses existing operation locks, retained roots,
+resource cleanup, and generation receipts. Four workers poll fairly; durable
+exponential backoff caps at 30 seconds. Preparation failures consume retries,
+healthy executions reset consecutive attempts, and manual stop suppresses retries.
+Boot identities preserve `unless-stopped` choices while allowing `always` to
+resume. Engine installation and replacement manage the daemon independently of
+workload supervisors. Inspection exposes policy, counter, pending deadline, and
+manual-stop state; wait stays attached to its original generation.
+
+Concurrent inspection exposed a loaded-but-not-yet-started systemd unit window.
+Scheduling grace now protects that window without hiding completed supervisors.
+Validation: Darwin arm64 build, formatting, unit tests, and vet passed. Linux arm64
+unit/vet and relevant race checks passed. The full privileged Linux integration
+suite and full real macOS suite passed; six-container concurrent restarts also
+passed eight consecutive runs. The product VM reboot test skipped to preserve
+other active workloads; a real dedicated development VM reboot verified all four
+policies, manual-stop persistence, and retained data using a persistently installed
+engine. Automatic guest restarts cannot preflight Mac socket
+ownership; asynchronous forwarding remains Lima's responsibility. Intel execution
+was not run.
+
 ## 2026-10-08: OCI and explicit managed stop signals
 
 Image startup defaults now retain and validate `StopSignal`; `run --stop-signal`

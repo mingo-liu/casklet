@@ -70,6 +70,16 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
+		fs.Func("restart", "detached restart policy", func(value string) error {
+			if value == "" {
+				return errors.New("--restart requires a policy")
+			}
+			if _, _, err := config.ParseRestartPolicy(value); err != nil {
+				return err
+			}
+			r.Config.RestartPolicy = value
+			return nil
+		})
 		fs.Func("stop-signal", "Linux signal for managed shutdown", func(value string) error {
 			if _, err := config.ParseStopSignal(value); err != nil {
 				return err
@@ -181,6 +191,9 @@ func parseRun(r Request, args []string) (Request, error) {
 	fs.Visit(func(f *flag.Flag) {
 		interactiveSpecified = interactiveSpecified || f.Name == "i" || f.Name == "interactive"
 	})
+	if !r.Detach && r.Config.RestartPolicy != "" {
+		return r, errors.New("--restart requires --detach")
+	}
 	if r.Detach && (r.Config.Interactive || r.Config.TTY) {
 		return r, errors.New("--interactive and --tty require a foreground run")
 	}

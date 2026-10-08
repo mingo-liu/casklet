@@ -27,34 +27,35 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
-	StopSignal  string         `json:"stop_signal,omitempty"`
-	LogMaxSize  int64          `json:"log_max_size,omitempty"`
-	LogMaxFiles int            `json:"log_max_files,omitempty"`
-	Seccomp     string         `json:"seccomp,omitempty"`
-	UserNS      bool           `json:"userns,omitempty"`
-	Rootless    bool           `json:"rootless,omitempty"`
-	UIDMappings []IDMapping    `json:"uid_mappings,omitempty"`
-	GIDMappings []IDMapping    `json:"gid_mappings,omitempty"`
-	Network     string         `json:"network,omitempty"`
-	DNS         []string       `json:"dns,omitempty"`
-	Publish     []PortMapping  `json:"publish,omitempty"`
-	StopTimeout *time.Duration `json:"stop_timeout,omitempty"`
-	Image       string         `json:"image,omitempty"`
-	OCI         bool           `json:"oci,omitempty"`
-	Mounts      []BindMount    `json:"mounts,omitempty"`
-	RootFS      string         `json:"rootfs"`
-	Hostname    string         `json:"hostname"`
-	Memory      int64          `json:"memory"`
-	PidsLimit   int64          `json:"pids_limit"`
-	CPUQuota    int64          `json:"cpu_quota"`
-	Timeout     time.Duration  `json:"timeout"`
-	Env         []string       `json:"env,omitempty"`
-	Workdir     string         `json:"workdir,omitempty"`
-	User        *User          `json:"user,omitempty"`
-	ReadOnly    bool           `json:"read_only"`
-	Interactive bool           `json:"interactive"`
-	TTY         bool           `json:"tty"`
-	Command     []string       `json:"command"`
+	RestartPolicy string         `json:"restart_policy,omitempty"`
+	StopSignal    string         `json:"stop_signal,omitempty"`
+	LogMaxSize    int64          `json:"log_max_size,omitempty"`
+	LogMaxFiles   int            `json:"log_max_files,omitempty"`
+	Seccomp       string         `json:"seccomp,omitempty"`
+	UserNS        bool           `json:"userns,omitempty"`
+	Rootless      bool           `json:"rootless,omitempty"`
+	UIDMappings   []IDMapping    `json:"uid_mappings,omitempty"`
+	GIDMappings   []IDMapping    `json:"gid_mappings,omitempty"`
+	Network       string         `json:"network,omitempty"`
+	DNS           []string       `json:"dns,omitempty"`
+	Publish       []PortMapping  `json:"publish,omitempty"`
+	StopTimeout   *time.Duration `json:"stop_timeout,omitempty"`
+	Image         string         `json:"image,omitempty"`
+	OCI           bool           `json:"oci,omitempty"`
+	Mounts        []BindMount    `json:"mounts,omitempty"`
+	RootFS        string         `json:"rootfs"`
+	Hostname      string         `json:"hostname"`
+	Memory        int64          `json:"memory"`
+	PidsLimit     int64          `json:"pids_limit"`
+	CPUQuota      int64          `json:"cpu_quota"`
+	Timeout       time.Duration  `json:"timeout"`
+	Env           []string       `json:"env,omitempty"`
+	Workdir       string         `json:"workdir,omitempty"`
+	User          *User          `json:"user,omitempty"`
+	ReadOnly      bool           `json:"read_only"`
+	Interactive   bool           `json:"interactive"`
+	TTY           bool           `json:"tty"`
+	Command       []string       `json:"command"`
 }
 
 var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -85,6 +86,9 @@ func (c Config) ValidateExecution() error {
 		return err
 	}
 	if err := c.ValidateSecurity(); err != nil {
+		return err
+	}
+	if _, _, err := ParseRestartPolicy(c.RestartPolicy); err != nil {
 		return err
 	}
 	if c.StopSignal != "" {

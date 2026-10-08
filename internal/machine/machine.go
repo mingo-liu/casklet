@@ -211,6 +211,9 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
 	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, "/usr/local/lib/casklet/engine.sha256", hash); err == nil {
 		_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-template")
+		if err == nil {
+			_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-restarts")
+		}
 		return err
 	}
 	fmt.Fprintln(m.stderr, "Installing the bundled container engine...")
@@ -233,6 +236,7 @@ install -d -m 0755 /usr/local/lib/casklet
 install -m 0755 "$1/casklet" /usr/local/bin/casklet.new
 mv /usr/local/bin/casklet.new /usr/local/bin/casklet
 /usr/local/bin/casklet __ensure-template
+/usr/local/bin/casklet __ensure-restarts replace
 printf '%s\n' "$2" > /usr/local/lib/casklet/engine.sha256
 `
 	_, err = m.output(ctx, instance, "sudo", "-n", "--", "/bin/sh", "-c", script, "install", guestStage, hash)

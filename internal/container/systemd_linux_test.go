@@ -49,6 +49,14 @@ func TestSchedulingGraceExpiresAcrossBootsAndClockChanges(t *testing.T) {
 	if !schedulingPendingAt(base, missing, boot, now) {
 		t.Fatal("normal concurrent scheduling was treated as abandoned")
 	}
+	loaded := unitStatus{LoadState: "loaded", ActiveState: "inactive"}
+	if !schedulingPendingAt(base, loaded, boot, now) {
+		t.Fatal("loaded unit awaiting its start job was treated as abandoned")
+	}
+	loaded.ExitCode = 1
+	if schedulingPendingAt(base, loaded, boot, now) {
+		t.Fatal("completed supervisor was treated as awaiting a start job")
+	}
 	for _, change := range []func(*Record){
 		func(record *Record) { record.BootID = "22222222-2222-2222-2222-222222222222" },
 		func(record *Record) { record.CreatedAt = now.Add(time.Hour) },

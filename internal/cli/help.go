@@ -58,6 +58,8 @@ const runOptions = `Options:
   --gid-map      CONTAINER_ID:HOST_ID:SIZE; repeat for independent ranges
   --rootless     Map container 0:0 to caller IDs without sudo (foreground only)
   --read-only    Mount the root filesystem read-only; /tmp stays writable
+  --restart      no (default), on-failure[:1-1000], always, or unless-stopped
+                 Detached only; automatic retries back off from 1s to 30s
   --stop-signal  Linux signal name or 1-64 (image StopSignal, otherwise SIGTERM)
   --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
   --log-max-size Bytes or binary k/m/g, 1 KiB-64 MiB (default: 4m; detached only)
@@ -73,6 +75,9 @@ Notes:
   OCI images require execution without user namespaces; rootless uses directories.
   Terminal options require a foreground run; -it requires a terminal on stdin.
   Detached containers receive no input; stdout and stderr share a retained log.
+  on-failure retries nonzero/unknown exits; :N caps consecutive automatic attempts.
+  always/unless-stopped also restart successful exits and resume on VM boot.
+  Manual stop pauses retries; only always resumes a manual stop on the next boot.
   Rootfs programs and libraries must match the native Linux architecture.
   Bind sources must not overlap the template or protected runtime paths.
   User namespaces require --network none; maps must include container ID 0,
@@ -207,6 +212,7 @@ Options:
 
 Notes:
   Prints JSON configuration and lifecycle state for a full ID or exact name.
+  Includes restart_policy, restart_count, restart_at, and stopped_by_user.
   Environment names are shown without values.
 
 Examples:
@@ -249,6 +255,7 @@ Options:
 Notes:
   Flags must precede ID|NAME. Sends the configured stop signal, then SIGKILL after the grace period.
   Keeps the container's files and record for start, inspect, or rm.
+  Suppresses automatic restarts until start/restart; always resumes on a new VM boot.
 
 Examples:
   casklet stop worker
@@ -261,6 +268,7 @@ Options:
 
 Notes:
   Waits for the observed execution to finish, prints its exit code, and returns it.
+  Automatic restarts do not redirect an existing wait to a later execution.
 
 Examples:
   casklet wait worker

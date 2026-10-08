@@ -201,7 +201,7 @@ func refreshRecord(ctx context.Context, store *Store, record Record, launched bo
 }
 
 func schedulingPending(record Record, status unitStatus) (bool, error) {
-	if status.LoadState != "not-found" || record.StartedAt != nil {
+	if record.StartedAt != nil {
 		return false, nil
 	}
 	bootID, err := currentBootID()
@@ -212,7 +212,10 @@ func schedulingPending(record Record, status unitStatus) (bool, error) {
 }
 
 func schedulingPendingAt(record Record, status unitStatus, bootID string, now time.Time) bool {
-	if status.LoadState != "not-found" || record.StartedAt != nil || (record.State != StateCreated && record.State != StateStarting) {
+	// A transient unit is briefly loaded but inactive before its start job runs.
+	// Readers must not claim its supervisor lease in that scheduling window.
+	unscheduled := status.LoadState == "not-found" || status.LoadState == "loaded" && status.ActiveState == "inactive" && status.MainPID == 0 && status.ExitCode == 0
+	if !unscheduled || record.StartedAt != nil || (record.State != StateCreated && record.State != StateStarting) {
 		return false
 	}
 	if record.BootID != "" && record.BootID != bootID {

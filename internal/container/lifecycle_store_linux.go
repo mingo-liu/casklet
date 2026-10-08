@@ -140,7 +140,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 }
 
 // BeginExecution requires both the operation lock and an inactive supervisor.
-func (store *Store) BeginExecution(ctx context.Context, id string, generation uint64) (Record, error) {
+func (store *Store) BeginExecution(ctx context.Context, id string, generation uint64, automatic ...bool) (Record, error) {
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return Record{}, err
@@ -173,6 +173,17 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 		return record, err
 	}
 	now := time.Now().UTC()
+	record.StoppedByUser = false
+	record.StoppedBootID = ""
+	record.RestartBootID = boot
+	record.RestartAt = nil
+	if len(automatic) > 0 && automatic[0] {
+		if record.RestartCount < 1000000 {
+			record.RestartCount++
+		}
+	} else {
+		record.RestartCount = 0
+	}
 	record.Generation++
 	record.LaunchAt = &now
 	record.PreviousExit = &previous

@@ -51,8 +51,9 @@ casklet machine share /Volumes/Projects
 casklet machine start
 ```
 
-Stopping the VM terminates running containers and preserves their files. Restart
-retained containers with `casklet start NAME`. Adding a share preserves the VM
+Stopping the VM terminates running containers and preserves their files. Policies
+`always` and eligible `unless-stopped` resume containers on VM boot; other retained
+containers need `casklet start NAME`. Adding a share preserves the VM
 disk, resources, forwarding rules, and existing shares. Sharing an already
 covered writable directory is a no-op. Overlapping or read-only shares are
 rejected rather than replaced.
@@ -293,6 +294,47 @@ If a port remains occupied, the command returns 125 and keeps the stopped
 generation and its files. A failed `restart` can therefore leave the container
 stopped; release the port and retry `start` or `restart`. `start` on an already
 running container remains idempotent.
+
+### Automatic restarts
+
+Use `run -d --restart POLICY`; the flag requires detached execution. Policies are
+saved with the container and cannot be changed on start/restart:
+
+| Policy | After completion | After VM boot |
+| --- | --- | --- |
+| `no` (default) | Stay stopped | Stay stopped |
+| `on-failure` | Retry nonzero or unknown command exits | Stay stopped |
+| `on-failure:N` | Same, up to N consecutive automatic attempts (1–1000) | Stay stopped |
+| `always` | Restart any exit | Resume, including previously manually stopped containers |
+| `unless-stopped` | Restart any exit unless manually stopped | Resume unless manually stopped |
+
+```sh
+casklet run -d --name service --restart unless-stopped -- /bin/sleep 300
+casklet run -d --name retry-job --restart on-failure:3 -- /bin/sh -c 'exit 1'
+casklet inspect retry-job
+casklet stop service
+```
+
+The guest's boot-enabled restart manager runs independently of the Mac client.
+Attempts reuse retained files, logs, configuration, and image/volume references;
+each creates fresh transient resources and an execution receipt. Preparation
+failures also consume retries. Delays are 1, 2, 4, 8, 16, then 30 seconds, and the
+consecutive counter resets after an execution runs for at least 10 seconds or
+an eligible new VM boot. Manual start/restart resets the counter. Inspection
+exposes `config.restart_policy`, `restart_count`, `restart_at`, and `stopped_by_user`.
+
+`stop` suppresses pending and future automatic attempts until start/restart;
+`always` resumes after a later VM boot, while `unless-stopped` preserves that
+choice. `wait` remains attached to the execution generation it first observed;
+an automatic restart does not make it wait for subsequent executions. Logs span
+generations, subject to their existing rotation limits. Remove a service by
+stopping it first, then running `rm`.
+
+Automatic restarts check guest network resources and published-port leases.
+Without a connected Mac client they cannot preflight Mac socket ownership;
+Lima restores forwarding asynchronously, and an occupied Mac port may remain
+unreachable until its owner releases it. Manual start/restart retains the Mac
+port preflight described above.
 
 The default managed stop signal is the image's `StopSignal`, or SIGTERM if absent.
 Use `run --stop-signal SIGQUIT` (or a Linux number from 1 to 64) to override it.
