@@ -208,3 +208,129 @@ func TestLayerDiffIDMismatchAndBoundedDownload(t *testing.T) {
 		t.Fatal("oversized layer accepted")
 	}
 }
+
+func TestLayerProgressReportsCompressedBytesExtractionAndFailure(t *testing.T) {
+	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: strings.Repeat("application", 10000)}))
+	manifest, err := img.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers, err := img.Layers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := layers[0].DiffID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fail := range []string{"", "digest", "size", "canceled"} {
+		t.Run(fail, func(t *testing.T) {
+			root, err := os.OpenRoot(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			archive, err := os.CreateTemp(t.TempDir(), "layer-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer archive.Close()
+			var events []Progress
+			ctx := WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
+			expected, remaining := diff, maxImageBytes
+			switch fail {
+			case "digest":
+				expected.Hex = strings.Repeat("0", 64)
+			case "size":
+				remaining = 1
+			case "canceled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			count, err := unpackLayer(ctx, root, archive, layers[0], expected, remaining, Progress{Layer: manifest.Layers[0].Digest.String(), Index: 1, Layers: 1, Total: manifest.Layers[0].Size})
+			if (err != nil) != (fail != "") {
+				t.Fatalf("unpack: %v", err)
+			}
+			if len(events) < 2 || events[0].Stage != ProgressDownloading {
+				t.Fatalf("events: %+v", events)
+			}
+			last := events[len(events)-1]
+			if fail != "" {
+				if last.Stage != ProgressFailed && last.Stage != ProgressCanceled {
+					t.Fatalf("missing failure: %+v", events)
+				}
+				for _, event := range events {
+					if event.Stage == ProgressLayerComplete {
+						t.Fatal("failure reported completion")
+					}
+				}
+				return
+			}
+			if last.Stage != ProgressLayerComplete || last.Total != 2*count || last.Current != last.Total {
+				t.Fatalf("extraction: %+v", events)
+			}
+			for _, stage := range []ProgressStage{ProgressDownloaded, ProgressVerifying, ProgressExtracting} {
+				found := false
+				for _, event := range events {
+					if event.Stage == stage {
+						found = true
+						if stage == ProgressDownloaded && (event.Current != manifest.Layers[0].Size || event.Total != manifest.Layers[0].Size || event.Current >= count) {
+							t.Fatalf("wrong compressed byte count: %+v, unpacked=%d", event, count)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("missing %s: %+v", stage, events)
+				}
+			}
+		})
+	}
+}
+
+func TestPullCanceledByProgressPreservesCacheAndCleansStaging(t *testing.T) {
+	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "index.docker.io/library/test:latest"
+	good := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "old"}))
+	cached, err := store.pullImage(context.Background(), ref, good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var events []Progress
+	ctx = WithProgress(ctx, func(event Progress) {
+		events = append(events, event)
+		if event.Stage == ProgressExtracting {
+			cancel()
+		}
+	})
+	updated := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "updated"}))
+	if _, err := store.pullImage(ctx, ref, updated); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled pull: %v", err)
+	}
+	for _, event := range events {
+		if event.Stage == ProgressReady || event.Stage == ProgressLayerComplete {
+			t.Fatalf("canceled pull reported success: %+v", events)
+		}
+	}
+	if len(events) == 0 || events[len(events)-1].Stage != ProgressCanceled {
+		t.Fatalf("cancellation progress: %+v", events)
+	}
+	resolved, err := store.Resolve(context.Background(), ref)
+	if err != nil || resolved.ID != cached.ID {
+		t.Fatalf("cache after cancellation: %+v %v", resolved, err)
+	}
+	entries, err := os.ReadDir(store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".import-") {
+			t.Fatalf("canceled staging leaked: %s", entry.Name())
+		}
+	}
+}

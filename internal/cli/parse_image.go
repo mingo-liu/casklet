@@ -25,7 +25,9 @@ func parseImage(r Request, args []string) (Request, error) {
 	switch args[0] {
 	case "ls":
 		fs.BoolVar(&r.JSON, "json", false, "print JSON images")
-	case "import", "pull", "rm":
+	case "pull":
+		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
+	case "import", "rm":
 	default:
 		return r, fmt.Errorf("unknown image command %q", args[0])
 	}
@@ -46,6 +48,9 @@ func parseImage(r Request, args []string) (Request, error) {
 	}
 	r.Reference = fs.Arg(0)
 	if args[0] == "pull" {
+		if err := validateProgressMode(r.Progress); err != nil {
+			return r, err
+		}
 		if _, err := image.NormalizeReference(r.Reference); err != nil {
 			return r, err
 		}

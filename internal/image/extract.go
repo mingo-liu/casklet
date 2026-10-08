@@ -34,11 +34,15 @@ func resolvePath(root *os.Root, name string, followFinal bool) (string, error) {
 	return rootfs.ResolveContainerPath(root, name, followFinal)
 }
 
-func walkLayer(ctx context.Context, archive *os.File, visit func(*tar.Header, *tar.Reader) error) error {
+func walkLayer(ctx context.Context, archive *os.File, visit func(*tar.Header, *tar.Reader) error, progress ...func(int)) error {
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	reader := tar.NewReader(contextReader{ctx: ctx, r: archive})
+	var source io.Reader = contextReader{ctx: ctx, r: archive}
+	if len(progress) > 0 {
+		source = countingReader{reader: source, read: progress[0]}
+	}
+	reader := tar.NewReader(source)
 	for count := 0; ; count++ {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -63,7 +67,7 @@ func walkLayer(ctx context.Context, archive *os.File, visit func(*tar.Header, *t
 
 // applyLayer applies all whiteouts before additions, so opaque markers cannot
 // delete additions from their own layer, regardless of archive entry order.
-func applyLayer(ctx context.Context, root *os.Root, archive *os.File) error {
+func applyLayer(ctx context.Context, root *os.Root, archive *os.File, progress ...func(int)) error {
 	err := walkLayer(ctx, archive, func(h *tar.Header, _ *tar.Reader) error {
 		base := path.Base(h.Name)
 		if !strings.HasPrefix(base, ".wh.") {
@@ -101,7 +105,7 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File) error {
 			return errors.New("invalid whiteout target")
 		}
 		return root.RemoveAll(path.Join(dir, target))
-	})
+	}, progress...)
 	if err != nil {
 		return err
 	}
@@ -209,7 +213,7 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File) error {
 			return root.Chmod(name, mode)
 		}
 		return nil
-	})
+	}, progress...)
 	if err != nil {
 		return err
 	}

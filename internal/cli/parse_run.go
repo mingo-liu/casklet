@@ -46,6 +46,7 @@ func parseRun(r Request, args []string) (Request, error) {
 			return err
 		})
 		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
+		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
 		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
 		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })
 		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
@@ -126,6 +127,9 @@ func parseRun(r Request, args []string) (Request, error) {
 		return r, errors.New("--rootfs is required")
 	}
 	if r.Action == "run" {
+		if err := validateProgressMode(r.Progress); err != nil {
+			return r, err
+		}
 		rootSpecified, imageSpecified := false, false
 		fs.Visit(func(f *flag.Flag) {
 			rootSpecified = rootSpecified || f.Name == "rootfs"

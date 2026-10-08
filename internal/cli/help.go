@@ -32,6 +32,7 @@ const runOptions = `Options:
                  periods, or hyphens; start alphanumeric; not a full ID
   --rootfs       Linux filesystem template (exclusive with --image)
   --image        Registry NAME[:TAG], NAME@sha256:DIGEST, or local sha256: ID
+  --progress     Image progress: auto, plain, or tty (default: auto)
   --entrypoint   Replace the image entrypoint; empty clears it and its default Cmd
   --hostname     Container hostname: 1-63 alphanumeric/hyphen characters,
                  start and end alphanumeric (default: mini)
@@ -230,9 +231,10 @@ Examples:
   mdocker image import ./rootfs/busybox
   mdocker image ls
 `,
-	"image pull": `Usage: mdocker image pull REFERENCE
+	"image pull": `Usage: mdocker image pull [--progress auto|plain|tty] REFERENCE
 
 Options:
+  --progress  Progress display: auto, plain, or tty (default: auto)
   -h, --help  Show this help
 
 Notes:

@@ -24,6 +24,7 @@ type Request struct {
 	StopTimeout *time.Duration
 	Interval    time.Duration
 	Entrypoint  *string
+	Progress    string
 }
 
 func Parse(args []string) (request Request, err error) {

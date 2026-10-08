@@ -145,6 +145,14 @@ func TestOCIImageAutomaticPullDefaultsOwnershipAndRetainedRestart(t *testing.T) 
 	if code != 0 || out != "image:default:/new-work\n" {
 		t.Fatalf("default image run: %d %q %q", code, out, stderr)
 	}
+	for _, phase := range []string{"Pulling", "Downloading", "Extracting", "Pull complete", "Image ready:"} {
+		if !strings.Contains(stderr, phase) {
+			t.Fatalf("automatic pull omitted %s: %q", phase, stderr)
+		}
+	}
+	if strings.ContainsAny(stderr, "\x1b\r") {
+		t.Fatalf("automatic progress used terminal controls on a pipe: %q", stderr)
+	}
 	store, err := image.OpenStore()
 	if err != nil {
 		t.Fatal(err)
@@ -165,6 +173,9 @@ func TestOCIImageAutomaticPullDefaultsOwnershipAndRetainedRestart(t *testing.T) 
 	if code != 0 || out != "override\n" {
 		t.Fatalf("offline overrides: %d %q %q", code, out, stderr)
 	}
+	if !strings.Contains(stderr, "Using cached image") || strings.Contains(stderr, "Downloading") {
+		t.Fatalf("cache progress: %q", stderr)
+	}
 	name := backgroundName(t)
 	backgroundSuccess(t, "run", "-d", "--name", name, "--image", record.ID, "--entrypoint", "", "--", "/bin/sh", "-c", "echo ready; sleep 300")
 	backgroundSuccess(t, "exec", name, "--", "/bin/sh", "-c", "echo retained > /data/persistent")
@@ -176,6 +187,36 @@ func TestOCIImageAutomaticPullDefaultsOwnershipAndRetainedRestart(t *testing.T) 
 	assertImageInUse(t, record.ID)
 	backgroundSuccess(t, "stop", name)
 	backgroundSuccess(t, "rm", name)
+}
+
+func TestOCIExplicitPullProgressAndExactStreams(t *testing.T) {
+	ref, closeRegistry := ociRegistryFixture(t)
+	code, out, stderr := start(t, "", "image", "pull", "--progress=tty", ref).wait(t)
+	if code != 0 || image.ValidateID(strings.TrimSpace(out)) != nil || strings.Count(out, "\n") != 1 {
+		t.Fatalf("pull result: %d %q %q", code, out, stderr)
+	}
+	id := strings.TrimSpace(out)
+	store, err := image.OpenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Remove(context.Background(), id, func(context.Context, string) (bool, error) { return false, nil }); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(stderr, "\x1b[1A") || !strings.Contains(stderr, "Downloading [") || !strings.Contains(stderr, "Extracting [") || !strings.HasSuffix(stderr, "Image ready: "+ref+"\n") {
+		t.Fatalf("TTY progress missing redraw or completion: %q", stderr)
+	}
+	code, out, stderr = start(t, "", "image", "pull", "--progress=plain", ref).wait(t)
+	if code != 0 || out != id+"\n" || !strings.Contains(stderr, "Image is up to date") || strings.ContainsAny(stderr, "\x1b\r") || strings.Contains(stderr, "Downloading") {
+		t.Fatalf("up-to-date pull: %d %q %q", code, out, stderr)
+	}
+	closeRegistry()
+	code, out, stderr = start(t, "", "image", "pull", ref).wait(t)
+	if code != 125 || out != "" || strings.Contains(stderr, "Image ready:") || strings.Contains(stderr, "Image is up to date") {
+		t.Fatalf("failed refresh claimed success: %d %q %q", code, out, stderr)
+	}
 }
 
 func TestOCIRootEntrypointCapabilities(t *testing.T) {

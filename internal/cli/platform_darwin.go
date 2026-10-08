@@ -69,6 +69,7 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 		fmt.Fprintf(stderr, "mdocker: %v\n", err)
 		return true, 125
 	}
+	paths = guestProgressArguments(paths, request, stderr)
 	code, err := machine.Execute(ctx, machine.Invocation{Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}, stdin, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "mdocker: %v\n", err)

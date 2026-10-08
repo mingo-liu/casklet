@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/mini-docker/internal/image"
 	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
 	"github.com/mingo-liu/mini-docker/internal/template"
 )
@@ -69,7 +70,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 			// the shorter detached workload startup deadline begins.
 			code := manageOperation(Request{Action: "image-pull", Reference: r.Config.Image}, stderr, func(ctx context.Context) (int, error) {
 				var err error
-				fmt.Fprintf(stderr, "Preparing image %s\n", r.Config.Image)
+				progress := newPullProgress(stderr, r.Progress)
+				ctx = image.WithProgress(ctx, progress.observe)
 				r.Config, lease, err = template.ResolveExecution(ctx, r.Config, r.Entrypoint)
 				return 0, err
 			})

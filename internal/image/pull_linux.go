@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/mingo-liu/mini-docker/internal/rootfs"
 	"golang.org/x/sys/unix"
@@ -52,7 +53,12 @@ func (store *Store) readReference(key string) (cachedReference, error) {
 
 // Resolve returns the cached identity of a canonical reference, without network
 // access. A removed target is a cache miss. Corrupt metadata is never ignored.
-func (store *Store) Resolve(ctx context.Context, reference string) (Record, error) {
+func (store *Store) Resolve(ctx context.Context, reference string) (record Record, err error) {
+	defer func() {
+		if err == nil {
+			reportProgress(ctx, Progress{Stage: ProgressCached, Reference: reference})
+		}
+	}()
 	if ValidateID(reference) == nil {
 		lock, err := store.lock(ctx, true)
 		if err != nil {
@@ -97,6 +103,7 @@ func (store *Store) Pull(ctx context.Context, reference string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
+	reportProgress(ctx, Progress{Stage: ProgressResolving, Reference: ref})
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 	img, err := remote.Image(parsed, remote.WithContext(ctx), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH}))
@@ -121,6 +128,13 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if cf.RootFS.Type != "layers" || len(layers) != len(cf.RootFS.DiffIDs) || len(layers) > 256 {
 		return Record{}, errors.New("invalid image layers configuration")
 	}
+	manifest, err := img.Manifest()
+	if err != nil {
+		return Record{}, err
+	}
+	if len(manifest.Layers) != len(layers) {
+		return Record{}, errors.New("invalid image manifest layer count")
+	}
 	digest, err := img.Digest()
 	if err != nil {
 		return Record{}, err
@@ -129,6 +143,7 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if err := validateLaunch(launch); err != nil {
 		return Record{}, err
 	}
+	reportProgress(ctx, Progress{Stage: ProgressWaiting, Reference: ref})
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return Record{}, err
@@ -138,9 +153,11 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 		return Record{}, err
 	}
 	if cached, err := store.resolveLocked(ref); err == nil && cached.ManifestDigest == digest.String() {
+		reportProgress(ctx, Progress{Stage: ProgressVerifyingImage, Reference: ref})
 		if err := store.verify(ctx, cached); err != nil {
 			return Record{}, err
 		}
+		reportProgress(ctx, Progress{Stage: ProgressUpToDate, Reference: ref})
 		return cached, nil
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return Record{}, err
@@ -168,7 +185,8 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 		if err != nil {
 			return Record{}, err
 		}
-		count, err := unpackLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total)
+		event := Progress{Reference: ref, Layer: manifest.Layers[i].Digest.String(), Index: i + 1, Layers: len(layers), Total: manifest.Layers[i].Size}
+		count, err := unpackLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total, event)
 		closeErr := archive.Close()
 		removeErr := os.Remove(archive.Name())
 		if err := errors.Join(err, closeErr, removeErr); err != nil {
@@ -192,10 +210,12 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if _, err := rootfs.Validate(tree); err != nil {
 		return Record{}, err
 	}
+	reportProgress(ctx, Progress{Stage: ProgressVerifyingImage, Reference: ref})
 	id, size, err := Identity(ctx, tree, runtime.GOARCH, launch)
 	if err != nil {
 		return Record{}, err
 	}
+	reportProgress(ctx, Progress{Stage: ProgressPublishing, Reference: ref})
 	record, err := store.read(id)
 	if err == nil {
 		if err := store.verify(ctx, record); err != nil {
@@ -247,26 +267,79 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if err := os.Rename(refStage.Name(), filepath.Join(store.root, referenceKey(ref))); err != nil {
 		return Record{}, err
 	}
-	return record, syncDirectory(store.root)
+	if err := syncDirectory(store.root); err != nil {
+		return Record{}, err
+	}
+	reportProgress(ctx, Progress{Stage: ProgressReady, Reference: ref})
+	return record, nil
 }
 
-func unpackLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64) (int64, error) {
-	r, err := layer.Uncompressed()
+// trackedLayer preserves go-containerregistry's decompression and blob digest
+// verification while counting bytes read from the compressed network stream.
+type trackedLayer struct {
+	v1.Layer
+	progress *streamProgress
+}
+
+func (l trackedLayer) Compressed() (io.ReadCloser, error) {
+	r, err := l.Layer.Compressed()
+	if err != nil {
+		return nil, err
+	}
+	return struct {
+		io.Reader
+		io.Closer
+	}{countingReader{reader: r, read: l.progress.add}, r}, nil
+}
+
+func unpackLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64, events ...Progress) (count int64, resultErr error) {
+	event := Progress{Stage: ProgressDownloading}
+	if len(events) > 0 {
+		event = events[0]
+		event.Stage = ProgressDownloading
+	}
+	progress := &streamProgress{ctx: ctx, event: event, now: time.Now}
+	reportProgress(ctx, event)
+	defer func() {
+		if resultErr != nil {
+			stage := ProgressFailed
+			if ctx.Err() != nil {
+				stage = ProgressCanceled
+			}
+			progress.finish(stage)
+		}
+	}()
+	tracked, err := partial.CompressedToLayer(trackedLayer{Layer: layer, progress: progress})
+	if err != nil {
+		return 0, err
+	}
+	r, err := tracked.Uncompressed()
 	if err != nil {
 		return 0, err
 	}
 	defer r.Close()
 	limit := min(maxLayerBytes, remaining)
 	digest := sha256.New()
-	count, err := io.Copy(io.MultiWriter(archive, digest), io.LimitReader(contextReader{ctx: ctx, r: r}, limit+1))
+	count, err = io.Copy(io.MultiWriter(archive, digest), io.LimitReader(contextReader{ctx: ctx, r: r}, limit+1))
 	if err != nil {
 		return count, err
 	}
 	if count > limit {
 		return count, errors.New("image exceeds unpacked size limit (4 GiB per layer, 16 GiB total)")
 	}
+	progress.finish(ProgressDownloaded)
+	progress.finish(ProgressVerifying)
 	if expected.Algorithm != "sha256" || hex.EncodeToString(digest.Sum(nil)) != expected.Hex {
 		return count, errors.New("image layer DiffID mismatch")
 	}
-	return count, applyLayer(ctx, root, archive)
+	progress.event.Stage = ProgressExtracting
+	progress.event.Current, progress.event.Total = 0, 2*count
+	progress.last = time.Time{}
+	reportProgress(ctx, progress.event)
+	if err := applyLayer(ctx, root, archive, progress.add); err != nil {
+		return count, err
+	}
+	progress.event.Current = progress.event.Total
+	progress.finish(ProgressLayerComplete)
+	return count, nil
 }
