@@ -24,6 +24,7 @@ type Request struct {
 	StopTimeout *time.Duration
 	Interval    time.Duration
 	Entrypoint  *string
+	DryRun      bool
 	Progress    string
 }
 
@@ -52,6 +53,9 @@ func Parse(args []string) (request Request, err error) {
 		return helpRequest(args[:len(args)-1])
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "system" {
+		return parseSystem(r, args[1:])
+	}
 	if r.Action == "volume" {
 		return parseVolume(r, args[1:])
 	}

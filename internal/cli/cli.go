@@ -49,9 +49,11 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
+	case "system-df":
+		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm":
 		return executeManagement(r, stdout, stderr)
-	case "image-import", "image-pull", "image-ls", "image-rm", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
+	case "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)

@@ -125,6 +125,16 @@ casklet volume ls
 新卷为空且属于 root，容器删除后数据仍保留，目前不支持用户命名空间。
 移除所有引用该卷的容器后，`casklet volume rm app-data` 才能删除卷和数据。
 
+查看 VM 磁盘占用，预览或清理未使用的缓存镜像：
+
+```sh
+casklet system df
+casklet image prune --dry-run
+casklet image prune
+```
+
+清理包括未使用的带标签镜像，保留容器与数据卷，并跳过存在活动租约或被保留容器引用的镜像。
+
 ## 文档与开发
 
 - [使用指南](guides/usage.md)：文件、镜像、网络、安全与生命周期管理（英文）。

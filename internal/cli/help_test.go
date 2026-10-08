@@ -36,6 +36,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 	for _, topic := range []string{
 		"run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm",
 		"volume", "volume create", "volume ls", "volume inspect", "volume rm",
+		"system", "system df", "image prune",
 		"image", "image pull", "image import", "image ls", "image rm", "help",
 		"machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "rootfs",
 	} {
@@ -73,7 +74,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 	for _, macOS := range []bool{false, true} {
 		text, err := scopedUsage("", macOS)
-		if err != nil || !strings.HasPrefix(text, "Usage: casklet COMMAND") || strings.Count(text, "\n") > 29 || strings.Contains(text, "--uid-map") || !strings.Contains(text, "COMMAND --help") {
+		if err != nil || !strings.HasPrefix(text, "Usage: casklet COMMAND") || strings.Count(text, "\n") > 30 || strings.Contains(text, "--uid-map") || !strings.Contains(text, "COMMAND --help") {
 			t.Fatalf("verbose or incomplete overview: %q %v", text, err)
 		}
 		ps, err := scopedUsage("ps", macOS)

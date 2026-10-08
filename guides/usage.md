@@ -341,6 +341,31 @@ Publish up to 32 mappings with
 `0.0.0.0` and TCP; specify `127.0.0.1` for host-only access. Networking is recreated
 on restart and cleaned up after exit. There is no IPv6 or host-network mode.
 
+## Disk usage and cache cleanup
+
+```sh
+casklet system df
+casklet system df --json
+casklet image prune --dry-run
+casklet image prune
+```
+
+`system df` reports guest filesystem capacity/free/available bytes and allocated
+blocks for images, retained containers (including logs), named volumes, transient
+runs, and templates. Hardlinks are counted once within a category, sparse files
+use allocated blocks, symlinks are not followed, and mounted descendants are
+excluded. Live workloads make this a sampled report rather than an atomic snapshot.
+Host bind data and the Mac's sparse VM disk file are outside these totals. A
+low-space notice appears below 1 GiB or 10% available; JSON exposes `low_space`.
+
+`image prune --dry-run` prints eligible IDs. Without `--dry-run`, the command
+removes unused cached images, including tagged images, and prints each removed ID.
+Active leases and references from all retained containers prevent deletion.
+Each candidate is rechecked immediately before removal. Cancellation or another
+error can leave a partial prune; printed IDs identify completed removals.
+Containers, logs, named volumes, and host bind data are preserved. Removing files
+frees guest filesystem space but does not promise immediate Mac disk compaction.
+
 ## Security and rootless execution
 
 Workloads use reduced capabilities and `no_new_privs`. Default seccomp filters

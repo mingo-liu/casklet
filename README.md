@@ -138,6 +138,17 @@ Volumes start empty with root ownership, survive container removal, and require
 execution without user namespaces. `casklet volume rm app-data` deletes the data
 only after all referencing containers are removed.
 
+Inspect guest disk usage and preview or clean unused cached images:
+
+```sh
+casklet system df
+casklet image prune --dry-run
+casklet image prune
+```
+
+Pruning includes unused tagged images, preserves containers and volumes, and
+refuses images with active leases or references from retained containers.
+
 ## Documentation and development
 
 - [Usage guide](guides/usage.md): files, images, networking, security, and lifecycle.

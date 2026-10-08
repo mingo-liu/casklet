@@ -33,6 +33,14 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer) (int, error)
 		if err == nil {
 			err = writeImages(stdout, records, r.JSON)
 		}
+	case "image-prune":
+		var records []image.Record
+		records, err = store.Prune(ctx, r.DryRun, container.ImageReferenced)
+		for _, record := range records {
+			if _, writeErr := fmt.Fprintln(stdout, record.ID); writeErr != nil {
+				return 125, writeErr
+			}
+		}
 	case "image-rm":
 		err = store.Remove(ctx, r.Reference, container.ImageReferenced)
 		if err == nil {

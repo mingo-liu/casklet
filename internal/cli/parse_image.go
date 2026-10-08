@@ -11,7 +11,7 @@ import (
 
 func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("image requires pull, import, ls, or rm")
+		return r, errors.New("image requires pull, import, ls, rm, or prune")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -27,6 +27,8 @@ func parseImage(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.JSON, "json", false, "print JSON images")
 	case "pull":
 		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
+	case "prune":
+		fs.BoolVar(&r.DryRun, "dry-run", false, "preview unused images without deleting them")
 	case "import", "rm":
 	default:
 		return r, fmt.Errorf("unknown image command %q", args[0])
@@ -37,9 +39,9 @@ func parseImage(r Request, args []string) (Request, error) {
 		}
 		return r, err
 	}
-	if args[0] == "ls" {
+	if args[0] == "ls" || args[0] == "prune" {
 		if fs.NArg() != 0 {
-			return r, errors.New("image ls does not accept positional arguments")
+			return r, errors.New("image ls and prune do not accept positional arguments")
 		}
 		return r, nil
 	}

@@ -16,6 +16,11 @@ func argumentError(args []string, err error) error {
 		switch args[0] {
 		case "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm":
 			topic = args[0]
+		case "system":
+			topic = "system"
+			if len(args) > 1 && args[1] == "df" {
+				topic += " df"
+			}
 		case "volume":
 			topic = "volume"
 			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm") {
@@ -23,7 +28,7 @@ func argumentError(args []string, err error) error {
 			}
 		case "image":
 			topic = "image"
-			if len(args) > 1 && (args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm") {
+			if len(args) > 1 && (args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm" || args[1] == "prune") {
 				topic += " " + args[1]
 			}
 		}

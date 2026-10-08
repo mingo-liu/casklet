@@ -399,6 +399,10 @@ func (store *Store) verify(ctx context.Context, record Record) error {
 }
 
 func (store *Store) Remove(ctx context.Context, id string, referenced ReferenceCheck) error {
+	return store.remove(ctx, id, referenced, false)
+}
+
+func (store *Store) remove(ctx context.Context, id string, referenced ReferenceCheck, dryRun bool) error {
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return err
@@ -433,6 +437,12 @@ func (store *Store) Remove(ctx context.Context, id string, referenced ReferenceC
 	}
 	if err := rootfs.CheckUnmounted(store.path(id)); err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dryRun {
+		return nil
 	}
 	tombstone := filepath.Join(store.root, ".remove-"+strings.TrimPrefix(id, "sha256:"))
 	if err := os.Rename(store.path(id), tombstone); err != nil {

@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Guest disk usage and safe image pruning
+
+Added `system df [--json]` with guest capacity/free/available bytes, low-space status,
+and allocated-block totals for images, containers/logs, volumes, runs, and templates.
+Scans pin directories, never follow symlinks, skip mounted descendants (including
+same-filesystem bind mounts), and deduplicate hardlinks within each category.
+Added `image prune [--dry-run]`; candidates are rechecked through the existing
+exclusive image lease and retained-container reference protocol. Partial failures
+preserve completed IDs for presentation. No container, log, or volume is pruned.
+
+Validation: Darwin arm64 build, formatting, unit tests, and vet passed. Linux arm64
+unit tests/vet and storage/image race tests passed. Privileged disk-accounting,
+bind-mount exclusion, pruning, and all image integration tests passed. Real macOS
+disk reporting and non-destructive prune preview passed alongside volume regression.
+The Mac VM disk file's physical compaction is outside this feature's scope.
+
 ## 2026-10-08: Guest-local named data volumes
 
 Added explicit `volume create/ls/inspect/rm` commands and named/readonly mounts.

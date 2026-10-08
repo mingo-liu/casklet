@@ -19,6 +19,7 @@ Commands:
   start     Start a stopped container with its retained files
   restart   Stop and start a container with its retained files
   rm        Remove a stopped container
+  system    Inspect VM disk usage
   volume    Create, list, inspect, or remove named data volumes
   image     Pull, import, list, or remove images
   doctor    Check runtime prerequisites and a rootfs template
@@ -79,6 +80,43 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"system": `Usage: casklet system COMMAND
+
+Commands:
+  df [--json]  Show guest disk capacity and allocated storage by category
+
+Examples:
+  casklet system df
+`,
+	"system df": `Usage: casklet system df [--json]
+
+Options:
+  --json  Print filesystem capacity, low-space status, and storage categories
+
+Notes:
+  Counts allocated blocks; includes all retained container roots and logs.
+  Does not follow symlinks; excludes mounted subtrees. Live writes may change sampled totals.
+  Low space means less than 1 GiB or 10% available on the guest filesystem.
+  Host bind data and Mac sparse VM disk allocation are outside these totals.
+
+Examples:
+  casklet system df --json
+`,
+	"image prune": `Usage: casklet image prune [--dry-run]
+
+Options:
+  --dry-run  Print eligible image IDs without deleting them
+
+Notes:
+  Removes unused cached images, including tagged ones; prints each removed ID.
+  Skips active leases and references from any retained container, even stopped ones.
+  Containers, logs, data volumes, and host bind data are preserved.
+  Each image is rechecked at deletion; a failure may leave a partially completed prune.
+
+Examples:
+  casklet image prune --dry-run
+  casklet image prune
+`,
 	"volume": `Usage: casklet volume COMMAND
 
 Commands:
@@ -273,6 +311,7 @@ Commands:
   import DIRECTORY  Copy a Linux rootfs into the local image store
   ls [--json]       List cached images and registry references
   rm ID             Remove an unused image
+  prune [--dry-run]  Remove images without leases or container references
 
 Notes:
   run --image uses cached names or IDs; an uncached name is pulled automatically.

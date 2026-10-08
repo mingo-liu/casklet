@@ -21,3 +21,5 @@ func (*Store) Acquire(context.Context, string) (Record, string, *os.File, error)
 	return Record{}, "", nil, errUnsupported
 }
 func (*Store) Remove(context.Context, string, ReferenceCheck) error { return errUnsupported }
+
+func (*Store) remove(context.Context, string, ReferenceCheck, bool) error { return errUnsupported }

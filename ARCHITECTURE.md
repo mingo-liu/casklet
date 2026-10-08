@@ -217,3 +217,13 @@ creation holds leases until records provide durable references. Removal acquires
 an exclusive lease and checks all container configurations. Lock order is volume
 store then container store; lifecycle operations never acquire volume locks while
 holding container metadata locks. User namespaces are currently excluded.
+
+## Guest disk accounting
+
+`storage` measures allocated blocks using pinned no-follow directories and
+`openat2` mount-boundary checks. It counts hardlinks once per category and skips
+vanished entries during live writes. `image.Prune` snapshots IDs, then checks each
+candidate under the existing deletion lock/lease/reference protocol. The CLI owns
+preview selection and presentation; disk reporting never deletes workloads or
+volumes. Filesystem availability covers the guest OS disk, while category totals
+cover only casklet storage and exclude host shares.
