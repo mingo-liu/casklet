@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Verify installed engine content before reuse
+
+The engine reuse check verifies actual executable content against the bundled
+SHA-256 in addition to the installation marker and executable permissions.
+A damaged executable with an unchanged marker is reinstalled atomically before
+it can handle guest operations. Existing supervisors keep their pinned binary.
+
+Regressions: `TestInstallationCheckRequiresMatchingEngineAndMarker` includes
+corrupt executable content with the correct marker. The macOS
+`TestMachineRepairsCorruptExecutableEngine` replaces the installed engine with
+an executable failure script, checks automatic repair and a surviving running
+container, and confirms healthy installations are reused. Both tests reproduced
+the gap before the fix.
+
+Validation: `make build fmt-check test vet` passed on macOS arm64. The guest
+check's unit tests and vet passed in the Linux arm64 VM. macOS end-to-end tests
+for corrupt and nonexecutable engine repair passed.
+
 ## 2026-10-08: Exec cleanup error exit status
 
 The foreground infrastructure-error policy also applies to `exec`: a successful

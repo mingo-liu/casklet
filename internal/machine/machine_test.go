@@ -2,7 +2,9 @@ package machine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -124,8 +126,8 @@ func TestMachineDiscoveryDoesNotAdoptDevelopmentVM(t *testing.T) {
 	}
 }
 
-func TestInstallationCheckRequiresExecutableEngineAndMatchingMarker(t *testing.T) {
-	for _, failure := range []string{"healthy", "missing engine", "nonexecutable engine", "engine directory", "missing marker", "stale marker"} {
+func TestInstallationCheckRequiresMatchingEngineAndMarker(t *testing.T) {
+	for _, failure := range []string{"healthy", "missing engine", "nonexecutable engine", "engine directory", "missing marker", "stale marker", "corrupt executable"} {
 		t.Run(failure, func(t *testing.T) {
 			directory := filepath.Join(t.TempDir(), "installation with spaces")
 			if err := os.MkdirAll(directory, 0755); err != nil {
@@ -136,7 +138,8 @@ func TestInstallationCheckRequiresExecutableEngineAndMatchingMarker(t *testing.T
 			if err := os.WriteFile(engine, []byte("payload"), 0755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(marker, []byte("installed-hash\n"), 0600); err != nil {
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte("payload")))
+			if err := os.WriteFile(marker, []byte(hash+"\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			var err error
@@ -154,11 +157,13 @@ func TestInstallationCheckRequiresExecutableEngineAndMatchingMarker(t *testing.T
 				err = os.Remove(marker)
 			case "stale marker":
 				err = os.WriteFile(marker, []byte("previous-hash\n"), 0600)
+			case "corrupt executable":
+				err = os.WriteFile(engine, []byte("corrupt"), 0755)
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			output, err := exec.Command("/bin/sh", "-c", installationCheckScript, "check-install", engine, marker, "installed-hash").Output()
+			output, err := exec.Command("/bin/sh", "-c", installationCheckScript, "check-install", engine, marker, hash).Output()
 			if failure == "healthy" {
 				if err != nil {
 					t.Fatalf("healthy installation: %q, %v", output, err)

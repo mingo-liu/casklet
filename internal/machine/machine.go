@@ -201,7 +201,7 @@ func enginePayload() ([]byte, error) {
 
 // Engine caching and template health are independent. The guest checks and
 // repairs the template even when the installed engine matches this client.
-const installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3"`
+const installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3" && test "$(sha256sum -- "$1")" = "$3  $1"`
 
 func (m *Machine) install(ctx context.Context, instance Instance) error {
 	payload, err := enginePayload()

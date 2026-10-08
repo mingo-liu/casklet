@@ -100,6 +100,10 @@ through the dedicated Lima product VM with `make test-macos`.
 - `mdocker doctor` checks the guest runtime with the default BusyBox template.
 - If startup was interrupted, retry `mdocker machine start`; engine installation
   is repeatable and executable replacement preserves existing container storage.
+- The installed engine is checked against the bundled SHA-256 before reuse.
+  A matching version marker alone does not bypass repair of damaged executable
+  content. Repair atomically replaces the binary while active supervisors keep
+  their pinned executable.
 - Every engine command checks the builtin template, including when the bundled
   engine is already installed. Missing/corrupt BusyBox files, applets, metadata,
   or required directories are repaired from the installed static BusyBox package.

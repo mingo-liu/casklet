@@ -31,6 +31,9 @@ whether an engine update is needed. Installation atomically replaces the guest
 executable and preserves the Linux container/image stores. The writable Mac
 home share provides installation staging and live bind sources; persistent
 container roots remain on the Linux disk.
+The reuse check verifies the installed executable's SHA-256 as well as the
+version marker, so executable corruption triggers atomic reinstallation before
+guest engine execution.
 
 Engine caching is independent of builtin template health. A private guest
 installation operation checks the template's layout, applet links, permissions,
