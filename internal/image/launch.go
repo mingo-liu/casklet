@@ -14,6 +14,7 @@ import (
 
 // LaunchConfig contains the execution defaults covered by an OCI image identity.
 type LaunchConfig struct {
+	StopSignal string   `json:"stop_signal,omitempty"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
 	Cmd        []string `json:"cmd,omitempty"`
 	Env        []string `json:"env,omitempty"`
@@ -22,7 +23,7 @@ type LaunchConfig struct {
 }
 
 func validateLaunch(defaults *LaunchConfig) error {
-	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir}
+	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir, StopSignal: defaults.StopSignal}
 	if len(cfg.Command) == 0 {
 		cfg.Command = []string{"/no-image-default"}
 	}
@@ -36,6 +37,9 @@ func validateLaunch(defaults *LaunchConfig) error {
 // User arguments replace Cmd and are appended to Entrypoint. An explicit
 // entrypoint replaces the image entrypoint and clears its default Cmd.
 func (defaults LaunchConfig) Apply(cfg config.Config, tree string, entrypoint *string) (config.Config, error) {
+	if cfg.StopSignal == "" {
+		cfg.StopSignal = defaults.StopSignal
+	}
 	args := cfg.Command
 	entry := defaults.Entrypoint
 	if entrypoint != nil {

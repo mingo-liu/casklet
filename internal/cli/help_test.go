@@ -82,7 +82,7 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 			t.Fatalf("verbose or incomplete ps help: %q %v", ps, err)
 		}
 		run, err := scopedUsage("run", macOS)
-		for _, detail := range []string{"-- COMMAND", "--uid-map", "--gid-map", "--rootless", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {
+		for _, detail := range []string{"-- COMMAND", "--uid-map", "--gid-map", "--rootless", "--stop-signal", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {
 			if err != nil || !strings.Contains(run, detail) {
 				t.Errorf("run help missing %q: %q %v", detail, run, err)
 			}

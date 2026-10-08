@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: OCI and explicit managed stop signals
+
+Image startup defaults now retain and validate `StopSignal`; `run --stop-signal`
+overrides it with a Linux signal name or number. Managed stop requests send the
+selected signal to the workload process group without changing the supervisor's
+control signal. Retained configurations and inspection preserve the selection.
+External foreground signals, timeout, orphan handling, and descendant cleanup
+keep their existing semantics and forced SIGKILL boundaries. Empty legacy image
+fields preserve their previous identity serialization.
+
+Validation: Darwin arm64 build, formatting, unit tests, and vet passed. Linux
+arm64 unit/vet and config/image/runtime/container race checks passed. Privileged
+OCI defaults/offline overrides, custom named/numeric stop signals, restart,
+shutdown deadlines, external signals, and descendant cleanup tests passed. The
+real macOS stop-signal/inspection/wait regression passed. Intel execution was not run.
+
 ## 2026-10-08: Guest disk usage and safe image pruning
 
 Added `system df [--json]` with guest capacity/free/available bytes, low-space status,

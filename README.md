@@ -149,6 +149,10 @@ casklet image prune
 Pruning includes unused tagged images, preserves containers and volumes, and
 refuses images with active leases or references from retained containers.
 
+Image `StopSignal` is retained for managed shutdown. Override it with
+`--stop-signal SIGQUIT`; stop/restart uses that Linux signal before the configured
+stop timeout forces termination. Foreground external signals remain unchanged.
+
 ## Documentation and development
 
 - [Usage guide](guides/usage.md): files, images, networking, security, and lifecycle.

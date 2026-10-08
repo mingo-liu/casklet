@@ -58,6 +58,7 @@ const runOptions = `Options:
   --gid-map      CONTAINER_ID:HOST_ID:SIZE; repeat for independent ranges
   --rootless     Map container 0:0 to caller IDs without sudo (foreground only)
   --read-only    Mount the root filesystem read-only; /tmp stays writable
+  --stop-signal  Linux signal name or 1-64 (image StopSignal, otherwise SIGTERM)
   --stop-timeout Grace before forced shutdown, 0s-1m (default: 5s)
   --log-max-size Bytes or binary k/m/g, 1 KiB-64 MiB (default: 4m; detached only)
   --log-max-files Retained files including current, 1-16 (default: 4; detached only)
@@ -68,7 +69,7 @@ Notes:
   Put -- before COMMAND; options after -- belong to the workload.
   With --image, COMMAND is optional and replaces image Cmd; Entrypoint is retained.
   Missing cached registry images are pulled for the native Linux architecture.
-  Image Env, WorkingDir, and User apply unless overridden.
+  Image Env, WorkingDir, User, and StopSignal apply unless overridden.
   OCI images require execution without user namespaces; rootless uses directories.
   Terminal options require a foreground run; -it requires a terminal on stdin.
   Detached containers receive no input; stdout and stderr share a retained log.
@@ -246,7 +247,7 @@ Options:
   --timeout  Override graceful shutdown, 0s-1m (default: container configuration)
 
 Notes:
-  Flags must precede ID|NAME. Sends SIGTERM, then SIGKILL after the grace period.
+  Flags must precede ID|NAME. Sends the configured stop signal, then SIGKILL after the grace period.
   Keeps the container's files and record for start, inspect, or rm.
 
 Examples:

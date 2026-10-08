@@ -122,7 +122,7 @@ func ociRegistryFixture(t *testing.T) (string, func()) {
 	}
 	cf.OS = "linux"
 	cf.Architecture = runtime.GOARCH
-	cf.Config = v1.Config{Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`printf '%s:%s:%s\n' "$IMAGE_VALUE" "$1" "$PWD"`, "entry", "default"}, Env: []string{"IMAGE_VALUE=image", "PATH=/usr/bin:/bin"}, WorkingDir: "/new-work", User: "app:data"}
+	cf.Config = v1.Config{Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`printf '%s:%s:%s\n' "$IMAGE_VALUE" "$1" "$PWD"`, "entry", "default"}, Env: []string{"IMAGE_VALUE=image", "PATH=/usr/bin:/bin"}, WorkingDir: "/new-work", User: "app:data", StopSignal: "SIGUSR1"}
 	img, err = mutate.ConfigFile(img, cf)
 	if err != nil {
 		t.Fatal(err)

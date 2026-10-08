@@ -70,6 +70,13 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
+		fs.Func("stop-signal", "Linux signal for managed shutdown", func(value string) error {
+			if _, err := config.ParseStopSignal(value); err != nil {
+				return err
+			}
+			r.Config.StopSignal = value
+			return nil
+		})
 		fs.Func("stop-timeout", "graceful shutdown duration", func(value string) error {
 			duration, err := time.ParseDuration(value)
 			if err != nil {

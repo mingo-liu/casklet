@@ -139,7 +139,7 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if err != nil {
 		return Record{}, err
 	}
-	launch := &LaunchConfig{Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User}
+	launch := &LaunchConfig{Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User, StopSignal: cf.Config.StopSignal}
 	if err := validateLaunch(launch); err != nil {
 		return Record{}, err
 	}

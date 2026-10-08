@@ -94,3 +94,18 @@ func TestNormalizeImageReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestImageStopSignalDefaultAndOverride(t *testing.T) {
+	defaults := LaunchConfig{Cmd: []string{"/server"}, StopSignal: "SIGUSR1"}
+	got, err := defaults.Apply(config.Config{}, t.TempDir(), nil)
+	if err != nil || got.StoppingSignal() != 10 {
+		t.Fatalf("default %+v %v", got, err)
+	}
+	got, err = defaults.Apply(config.Config{StopSignal: "SIGINT"}, t.TempDir(), nil)
+	if err != nil || got.StoppingSignal() != 2 {
+		t.Fatalf("override %+v %v", got, err)
+	}
+	if err := validateLaunch(&LaunchConfig{StopSignal: "INVALID"}); err == nil {
+		t.Fatal("invalid image signal accepted")
+	}
+}

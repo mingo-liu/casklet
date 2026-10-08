@@ -27,6 +27,7 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	StopSignal  string         `json:"stop_signal,omitempty"`
 	LogMaxSize  int64          `json:"log_max_size,omitempty"`
 	LogMaxFiles int            `json:"log_max_files,omitempty"`
 	Seccomp     string         `json:"seccomp,omitempty"`
@@ -85,6 +86,11 @@ func (c Config) ValidateExecution() error {
 	}
 	if err := c.ValidateSecurity(); err != nil {
 		return err
+	}
+	if c.StopSignal != "" {
+		if _, err := ParseStopSignal(c.StopSignal); err != nil {
+			return err
+		}
 	}
 	if c.StopTimeout != nil {
 		if err := ValidateStopTimeout(*c.StopTimeout); err != nil {

@@ -265,7 +265,7 @@ func Init() int {
 			if !stopping {
 				grace = requested
 			}
-			_ = unix.Kill(-process.Pid, unix.SIGTERM)
+			_ = unix.Kill(-process.Pid, syscall.Signal(cfg.StoppingSignal()))
 			beginShutdown()
 		case <-orphaned:
 			orphaned = nil

@@ -146,7 +146,7 @@ are rejected. Pulls are bounded to 15 minutes, 256 layers, 1 million entries per
 layer, 4 GiB uncompressed per layer, and 16 GiB uncompressed in total, and require
 enough VM disk space for staging plus the unpacked tree.
 
-Image `Entrypoint + Cmd`, `Env`, `WorkingDir`, and `User` supply startup defaults.
+Image `Entrypoint + Cmd`, `Env`, `WorkingDir`, `User`, and `StopSignal` supply startup defaults.
 Arguments after `--` replace `Cmd` while retaining `Entrypoint`. `--entrypoint PATH`
 replaces the entrypoint and clears default `Cmd`; `--entrypoint ''` clears both.
 `--env`, `--workdir`, and numeric `--user UID[:GID]` override image values. Image
@@ -281,7 +281,7 @@ casklet wait worker
 casklet rm worker
 ```
 
-`ps` lists active containers; `-a` includes completed ones. `stop` sends SIGTERM
+`ps` lists active containers; `-a` includes completed ones. `stop` sends the configured stop signal
 and forces shutdown after the grace period. `wait` prints and returns the exit
 code for the execution it observed. `start` and `restart` keep the private rootfs
 but recreate transient namespaces, cgroups, and temporary storage. `rm` requires
@@ -293,6 +293,20 @@ If a port remains occupied, the command returns 125 and keeps the stopped
 generation and its files. A failed `restart` can therefore leave the container
 stopped; release the port and retry `start` or `restart`. `start` on an already
 running container remains idempotent.
+
+The default managed stop signal is the image's `StopSignal`, or SIGTERM if absent.
+Use `run --stop-signal SIGQUIT` (or a Linux number from 1 to 64) to override it.
+`stop`, `restart`, and systemd VM shutdown use the saved signal and stop timeout,
+then force SIGKILL when the deadline expires. Signal names/numbers always have
+Linux meanings, including when entered on macOS. The supervisor and init receive
+their normal control signals; only the workload receives the selected stop signal.
+External signals on foreground runs remain unchanged; timeout, orphan cleanup,
+and descendant cleanup retain their existing SIGTERM/SIGKILL behavior.
+
+```sh
+casklet run -d --name signal-worker --stop-signal SIGUSR1 --stop-timeout 2s -- /bin/sh -c "trap 'exit 0' USR1; while :; do sleep 1; done"
+casklet stop signal-worker
+```
 
 Detached stdout/stderr share rotating logs, defaulting to four files of 4 MiB.
 Set `--log-max-size` and `--log-max-files` on detached `run`; retained logs are
