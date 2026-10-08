@@ -162,6 +162,23 @@ mdocker run --image redis:8 -- --version
 mdocker run --image redis:8 --entrypoint '' -- /bin/sh -c 'id; pwd'
 ```
 
+Both `run --image` and `image pull` report per-layer download, verification,
+extraction, and completion to stderr. Download byte counts use compressed registry
+layer sizes. A terminal updates progress bars in place for up to six recent layers;
+redirected output uses throttled text lines without terminal controls. `auto` selects
+the display from the Mac's stderr, including over the VM SSH connection. Cached runs
+show `Using cached image`; an unchanged explicit pull shows `Image is up to date`
+after verification. Failed or canceled layers never report pull completion.
+
+```sh
+mdocker image pull --progress=plain redis:8
+mdocker run -d --name redis --progress=auto --image redis:8
+image_id=$(mdocker image pull redis:8 2>pull.log)
+```
+
+Use `--progress=tty` to force dynamic bars or `--progress=plain` for plain text.
+The image ID, container ID, and foreground application output stay on stdout.
+
 Cached names run without contacting their registry. A mutable tag keeps its cached
 version until `image pull` refreshes it; use a digest reference for a fixed source.
 Local `sha256:` IDs hash the unpacked content, ownership, architecture, and startup

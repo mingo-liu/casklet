@@ -103,6 +103,11 @@ toolbox, with no `bin/busybox`, to verify defaults, accounts, ownership, offline
 execution, retained restart, shared memory, and bounded root capabilities. The
 setpriv-style regression drops all bounding capabilities before switching UID/GID.
 A separate minimal root test runs with no BusyBox or pre-existing mount targets.
+Progress regressions check compressed byte counts, throttling, failure/cancellation
+rollback, cache status, and exact stdout results. The macOS progress test starts a
+bounded local registry helper inside the product VM and checks pipe output and
+host-only stderr PTY output through the actual SSH transport, without public images.
+It leaves other running containers and their images alone.
 
 For a real public-registry smoke on macOS, use the Redis/Nginx/PostgreSQL examples
 in the usage guide. Check application readiness, host-published responses, and

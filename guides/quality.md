@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: OCI pull progress through the macOS client
+
+Automatic image preparation and explicit image pulls now expose operation-scoped
+progress events. Download bytes count the compressed stream against manifest layer
+sizes without additional downloads; archive reads report extraction progress.
+Digest checks, atomic publication, cancellation, and image leases retain their
+existing behavior. Cached runs and unchanged explicit pulls have distinct status
+messages. Failed and canceled layers do not emit completion, and output errors
+stop further presentation without changing the image transaction.
+
+The CLI renders progress on stderr and preserves exact stdout IDs/workload output.
+Automatic display mode is selected on the Mac before SSH dispatch: terminals redraw
+up to six recent layer rows, while pipes/files receive throttled text without ANSI
+controls. Both commands accept `--progress=auto|plain|tty`. No extra guest PTY is
+allocated for progress, preserving detached command stream separation.
+
+Validation: Darwin and Linux arm64 unit/race tests and vet passed; formatting and
+diff checks passed. Linux OCI/generic-root privileged integration tests passed,
+including automatic/explicit pulls, exact streams, cache status, and failed refresh.
+The full macOS end-to-end suite passed, including an in-VM local registry test with
+plain output and a host stderr PTY (the VM reboot case skipped to preserve another
+active container). Linux and Darwin amd64 cross-builds passed. Tests also cover
+compressed versus unpacked byte counts, throttling/final updates, unknown totals,
+output failure, option forwarding, and cancellation cleanup that preserves cache.
+
 ## 2026-10-08: OCI application images and generic filesystems
 
 Registry names now resolve to cached immutable images or pull the native Linux

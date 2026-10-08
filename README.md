@@ -39,8 +39,9 @@ mdocker run -d --name redis-web --network bridge -p 127.0.0.1:6379:6379 --image 
 
 OCI/Docker images include programs, dependencies, and startup defaults. The guest
 pulls the matching Linux architecture, verifies and unpacks its layers, and runs
-it with mini-docker's engine. Cached images work offline. Use `mdocker image pull
-redis:8` to refresh a tag, or a registry digest to pin its source. Supply application
+it with mini-docker's engine. Cached images work offline. Pulls show per-layer download and extraction progress on stderr,
+with dynamic bars in a terminal and plain text when redirected. Use `--progress=plain`
+for log-friendly output. Use `mdocker image pull redis:8` to refresh a tag, or a registry digest to pin its source. Supply application
 settings with `--env`, persistent directories with `--mount`, and command arguments
 after `--`. See the [image guide](guides/usage.md#ocidocker-images).
 

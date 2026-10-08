@@ -193,6 +193,10 @@ content identity also covers numeric ownership and defaults. Atomic reference fi
 map normalized registry names to immutable local IDs. Pull refreshes references;
 run reuses a cached reference. The global image lock serializes staging recovery,
 pulls, imports, and removal. Network preparation precedes workload startup deadlines.
+Operation-scoped image observers emit layer phases and throttled byte counts from
+compressed streams and archive reads. The CLI owns rendering on stderr, preserving
+stdout results. The Mac resolves automatic progress mode before SSH dispatch; no
+PTY or output-stream merging is needed for detached runs or explicit image pulls.
 
 Template resolution holds an image lease while merging defaults and publishing a
 durable reference or acquiring the runtime source. Container records store the local
