@@ -94,6 +94,22 @@ fail CI rather than being ignored. Configure these checks as required in the
 repository's branch/release rules. macOS end-to-end tests still run locally
 through the dedicated Lima product VM with `make test-macos`.
 
+## OCI regression tests
+
+The Linux image unit tests serve an in-process registry to exercise platform lists,
+layer integrity, cache refresh, and rollback without external registry access.
+`tests/integration/oci_linux_test.go` uses a local registry and a relocated static
+toolbox, with no `bin/busybox`, to verify defaults, accounts, ownership, offline
+execution, retained restart, shared memory, and bounded root capabilities. The
+setpriv-style regression drops all bounding capabilities before switching UID/GID.
+A separate minimal root test runs with no BusyBox or pre-existing mount targets.
+
+For a real public-registry smoke on macOS, use the Redis/Nginx/PostgreSQL examples
+in the usage guide. Check application readiness, host-published responses, and
+restart data separately from the engine's successful process-start handshake.
+Public image smokes require registry connectivity; the deterministic regression
+suite does not. Pull staging and caches live on the VM disk.
+
 ## Troubleshooting
 
 - `mdocker machine status` reports the product VM without creating or starting it.

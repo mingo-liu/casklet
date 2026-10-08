@@ -26,7 +26,23 @@ You can use `./bin/mdocker` without installing. Run it as your regular Mac user,
 without sudo. The first command that needs the engine creates the
 `mini-docker-runtime` VM, installs the bundled engine, and prepares a static
 BusyBox filesystem. Initial setup needs internet access; subsequent runs use
-the existing VM and its local data. Container options precede the required `--`.
+the existing VM and its local data. Container options precede `--` when supplying a command. Registry images provide
+their own default command and are downloaded automatically on a cache miss.
+
+## Run an application image
+
+```sh
+mdocker run -d --name redis --image redis:8
+# Publish to localhost on your Mac:
+mdocker run -d --name redis-web --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+```
+
+OCI/Docker images include programs, dependencies, and startup defaults. The guest
+pulls the matching Linux architecture, verifies and unpacks its layers, and runs
+it with mini-docker's engine. Cached images work offline. Use `mdocker image pull
+redis:8` to refresh a tag, or a registry digest to pin its source. Supply application
+settings with `--env`, persistent directories with `--mount`, and command arguments
+after `--`. See the [image guide](guides/usage.md#ocidocker-images).
 
 ## Common operations
 

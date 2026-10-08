@@ -75,7 +75,7 @@ flowchart TD
     main --> runtime[runtime: supervisor and namespace children]
     cli --> container
     cli --> runtime
-    cli --> image[image: immutable local snapshots]
+    cli --> image[image: OCI registry and immutable snapshots]
     container --> runtime
     container --> template[template: source resolution and leases]
     runtime --> template
@@ -100,7 +100,7 @@ while managed exec uses runtime resources and IPC.
 | `container` | Records, generations, operation locks, systemd services, logs, inspection | Namespace setup and workload execution |
 | `runtime` | Startup handshake, PID 1, signals, exec sessions, run recovery and cleanup | User-facing command parsing and container records |
 | `template` | Directory/image selection, canonical validation, image lease ownership | Copies, mounts, and lifecycle state |
-| `image` | Content identity, atomic import, integrity checks and deletion leases | Runtime supervision |
+| `image` | Registry resolution, platform selection, layer application, startup defaults, content identity, atomic publication and deletion leases | Runtime supervision |
 | `rootfs` | Confined filesystem access, copying, mounts and DNS files | Image lookup and container management |
 | `cgroup`, `network`, `ipc` | Their Linux resource/protocol operations | CLI and durable lifecycle policy |
 
@@ -178,3 +178,26 @@ with an error, and unknown directory names are left alone.
 Use unit tests for invalid inputs, cancellation, and failure cleanup; validate
 runtime changes with privileged integration tests in the dedicated Linux VM.
 No new framework or global service registry is needed to add a command or adapter.
+
+## OCI images
+
+The guest image adapter uses go-containerregistry for OCI/Docker registry transport,
+anonymous token challenges, manifest lists, and compression. It does not invoke
+Docker Engine. Downloads select the native Linux platform and verify each layer's
+uncompressed digest before applying it to a private staging root. Whiteouts precede
+same-layer additions. Root-confined operations interpret absolute symlinks relative
+to the image, never the host. Unsupported special files fail the transaction.
+
+Image records contain execution defaults and the source manifest digest; the local
+content identity also covers numeric ownership and defaults. Atomic reference files
+map normalized registry names to immutable local IDs. Pull refreshes references;
+run reuses a cached reference. The global image lock serializes staging recovery,
+pulls, imports, and removal. Network preparation precedes workload startup deadlines.
+
+Template resolution holds an image lease while merging defaults and publishing a
+durable reference or acquiring the runtime source. Container records store the local
+ID and fully merged configuration. Runtime preserves image ownership in its private
+copy, creates a missing working directory, mounts private shared memory, and applies
+the bounded OCI root capability policy needed by application entrypoints. Builtin
+BusyBox health checks remain strict; generic filesystem validation requires neither
+BusyBox nor static linking. Restart uses the retained root and saved configuration.

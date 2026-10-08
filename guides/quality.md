@@ -6,6 +6,44 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: OCI application images and generic filesystems
+
+Registry names now resolve to cached immutable images or pull the native Linux
+platform through go-containerregistry without Docker Engine. Explicit image pulls
+refresh tags. Downloaded layer digests and DiffIDs are verified, whiteouts precede
+same-layer additions, and root-confined extraction supports merged `/usr`, symlinks,
+and hardlinks. Interrupted or failed pulls preserve the prior reference and leave
+no published partial image. Local identities cover ownership and startup defaults;
+leases protect source resolution, creation, execution, and deletion.
+
+Image entrypoints, commands, environment, working directories, and numeric/named
+users are merged with explicit options before container creation. Retained containers
+save the immutable ID and merged execution config. Generic filesystems require no
+BusyBox; the managed builtin still receives its original strict health validation.
+Runtime copies preserve image UID/GID, create missing working directories before
+read-only setup, and provide private shared memory. OCI root workloads receive only
+the bounded capabilities needed for initialization, user switching, capability
+reduction with setpriv, and HTTP listeners. Directory and non-root policies still
+drop all capabilities. User namespaces remain unsupported for OCI sources.
+
+Regression coverage includes multi-platform local registries, layer replacement,
+whiteouts/opaque directories, archive traversal, host-target symlinks, forward and
+cross-layer hardlinks, duplicate paths, unsupported devices, digest/size bounds,
+cancellation, cache refresh/offline use, config integrity, account lookup, default
+and override precedence, ownership across copies, retained restart, image leases,
+capability dropping before user switching, and a generic root with no BusyBox or
+runtime mount targets. Existing builtin repair tests continue to pass.
+
+Validation: Darwin and Linux arm64 unit/race tests and vet passed, as did the full
+privileged Linux integration suite, additional OCI/generic-root tests, and the full
+macOS end-to-end suite (the VM reboot case skipped to preserve another active
+container). Formatting and diff checks passed. Vulnerability checks
+reported no reachable vulnerabilities for Darwin/Linux on arm64/amd64. Real macOS
+smokes pulled Redis 8, Nginx stable, and PostgreSQL 17: Redis answered host TCP PING
+and retained a key across restart, Nginx served its HTTP page on the Mac, and
+PostgreSQL initialized and executed a SQL query with a configured password and
+512 MiB memory limit. Temporary smoke containers were stopped and removed.
+
 ## 2026-10-08: Allocate log snapshots once
 
 Log snapshots allocate one buffer sized to validated unread bytes and read each

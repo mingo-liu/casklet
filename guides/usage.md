@@ -111,28 +111,78 @@ mdocker run --rootfs ./rootfs/busybox \
 | `--timeout` | Command deadline; `0` disables it |
 | `--stop-timeout` | Shutdown grace from `0s` to `1m`; default `5s` |
 | `--env KEY=VALUE` | Repeatable; last assignment wins, empty values allowed |
-| `--workdir` | Existing absolute directory inside the container; default `/` |
-| `--user UID[:GID]` | Numeric identity; GID defaults to UID, default `0:0` |
+| `--workdir` | Absolute directory; image default or `/`; directory templates require it to exist |
+| `--user UID[:GID]` | Numeric identity; GID defaults to UID; overrides image User, otherwise `0:0` |
 | `--read-only` | Read-only root; `/tmp` stays writable, bind settings are independent |
 
 The default environment is `PATH=/bin:/usr/bin`, `HOME=/`, `LANG=C`. A numeric
 non-root user needs access to the configured working directory and executables.
 Init, commands, descendants, and managed exec sessions share aggregate limits.
 
-## Local images
+## OCI/Docker images
+
+```sh
+mdocker run -d --name redis --image redis:8
+mdocker run -d --name web --network bridge -p 127.0.0.1:8080:80 --image nginx:stable
+mdocker run -d --name database --memory 512m --env POSTGRES_PASSWORD=example-password \
+  --image postgres:17
+```
+
+`--image` accepts a registry name, `NAME@sha256:DIGEST`, or a full local image ID.
+Docker Hub, its `library/` namespace, and the `latest` tag are defaults. An uncached
+name is pulled automatically inside the VM, selecting `linux/arm64` on Apple
+silicon or `linux/amd64` on Intel. Anonymous-access registries are supported;
+private-registry login and arbitrary insecure HTTP registries are not provided.
+Loopback HTTP registries are supported for local development and tests.
+
+The image store verifies downloaded blobs and uncompressed layer DiffIDs, applies
+layers in order (including whiteouts and opaque directories), preserves numeric
+ownership, and atomically publishes an independent rootfs. Programs may use dynamic
+libraries and merged `/usr` layouts; static BusyBox is only a requirement for the
+managed builtin template. Extraction strips setuid/setgid bits and does not apply
+file capabilities or extended attributes. Device nodes, sockets, and FIFOs in layers
+are rejected. Pulls are bounded to 15 minutes, 256 layers, 1 million entries per
+layer, 4 GiB uncompressed per layer, and 16 GiB uncompressed in total, and require
+enough VM disk space for staging plus the unpacked tree.
+
+Image `Entrypoint + Cmd`, `Env`, `WorkingDir`, and `User` supply startup defaults.
+Arguments after `--` replace `Cmd` while retaining `Entrypoint`. `--entrypoint PATH`
+replaces the entrypoint and clears default `Cmd`; `--entrypoint ''` clears both.
+`--env`, `--workdir`, and numeric `--user UID[:GID]` override image values. Image
+user/group names are resolved against its `/etc/passwd` and `/etc/group`; an omitted
+group uses the account's primary group, or GID 0 for a numeric UID without an account.
+Supplementary groups are not inherited. A missing working directory is created in
+the private root before execution. Image `EXPOSE` and `VOLUME` metadata do not publish
+ports or provision storage; provide `--network bridge -p ...` and `--mount` explicitly.
+
+```sh
+mdocker image pull redis:8 # Refresh the cached tag explicitly.
+mdocker image ls --json
+mdocker run --image redis:8 -- --version
+mdocker run --image redis:8 --entrypoint '' -- /bin/sh -c 'id; pwd'
+```
+
+Cached names run without contacting their registry. A mutable tag keeps its cached
+version until `image pull` refreshes it; use a digest reference for a fixed source.
+Local `sha256:` IDs hash the unpacked content, ownership, architecture, and startup
+configuration and differ from registry manifest digests (`manifest_digest` in image
+JSON). A retained container records its immutable local ID and merged configuration;
+start/restart preserves its writes and does not re-resolve its original tag.
+
+### Directory imports
 
 ```sh
 image_id=$(mdocker image import ./rootfs/busybox)
-mdocker image ls --json
 mdocker run --image "$image_id" -- /bin/echo hello
 mdocker image rm "$image_id"
 ```
 
-Images are immutable, content-addressed local snapshots. Use the full
-`sha256:` ID with `--image`. Omitting both source options uses the built-in BusyBox template. Imports copy the source;
-later source changes do not alter the image. Running copies are independent.
-Deletion is blocked while an image is leased or referenced by a retained
-container. Remove those containers first. There is no registry or layer support.
+Directory imports have no default command. Imports copy a stable Linux filesystem;
+later source changes do not alter it. Running copies are independent. Omitting
+`--image` and `--rootfs` selects builtin BusyBox. Deletion requires a full local ID
+and is blocked while the image is leased or referenced by a retained container.
+Remove referencing containers first; deleting a cached target makes its name a
+cache miss on the next run.
 
 ## Persistent data
 
@@ -255,7 +305,13 @@ on restart and cleaned up after exit. There is no IPv6 or host-network mode.
 
 Workloads use reduced capabilities and `no_new_privs`. Default seccomp filters
 dangerous syscalls across all threads and descendants; unsupported kernels fail
-startup. It is a denylist, so use trusted workloads. `--seccomp unconfined`
+startup. Directory templates and non-root image users receive no capabilities.
+OCI images starting as root retain only `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`,
+`SETGID`, `SETPCAP`, `KILL`, and `NET_BIND_SERVICE` for data initialization, privilege dropping,
+and HTTP listeners. These remain bounded; namespace/mount/network administration
+is unavailable. `/dev/shm` is a private 64 MiB tmpfs charged to the container memory
+limit. OCI images currently do not support user namespaces or rootless execution.
+It is a denylist, so use trusted workloads. `--seccomp unconfined`
 disables the filter when a trusted command needs blocked syscalls.
 
 For foreground user namespaces, provide nonoverlapping UID/GID mappings that
