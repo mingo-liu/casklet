@@ -21,7 +21,7 @@ func TestLocalPreflightFailsBeforeLima(t *testing.T) {
 		want string
 	}{
 		{[]string{"run", "--rootfs", filepath.Join(t.TempDir(), "missing"), "--", "true"}, "rootfs template"},
-		{[]string{"image", "import", t.TempDir()}, "rootfs template"},
+		{[]string{"image", "import", filepath.Join(t.TempDir(), "missing")}, "rootfs template"},
 		{[]string{"run", "--rootfs", BuiltinRootFS, "--mount", "type=bind,source=" + filepath.Join(t.TempDir(), "missing") + ",target=/data", "--", "true"}, "bind source"},
 		{[]string{"run", "-p", "22:80", "--", "true"}, "reserved by Lima"},
 		{[]string{"run", "-p", "192.0.2.1:49181:80", "--", "true"}, "host addresses"},

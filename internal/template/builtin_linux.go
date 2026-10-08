@@ -196,7 +196,7 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 	if err := checkBuiltinDirectory(path, owner); err != nil {
 		return err
 	}
-	if _, err := rootfs.Validate(path); err != nil {
+	if _, err := rootfs.ValidateBusyBox(path); err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(path)

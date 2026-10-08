@@ -14,9 +14,26 @@ import (
 	"strings"
 )
 
-// Validate resolves a trusted template and checks its mount targets and BusyBox.
+// Validate resolves a filesystem and checks existing runtime mount targets.
 // The template must remain unchanged until Copy finishes.
 func Validate(path string) (string, error) {
+	root, err := directory(path)
+	if err != nil {
+		return "", err
+	}
+	if root == string(filepath.Separator) {
+		return "", errors.New("the host root cannot be used as a rootfs")
+	}
+	for _, name := range []string{"proc", "dev", "tmp"} {
+		if err := realDirectory(filepath.Join(root, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("rootfs %s: %w", name, err)
+		}
+	}
+	return root, nil
+}
+
+// ValidateBusyBox additionally validates the managed static BusyBox template.
+func ValidateBusyBox(path string) (string, error) {
 	root, err := directory(path)
 	if err != nil {
 		return "", err
@@ -125,6 +142,25 @@ func Copy(ctx context.Context, source, destination string) error {
 // is its canonical host path, used to reject overlap and mounted descendants.
 // The source must remain stable until copying finishes.
 func CopyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string) error {
+	return copyFromRoot(ctx, root, sourcePath, destination, false)
+}
+
+// CopyOwned preserves numeric image ownership when preparing a privileged root.
+// Directory templates and rootless copies retain the original Copy policy.
+func CopyOwned(ctx context.Context, source, destination string) error {
+	canonical, err := directory(source)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(canonical)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return copyFromRoot(ctx, root, canonical, destination, true)
+}
+
+func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string, ownership bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -195,9 +231,20 @@ func CopyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination st
 			if err != nil {
 				return err
 			}
-			return os.Symlink(link, target)
+			if err := os.Symlink(link, target); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unsupported special file in rootfs: %s", rel)
+		}
+		if ownership {
+			uid, gid := Ownership(info)
+			if err := os.Lchown(target, int(uid), int(gid)); err != nil {
+				return err
+			}
+			if mode.IsRegular() {
+				return os.Chmod(target, mode)
+			}
 		}
 		return nil
 	})

@@ -88,7 +88,7 @@ func TestValidateRejectsInvalidTemplates(t *testing.T) {
 				binary.LittleEndian.PutUint32(program, uint32(elf.PT_INTERP))
 				must(t, os.WriteFile(busybox, append(data, program...), 0755))
 			}
-			if _, err := Validate(root); err == nil {
+			if _, err := ValidateBusyBox(root); err == nil {
 				t.Fatal("invalid template was accepted")
 			}
 		})

@@ -98,6 +98,9 @@ func TestAcquireFailureReleasesLease(t *testing.T) {
 				if err := os.Remove(filepath.Join(root, "proc")); err != nil {
 					t.Fatal(err)
 				}
+				if err := os.Symlink("/proc", filepath.Join(root, "proc")); err != nil {
+					t.Fatal(err)
+				}
 			case "missing bind source":
 				cfg.Mounts = []config.BindMount{{Source: filepath.Join(t.TempDir(), "missing"), Target: "/data"}}
 			case "overlapping bind source":

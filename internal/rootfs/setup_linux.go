@@ -25,6 +25,9 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 		return fmt.Errorf("cannot switch to the host root")
 	}
 	for _, name := range []string{"proc", "dev", "tmp"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil && !os.IsExist(err) {
+			return err
+		}
 		if err := realDirectory(filepath.Join(root, name)); err != nil {
 			return err
 		}
@@ -68,6 +71,12 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	}
 	if err := unix.Mount("tmpfs", "/dev", "tmpfs", unix.MS_NOSUID|unix.MS_NOEXEC, "size=1m,mode=0755"); err != nil {
 		return fmt.Errorf("mount dev: %w", err)
+	}
+	if err := os.Mkdir("/dev/shm", 01777); err != nil {
+		return err
+	}
+	if err := unix.Mount("tmpfs", "/dev/shm", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=64m,mode=1777"); err != nil {
+		return fmt.Errorf("mount shared memory: %w", err)
 	}
 	for i, name := range []string{"null", "zero", "random", "urandom", "tty"} {
 		target := "/dev/" + name

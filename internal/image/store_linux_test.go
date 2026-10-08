@@ -123,7 +123,10 @@ func TestStoreImportRejectsUnsafePathsAndRollsBack(t *testing.T) {
 	if err := os.Remove(filepath.Join(source, "fifo")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(source, "bin/busybox")); err != nil {
+	if err := os.Remove(filepath.Join(source, "proc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/proc", filepath.Join(source, "proc")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Import(context.Background(), source); err == nil {
