@@ -37,9 +37,7 @@ automatically on a cache miss; `--` is unnecessary when using that default.
 
 After updating the source, run `make build` and `sudo make install` again to update
 the installed client. Its bundled guest engine updates automatically on the next
-engine command, preserving existing containers and images. When upgrading from the previous
-project name, the renamed client uses a new VM and state directories; see the
-[rename notes](guides/development.md#macos-client).
+engine command, preserving existing containers and images.
 
 ## Run an application image
 

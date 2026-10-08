@@ -32,8 +32,6 @@ casklet run -it -- /bin/sh
 
 更新源码后，再执行 `make build` 和 `sudo make install` 更新已安装的客户端。
 下次执行需要引擎的命令时，会自动更新其内置的虚拟机引擎，保留现有容器和镜像。
-从项目旧名称升级时，新客户端会使用新的虚拟机和状态目录，详见
-[改名说明](guides/development.md#macos-client)（英文）。
 
 ## 运行应用镜像
 

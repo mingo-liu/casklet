@@ -51,13 +51,6 @@ The client maintains its initialization lock and generated VM configuration in
 configuration under its own instance directory. The product instance is
 `casklet-runtime`; the separate development instance is named `casklet`.
 
-The renamed client uses its own VM and state directories. It does not automatically
-adopt instances or data created under the previous project name. Existing VM disks
-and container/image data remain available in their original instances. Export any
-needed files before recreating workloads with the renamed client. Rebuild and
-reinstall the client, update scripts to use `casklet` and `CASKLET_*` variables,
-and regenerate exported BusyBox templates so they contain `.casklet-rootfs.json`.
-
 ## Internal Linux engine tests
 
 Linux remains an internal execution and test environment. The ordinary macOS
