@@ -12,7 +12,11 @@ The public product supports macOS only. Use `make build` to compile the Darwin c
 
 ## Coding Style & Naming Conventions
 
-Use English for repository documentation, identifiers, comments, CLI help, logs, errors, and commit descriptions. Discussions with the user remain in Chinese. Format Go code with gofmt (`make fmt`), follow standard Go naming conventions, and use `//go:build linux` for platform-specific code. Keep unsupported-platform errors explicit.
+Use English for repository documentation (except the maintained Chinese README), identifiers, comments, CLI help, logs, errors, and commit descriptions. Discussions with the user remain in Chinese. Format Go code with gofmt (`make fmt`), follow standard Go naming conventions, and use `//go:build linux` for platform-specific code. Keep unsupported-platform errors explicit.
+
+`README.zh-CN.md` is the maintained Chinese translation of `README.md`. Update both in the same change, keeping feature coverage, command examples, prerequisites, defaults, and limitations aligned. Other maintained guides remain in English unless a translation is explicitly requested.
+
+When adding or changing CLI commands or flags, update their focused help, relevant usage documentation, and examples in the same change. Extend the help regression checks when syntax or behavior changes, and keep `COMMAND --help` equivalent to `help COMMAND`.
 
 ## Testing Guidelines
 
