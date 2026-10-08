@@ -146,6 +146,50 @@ func execCgroup(t *testing.T, output string) string {
 	return ""
 }
 
+func TestExecCleanupFailureReturnsNonzeroAndPreservesCommandStatus(t *testing.T) {
+	for _, status := range []int{0, 7} {
+		t.Run(fmt.Sprintf("exit-%d", status), func(t *testing.T) {
+			name, id := execContainer(t, nil)
+			original := waitBackground(t, id, "running")
+			call := startExec(t, "", nil, name, "/bin/sh", "-c", fmt.Sprintf(`
+set -eu
+cat /proc/self/cgroup
+echo cleanup-ready
+while [ ! -e /exec-cleanup-finish ]; do sleep 0.1; done
+exit %d`, status))
+			group := execCgroup(t, call.ready(t, "cleanup-ready\n"))
+			if filepath.Dir(group) != original.Cgroup || !strings.HasPrefix(filepath.Base(group), "exec-") {
+				t.Fatalf("unexpected exec cgroup: %q parent=%q", group, original.Cgroup)
+			}
+			// Preserve an unrecognized child to inject a real removal failure.
+			child := filepath.Join(group, "preserve-unexpected-child")
+			if err := os.Mkdir(child, 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.Remove(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Error(err)
+				}
+			})
+			execSuccess(t, nil, id, "/bin/touch", "/exec-cleanup-finish")
+			code, out, diagnostic := call.wait(t)
+			want := status
+			if want == 0 {
+				want = 125
+			}
+			if code != want || !strings.Contains(out, "cleanup-ready\n") || !strings.Contains(diagnostic, "preserve unexpected cgroup child") {
+				t.Fatalf("cleanup result: exit=%d want=%d stdout=%q stderr=%q", code, want, out, diagnostic)
+			}
+			if next := waitBackground(t, id, "running"); next.Generation != original.Generation {
+				t.Fatalf("exec cleanup changed the container generation: %+v", next)
+			}
+			if out := execSuccess(t, nil, id, "/bin/echo", "still-running"); out != "still-running\n" {
+				t.Fatal("exec cleanup affected the main container")
+			}
+		})
+	}
+}
+
 func TestExecSharedNamespacesAndFilesystem(t *testing.T) {
 	name, id := execContainer(t, []string{"--hostname", "exec-host"})
 	out := execSuccess(t, nil, name, "/bin/sh", "-c", `

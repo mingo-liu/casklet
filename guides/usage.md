@@ -218,7 +218,9 @@ Command exit codes pass through. Signals return `128 + signal`, command timeout
 returns `124`, and configuration/startup errors return `125`. Diagnostics go to
 stderr. Argument errors link to the relevant command help. Lifecycle errors
 include recovery commands, such as stopping a running container before removal
-or listing containers after a failed lookup. A completed command keeps its exit code during descendant cleanup.
+or listing containers after a failed lookup. Successful foreground `run` and
+`exec` commands return 125 if cleanup fails. A command's nonzero exit code is
+preserved, with cleanup diagnostics on stderr.
 For detached containers, `inspect` reports cleanup failures separately in the
 `cleanup_failures` array; `previous_exit` retains them after a restart. The array
 contains failure stages rather than private error messages. `wait` still returns

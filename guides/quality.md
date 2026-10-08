@@ -6,6 +6,26 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Exec cleanup error exit status
+
+The foreground infrastructure-error policy also applies to `exec`: a successful
+command followed by cleanup failure returns 125. Nonzero command statuses are
+preserved, and cleanup diagnostics are written to stderr.
+
+Regressions: `TestExecCleanupFailureReturnsNonzeroAndPreservesCommandStatus`
+in both privileged Linux and macOS end-to-end suites injects an unrecognized
+child into the session's actual cgroup. It checks exit 0 becomes 125, exit 7
+stays 7, stderr identifies the failed removal, and the main container retains
+its running generation and accepts another exec. The tests reproduced the
+incorrect zero status on both platforms before the fix.
+
+Final cumulative validation for the three 2026-10-08 fixes: `make build` and
+`mdocker doctor` passed. `make fmt-check test vet test-race` passed on macOS
+arm64 and in the dedicated Linux arm64 VM. The complete privileged Linux
+integration suite and `make test-macos` passed, including VM stop/start,
+engine/template repair, signals, lifecycle ports, exec cleanup, and interactive
+terminals. Intel Mac and Linux amd64 execution were not run.
+
 ## 2026-10-08: Retained-container host port preflight
 
 Mac `start` and `restart` check the saved published ports before creating a new

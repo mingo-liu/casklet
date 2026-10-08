@@ -56,6 +56,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
 		if err != nil {
 			fmt.Fprintf(stderr, "mdocker: %v\n", operationError(r, err))
+			if code == 0 {
+				return 125
+			}
 		}
 		return code
 	case "run":
