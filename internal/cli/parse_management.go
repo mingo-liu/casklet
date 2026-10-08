@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 func parseManagement(r Request, args []string) (Request, error) {

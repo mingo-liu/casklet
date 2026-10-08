@@ -32,7 +32,7 @@ func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 	if strings.Contains(string(data), "Lima is required") {
 		t.Fatalf("attempted machine setup: %s", data)
 	}
-	if !strings.Contains(string(data), "mdocker doctor [--rootfs DIRECTORY]") {
+	if !strings.Contains(string(data), "casklet doctor [--rootfs DIRECTORY]") {
 		t.Fatalf("help omitted the default doctor template: %s", data)
 	}
 }

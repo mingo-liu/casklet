@@ -1,10 +1,10 @@
-# mini-docker
+# casklet
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-A macOS command-line container tool with its own Go container engine. `mdocker`
+A macOS command-line container tool with its own Go container engine. `casklet`
 automatically manages a dedicated Lima Linux VM; containers run in that VM using
-mini-docker's namespaces, cgroups v2, and process supervision. Docker Engine and
+casklet's namespaces, cgroups v2, and process supervision. Docker Engine and
 containerd are not required.
 
 Supported hosts: macOS 13.5+ on Apple silicon or Intel, with Lima 2.0+.
@@ -22,14 +22,14 @@ brew install lima
 make build
 sudo make install
 
-mdocker doctor
-mdocker run -- /bin/sh -c 'hostname; ps; echo hello'
-mdocker run -it -- /bin/sh
+casklet doctor
+casklet run -- /bin/sh -c 'hostname; ps; echo hello'
+casklet run -it -- /bin/sh
 ```
 
-You can use `./bin/mdocker` without installing. Run it as your regular Mac user,
+You can use `./bin/casklet` without installing. Run it as your regular Mac user,
 without sudo. The first command that needs the engine creates the
-`mini-docker-runtime` VM, installs the bundled engine, and prepares a static
+`casklet-runtime` VM, installs the bundled engine, and prepares a static
 BusyBox filesystem. Initial setup needs internet access; subsequent runs use
 the existing VM and its local data. Container options precede `--` when supplying
 a command. Registry images provide their own default command and are downloaded
@@ -37,19 +37,21 @@ automatically on a cache miss; `--` is unnecessary when using that default.
 
 After updating the source, run `make build` and `sudo make install` again to update
 the installed client. Its bundled guest engine updates automatically on the next
-engine command, preserving existing containers and images.
+engine command, preserving existing containers and images. When upgrading from the previous
+project name, the renamed client uses a new VM and state directories; see the
+[rename notes](guides/development.md#macos-client).
 
 ## Run an application image
 
 ```sh
-mdocker run -d --name redis --image redis:8
+casklet run -d --name redis --image redis:8
 # Publish to localhost on your Mac:
-mdocker run -d --name redis-local --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+casklet run -d --name redis-local --network bridge -p 127.0.0.1:6379:6379 --image redis:8
 ```
 
 OCI/Docker images include programs, dependencies, and startup defaults. The guest
 pulls the matching Linux architecture, verifies and unpacks its layers, and runs
-it with mini-docker's engine. Cached images work offline. Supply application
+it with casklet's engine. Cached images work offline. Supply application
 settings with `--env`, persistent directories with `--mount`, and command arguments
 after `--`. Arguments replace image `Cmd` and retain `Entrypoint`; use `--entrypoint`
 to override it. Anonymous-access registries are supported; private-registry login
@@ -65,10 +67,10 @@ Image/container IDs and application output stay on stdout. Cached runs show
 `Using cached image`; an unchanged explicit pull shows `Image is up to date`.
 
 ```sh
-mdocker image pull redis:8
-mdocker image pull --progress=plain redis:8
-mdocker image ls
-mdocker image ls --json
+casklet image pull redis:8
+casklet image pull --progress=plain redis:8
+casklet image ls
+casklet image ls --json
 ```
 
 Tags keep their cached version until `image pull` refreshes them. Use a registry
@@ -77,25 +79,25 @@ local `sha256:` ID from `image ls`. Stop and remove all referencing containers f
 image removal accepts local IDs rather than registry names such as `redis:8`.
 
 ```sh
-mdocker image rm IMAGE_ID
+casklet image rm IMAGE_ID
 ```
 
 ## Common operations
 
 ```sh
-mdocker run -d --name worker --memory 128m --pids-limit 64 --cpus 0.5 \
+casklet run -d --name worker --memory 128m --pids-limit 64 --cpus 0.5 \
   -- /bin/sleep 300
-mdocker ps
-mdocker exec worker -- /bin/sh -c 'hostname; id'
-mdocker exec -it worker -- /bin/sh
-mdocker logs --tail 20 worker
-mdocker inspect worker
-mdocker stats worker
-mdocker stop worker
-mdocker start worker
-mdocker restart worker
-mdocker stop worker
-mdocker rm worker
+casklet ps
+casklet exec worker -- /bin/sh -c 'hostname; id'
+casklet exec -it worker -- /bin/sh
+casklet logs --tail 20 worker
+casklet inspect worker
+casklet stats worker
+casklet stop worker
+casklet start worker
+casklet restart worker
+casklet stop worker
+casklet rm worker
 ```
 
 Use `exit` to leave the exec shell; the main container continues running.
@@ -103,27 +105,27 @@ Stop/start and restart preserve the container's private files; `rm` deletes them
 Bind-mounted host data survives container removal.
 
 Your Mac home directory is shared with the VM for rootfs imports and bind mounts.
-The image cache is at `/var/lib/mini-docker/images`, and container records and
-private roots are at `/var/lib/mini-docker/containers`, inside the VM. Published
+The image cache is at `/var/lib/casklet/images`, and container records and
+private roots are at `/var/lib/casklet/containers`, inside the VM. Published
 TCP and UDP ports are forwarded back to the Mac. The default network is loopback
 only; use `--network bridge` for connectivity and port publishing.
 
 ```sh
-mdocker run --mount "type=bind,source=$PWD,target=/work" --workdir /work \
+casklet run --mount "type=bind,source=$PWD,target=/work" --workdir /work \
   -- /bin/sh -c 'ls'
-mdocker machine status
-mdocker machine stop
-mdocker machine start
+casklet machine status
+casklet machine stop
+casklet machine start
 ```
 
 Stopping the VM stops its workloads and preserves their data. After starting the
-VM, use `mdocker start NAME` to start a retained container again.
+VM, use `casklet start NAME` to start a retained container again.
 
 The VM defaults to 4 CPUs, 4 GiB memory, and a 20 GiB disk. Before its first use,
 you can choose resources and additional shared directories:
 
 ```sh
-mdocker machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
+casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 ```
 
 ## Documentation and development
@@ -131,7 +133,7 @@ mdocker machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 - [Usage guide](guides/usage.md): files, images, networking, security, and lifecycle.
 - [Development guide](guides/development.md): builds, tests, and troubleshooting.
 - [Architecture](ARCHITECTURE.md): host/guest boundaries and resource ownership.
-- `mdocker help`: command overview; `mdocker COMMAND --help`: syntax, options, and examples.
+- `casklet help`: command overview; `casklet COMMAND --help`: syntax, options, and examples.
 
 ```sh
 make fmt-check test vet test-race vuln

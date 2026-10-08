@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/config"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
 const (

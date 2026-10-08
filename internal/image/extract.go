@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
 const maxLayerBytes int64 = 4 << 30

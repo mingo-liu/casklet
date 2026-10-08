@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
 )
 
 // Supervisor is an internal entry point launched only by an immutable unit.
@@ -21,23 +21,23 @@ func Supervisor(id string, generations ...uint64) int {
 		generation = generations[0]
 	}
 	if err := validateID(id); err != nil {
-		fmt.Fprintln(os.Stderr, "mini-docker:", err)
+		fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	if err := checkSupervisorUnit(id, generation); err != nil {
-		fmt.Fprintln(os.Stderr, "mini-docker:", err)
+		fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	store, err := OpenStore()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "mini-docker:", err)
+		fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	lease, err := store.AcquireLease(ctx, id)
 	cancel()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "mini-docker:", err)
+		fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	defer lease.Close()
@@ -64,7 +64,7 @@ func Supervisor(id string, generations ...uint64) int {
 			record.Error = fmt.Sprintf("startup stopped before the command began (exit %d)", code)
 		}
 	}); err != nil {
-		fmt.Fprintln(os.Stderr, "mini-docker: record completion:", err)
+		fmt.Fprintln(os.Stderr, "casklet: record completion:", err)
 		return 125
 	}
 	return code
@@ -154,7 +154,7 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 		return cfg.StoppingTimeout()
 	})
 	if runErr != nil {
-		fmt.Fprintln(writer, "mini-docker:", runErr)
+		fmt.Fprintln(writer, "casklet:", runErr)
 	}
 	closeErr := writer.Close()
 	select {

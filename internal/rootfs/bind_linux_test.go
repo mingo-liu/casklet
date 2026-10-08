@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func TestMountSourceDirectories(t *testing.T) {

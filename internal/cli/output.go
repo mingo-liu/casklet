@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func writeRecords(out io.Writer, records []container.Record, asJSON bool) error {

@@ -22,7 +22,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 // The registry fixture uses a relocated static toolbox instead of bin/busybox.
@@ -129,7 +129,7 @@ func ociRegistryFixture(t *testing.T) (string, func()) {
 	}
 	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(server.Close)
-	ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + "/mini-docker/app:test")
+	ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + "/casklet/app:test")
 	if err != nil {
 		t.Fatal(err)
 	}

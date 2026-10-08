@@ -6,6 +6,30 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Unify project and command naming as casklet
+
+The project, Go module, command entry point, public CLI, embedded engine asset,
+VM names, environment variables, state paths, rootfs metadata, systemd units,
+AppArmor profile, and network ownership identifiers now use casklet naming.
+Default container names and hostnames follow the same naming. The redundant
+build-time command alias is removed. CLI help, scripts, CI, architecture,
+repository guidelines, both READMEs, and usage/development examples are aligned.
+Help and parser regressions also check the renamed overview and hostname default.
+
+The development guide describes the separate VM/state directories and the need
+to recreate exported templates and update external scripts when upgrading from
+the previous project name. Existing VM data is not migrated automatically.
+
+Validation: Darwin and Linux arm64 formatting, unit tests, vet, and race checks
+passed. The complete privileged Linux integration suite and macOS end-to-end
+suite passed, including VM stop/start, engine repair, rootless execution, image
+progress, published ports, lifecycle, signal forwarding, and interactive terminals.
+Darwin amd64 builds with an embedded Linux amd64 engine and the standalone Linux
+amd64 build passed; amd64 execution was not run. Staged installation and installed
+command help passed. Source/configuration/documentation scans found no old product
+names, bilingual README command examples match, local documentation links resolve,
+shell syntax checks passed, and diff whitespace checks passed.
+
 ## 2026-10-08: Synchronize bilingual README application workflows
 
 The English and Chinese READMEs now cover the same OCI application and progress
@@ -161,7 +185,7 @@ its running generation and accepts another exec. The tests reproduced the
 incorrect zero status on both platforms before the fix.
 
 Final cumulative validation for the three 2026-10-08 fixes: `make build` and
-`mdocker doctor` passed. `make fmt-check test vet test-race` passed on macOS
+`casklet doctor` passed. `make fmt-check test vet test-race` passed on macOS
 arm64 and in the dedicated Linux arm64 VM. The complete privileged Linux
 integration suite and `make test-macos` passed, including VM stop/start,
 engine/template repair, signals, lifecycle ports, exec cleanup, and interactive
@@ -266,7 +290,7 @@ Regressions: `TestStoreOperationsRecoverInterruptedTransactions`,
 
 - `make fmt-check test vet test-race` passed on macOS arm64 and in the dedicated
   Linux arm64 development VM.
-- `make build` and `mdocker doctor` passed with the native Darwin client and its
+- `make build` and `casklet doctor` passed with the native Darwin client and its
   bundled Linux engine.
 - The complete privileged Linux integration suite passed, including cleanup
   failure persistence and mounted transaction preservation. Final compatibility

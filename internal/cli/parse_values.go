@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 var cpuPattern = regexp.MustCompile(`^(?:[0-9]+(?:\.[0-9]{1,3})?|\.[0-9]{1,3})$`)

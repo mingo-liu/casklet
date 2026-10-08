@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/remote"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/remote"
 )
 
 func TestHostLifecyclePreflightFencesGenerationAndOperations(t *testing.T) {

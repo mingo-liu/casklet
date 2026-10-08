@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 func TestCommandHelp(t *testing.T) {
@@ -48,7 +48,7 @@ func TestCommandArgumentErrors(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out, diagnostic, code := command(t, args...)
-			if code != 125 || out != "" || !strings.HasPrefix(diagnostic, "mdocker: ") {
+			if code != 125 || out != "" || !strings.HasPrefix(diagnostic, "casklet: ") {
 				t.Fatalf("argument error: exit=%d stdout=%q stderr=%q", code, out, diagnostic)
 			}
 		})

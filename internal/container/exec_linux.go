@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/ipc"
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/ipc"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
 	"golang.org/x/sys/unix"
 )
 

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 func inspectBackground(t *testing.T, ref string) container.Inspection {
@@ -106,7 +106,7 @@ func TestStatsUnavailableCgroup(t *testing.T) {
 	name := backgroundName(t)
 	id := startBackground(t, name, nil, "/bin/sleep", "30")
 	// Private metadata corruption must neither disclose host data nor read unrelated cgroups.
-	path := filepath.Join("/var/lib/mini-docker/containers", id, "state.json")
+	path := filepath.Join("/var/lib/casklet/containers", id, "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func waitStatsSampling(t *testing.T, cmd *exec.Cmd, id string) {
 		}
 		for _, entry := range entries {
 			target, err := os.Readlink(filepath.Join(dir, entry.Name()))
-			if err == nil && strings.Contains(target, "mini-docker-"+id+".service/container-") {
+			if err == nil && strings.Contains(target, "casklet-"+id+".service/container-") {
 				return
 			}
 		}

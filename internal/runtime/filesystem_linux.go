@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
 // A retained root takes precedence over the original source on restart. This

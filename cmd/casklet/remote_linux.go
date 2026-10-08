@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/cli"
-	"github.com/mingo-liu/mini-docker/internal/machine"
-	"github.com/mingo-liu/mini-docker/internal/remote"
+	"github.com/mingo-liu/casklet/internal/cli"
+	"github.com/mingo-liu/casklet/internal/machine"
+	"github.com/mingo-liu/casklet/internal/remote"
 )
 
 func remoteMode(args []string) (bool, int) {
@@ -34,7 +34,7 @@ func remoteMode(args []string) (bool, int) {
 		return false, 0
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(os.Stderr, "casklet: %v\n", err)
 		return true, 125
 	}
 	return true, code

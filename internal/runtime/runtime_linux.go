@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/ipc"
-	"github.com/mingo-liu/mini-docker/internal/network"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/ipc"
+	"github.com/mingo-liu/casklet/internal/network"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -103,7 +103,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			defer networkLease.Close()
 		}
 		if err := run.remove(); err != nil {
-			fmt.Fprintf(stderr, "mini-docker: cleanup %s: %v\n", run.path, err)
+			fmt.Fprintf(stderr, "casklet: cleanup %s: %v\n", run.path, err)
 			runErr = errors.Join(runErr, cleanupFailure("run.remove", err))
 		}
 	}()
@@ -257,7 +257,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		// After the main loop, guarantee Wait has reaped init before disk cleanup.
 		if !waitConsumed {
 			if err := group.Kill(); err != nil {
-				fmt.Fprintf(stderr, "mini-docker: stop init after cgroup kill failure: %v\n", err)
+				fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
 				_ = cmd.Process.Kill()
 			}
 			select {
@@ -466,7 +466,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		case <-kill:
 			kill = nil
 			if err := group.Kill(); err != nil {
-				fmt.Fprintf(stderr, "mini-docker: stop init after cgroup kill failure: %v\n", err)
+				fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
 				if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 					return 125, fmt.Errorf("force container shutdown: %w", err)
 				}

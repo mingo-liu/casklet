@@ -8,11 +8,11 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/cgroup"
 	"golang.org/x/sys/unix"
 )
 
-const scopeEnvironment = "MINI_DOCKER_SCOPE_LAUNCHED"
+const scopeEnvironment = "CASKLET_SCOPE_LAUNCHED"
 
 // prepareLaunch replaces the CLI process so terminal descriptors, signals, and
 // workload exit codes pass through the privilege and delegation setup.
@@ -29,7 +29,7 @@ func prepareLaunch(args []string, request Request) error {
 	}
 	if os.Geteuid() != 0 && !request.Config.Rootless {
 		if _, err := exec.LookPath("/usr/bin/sudo"); err != nil {
-			return errors.New("root privileges are required; install sudo or run mdocker as root")
+			return errors.New("root privileges are required; install sudo or run casklet as root")
 		}
 		command := append([]string{"sudo", "--", executable}, args...)
 		return unix.Exec("/usr/bin/sudo", command, os.Environ())

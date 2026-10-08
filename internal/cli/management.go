@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func executeManagement(r Request, stdout, stderr io.Writer) int {
@@ -43,7 +43,7 @@ func manageOperation(r Request, stderr io.Writer, operation func(context.Context
 		return 128 + int((<-signals).(syscall.Signal))
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", operationError(r, err))
+		fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
 		return 125
 	}
 	return returnCode

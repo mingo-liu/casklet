@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/ipc"
+	"github.com/mingo-liu/casklet/internal/ipc"
 	"golang.org/x/sys/unix"
 )
 

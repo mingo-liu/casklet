@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/network"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/network"
 )
 
 func networkCommand(t *testing.T, tool string, args ...string) string {
@@ -46,26 +46,26 @@ func networkSnapshot(t *testing.T) string {
 	}
 	var owned []string
 	for _, link := range links {
-		if strings.HasPrefix(link.Alias, "mini-docker") || strings.HasPrefix(link.Alias, "mdocker_") {
+		if strings.HasPrefix(link.Alias, "casklet") || strings.HasPrefix(link.Alias, "casklet_") {
 			owned = append(owned, link.Name)
 		}
 	}
 	tables := strings.Split(networkCommand(t, "nft", "list", "tables"), "\n")
 	for _, table := range tables {
-		if strings.Contains(table, "mdocker_") {
+		if strings.Contains(table, "casklet_") {
 			owned = append(owned, table)
 		}
 	}
-	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if _, err := os.Lstat(filepath.Join("/var/lib/mini-docker/runs", entry.Name(), "network.json")); err == nil {
+		if _, err := os.Lstat(filepath.Join("/var/lib/casklet/runs", entry.Name(), "network.json")); err == nil {
 			owned = append(owned, entry.Name())
 		}
 	}
-	if _, err := os.Lstat("/var/lib/mini-docker/runs/.network-shared.json"); err == nil {
+	if _, err := os.Lstat("/var/lib/casklet/runs/.network-shared.json"); err == nil {
 		owned = append(owned, "shared-state")
 	}
 	sort.Strings(owned)
@@ -88,7 +88,7 @@ func assertNetworkSnapshot(t *testing.T, before string) {
 func networkUpstream(t *testing.T) string {
 	t.Helper()
 	require(t)
-	namespace := fmt.Sprintf("mdocker-upstream-%d-%d", os.Getpid(), sequence.Add(1))
+	namespace := fmt.Sprintf("casklet-upstream-%d-%d", os.Getpid(), sequence.Add(1))
 	host := fmt.Sprintf("mx%d", sequence.Add(1))
 	networkCommand(t, "ip", "netns", "add", namespace)
 	t.Cleanup(func() {
@@ -103,7 +103,7 @@ func networkUpstream(t *testing.T) string {
 		networkCommand(t, "ip", append([]string{"netns", "exec", namespace, "ip"}, args...)...)
 	}
 	// Intentionally no default route: return packets require host-side SNAT.
-	cmd := exec.Command("ip", "netns", "exec", namespace, os.Getenv("MINI_DOCKER_HELPER"), "network-server")
+	cmd := exec.Command("ip", "netns", "exec", namespace, os.Getenv("CASKLET_HELPER"), "network-server")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestNetworkSupervisorRecovery(t *testing.T) {
 	port := freeNetworkPort(t, "tcp")
 	id := startBackground(t, backgroundName(t), []string{"--network", "bridge", "-p", fmt.Sprintf("127.0.0.1:%d:8080", port)}, "/bin/integration-helper", "network-service")
 	networkHTTP(t, fmt.Sprintf("127.0.0.1:%d", port))
-	networkCommand(t, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "mini-docker-"+id+".service")
+	networkCommand(t, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "casklet-"+id+".service")
 	waitBackground(t, id, "failed")
 	assertBackgroundUnitStopped(t, id)
 	assertNetworkSnapshot(t, before)
@@ -348,15 +348,15 @@ func TestNetworkSupervisorRecovery(t *testing.T) {
 func TestNetworkRefusesHostConflicts(t *testing.T) {
 	require(t)
 	before := networkSnapshot(t)
-	networkCommand(t, "ip", "link", "add", "mdocker0", "type", "dummy")
-	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", "mdocker0").Run() })
+	networkCommand(t, "ip", "link", "add", "casklet0", "type", "dummy")
+	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", "casklet0").Run() })
 	code, _, stderr := start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/true").wait(t)
-	if code != 125 || !strings.Contains(stderr, "mdocker0") {
+	if code != 125 || !strings.Contains(stderr, "casklet0") {
 		t.Fatalf("bridge conflict: code=%d stderr=%q", code, stderr)
 	}
 	// Runtime rollback must leave this unrelated interface intact.
-	networkCommand(t, "ip", "link", "show", "mdocker0")
-	networkCommand(t, "ip", "link", "delete", "mdocker0")
+	networkCommand(t, "ip", "link", "show", "casklet0")
+	networkCommand(t, "ip", "link", "delete", "casklet0")
 	assertNetworkSnapshot(t, before)
 	name := fmt.Sprintf("mc%d", sequence.Add(1))
 	networkCommand(t, "ip", "link", "add", name, "type", "dummy")
@@ -374,11 +374,11 @@ func TestNetworkRefusesHostConflicts(t *testing.T) {
 func TestNetworkPreviousBootJournalPreservesHost(t *testing.T) {
 	require(t)
 	before := networkSnapshot(t)
-	shared := "/var/lib/mini-docker/runs/.network-shared.json"
+	shared := "/var/lib/casklet/runs/.network-shared.json"
 	if _, err := os.Lstat(shared); !os.IsNotExist(err) {
 		t.Fatalf("fixture requires no active bridge: %v", err)
 	}
-	path, err := os.MkdirTemp("/var/lib/mini-docker/runs", "run-oldboot-")
+	path, err := os.MkdirTemp("/var/lib/casklet/runs", "run-oldboot-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +392,10 @@ func TestNetworkPreviousBootJournalPreservesHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A later boot can have unrelated interfaces, tables, and forwarding settings.
-	networkCommand(t, "ip", "link", "add", "mdocker0", "type", "dummy")
-	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", "mdocker0").Run() })
+	networkCommand(t, "ip", "link", "add", "casklet0", "type", "dummy")
+	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", "casklet0").Run() })
 	sum := sha256.Sum256([]byte(filepath.Base(path)))
-	table := fmt.Sprintf("mdocker_%x", sum[:6])
+	table := fmt.Sprintf("casklet_%x", sum[:6])
 	networkCommand(t, "nft", "add", "table", "ip", table)
 	t.Cleanup(func() { _ = exec.Command("nft", "delete", "table", "ip", table).Run() })
 	forwarding := "/proc/sys/net/ipv4/ip_forward"
@@ -410,7 +410,7 @@ func TestNetworkPreviousBootJournalPreservesHost(t *testing.T) {
 	if err := network.Cleanup(path); err != nil {
 		t.Fatal(err)
 	}
-	networkCommand(t, "ip", "link", "show", "mdocker0")
+	networkCommand(t, "ip", "link", "show", "casklet0")
 	networkCommand(t, "nft", "list", "table", "ip", table)
 	value, err := os.ReadFile(forwarding)
 	if err != nil || strings.TrimSpace(string(value)) != "1" {
@@ -421,7 +421,7 @@ func TestNetworkPreviousBootJournalPreservesHost(t *testing.T) {
 			t.Fatalf("stale journal retained: %s %v", file, err)
 		}
 	}
-	networkCommand(t, "ip", "link", "delete", "mdocker0")
+	networkCommand(t, "ip", "link", "delete", "casklet0")
 	networkCommand(t, "nft", "delete", "table", "ip", table)
 	if err := os.WriteFile(forwarding, prior, 0600); err != nil {
 		t.Fatal(err)
@@ -467,7 +467,7 @@ func TestNetworkPartialSetupRetainsReservations(t *testing.T) {
 	if out, err := poison.CombinedOutput(); err != nil {
 		t.Fatalf("poison private namespace: %v %s", err, out)
 	}
-	path, err := os.MkdirTemp("/var/lib/mini-docker/runs", "run-partial-")
+	path, err := os.MkdirTemp("/var/lib/casklet/runs", "run-partial-")
 	if err != nil {
 		t.Fatal(err)
 	}

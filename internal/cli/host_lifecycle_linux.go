@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/remote"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/remote"
 )
 
 // ExecuteHostLifecycle is a private transport mode. The guest owns locking,
@@ -20,7 +20,7 @@ func ExecuteHostLifecycle(args []string, stdin, stdout, stderr *os.File) int {
 		err = fmt.Errorf("host lifecycle transport requires root and start or restart")
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {

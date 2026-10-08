@@ -5,7 +5,7 @@ package rootfs
 import (
 	"errors"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func ValidateMountSources(mounts []config.BindMount, root string) error {

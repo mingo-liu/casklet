@@ -82,11 +82,11 @@ func TestSeccompPolicy(t *testing.T) {
 }
 
 func TestSeccompThreadSynchronization(t *testing.T) {
-	if os.Getenv("MINI_DOCKER_TEST_SECCOMP") != "1" {
+	if os.Getenv("CASKLET_TEST_SECCOMP") != "1" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSeccompThreadSynchronization$")
-		cmd.Env = append(os.Environ(), "MINI_DOCKER_TEST_SECCOMP=1")
+		cmd.Env = append(os.Environ(), "CASKLET_TEST_SECCOMP=1")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("seccomp subprocess: %v: %s", err, out)
 		}

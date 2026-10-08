@@ -23,9 +23,9 @@ func socketPath(token string) (string, error) {
 	if !sessionToken.MatchString(token) {
 		return "", errors.New("invalid remote session token")
 	}
-	directory := "/run/mini-docker-remote"
+	directory := "/run/casklet-remote"
 	if os.Geteuid() != 0 {
-		directory = fmt.Sprintf("/run/user/%d/mini-docker-remote", os.Geteuid())
+		directory = fmt.Sprintf("/run/user/%d/casklet-remote", os.Geteuid())
 	}
 	if err := os.Mkdir(directory, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err

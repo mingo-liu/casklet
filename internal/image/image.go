@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
 var ErrNotFound = errors.New("image not found")
@@ -132,6 +132,6 @@ func (r contextReader) Read(p []byte) (int, error) {
 
 // IsStorePath rejects bypassing image leases through a raw rootfs path.
 func IsStorePath(path string) bool {
-	const root = "/var/lib/mini-docker/images"
+	const root = "/var/lib/casklet/images"
 	return path == root || strings.HasPrefix(path, root+"/")
 }

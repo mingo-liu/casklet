@@ -18,7 +18,7 @@ func TestContainerTransactionRecoveryPreservesMountedTrees(t *testing.T) {
 	// Establish the production store before creating a private interrupted
 	// transaction. Every CLI must preserve it until its mount is removed.
 	backgroundSuccess(t, "ps", "--all", "--json")
-	path := filepath.Join("/var/lib/mini-docker/containers", fmt.Sprintf(".remove-%032x", time.Now().UnixNano()))
+	path := filepath.Join("/var/lib/casklet/containers", fmt.Sprintf(".remove-%032x", time.Now().UnixNano()))
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}

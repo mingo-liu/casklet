@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // LaunchConfig contains the execution defaults covered by an OCI image identity.

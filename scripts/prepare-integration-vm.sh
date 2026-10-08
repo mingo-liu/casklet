@@ -2,7 +2,7 @@
 # Provision only a dedicated, disposable Ubuntu integration VM.
 set -eu
 fail() { printf 'prepare-integration-vm: %s\n' "$*" >&2; exit 1; }
-[ "${MINI_DOCKER_DEDICATED_VM:-}" = 1 ] || fail 'set MINI_DOCKER_DEDICATED_VM=1 only in a dedicated disposable VM'
+[ "${CASKLET_DEDICATED_VM:-}" = 1 ] || fail 'set CASKLET_DEDICATED_VM=1 only in a dedicated disposable VM'
 [ "$(uname -s)" = Linux ] || fail 'Linux is required'
 [ -d /run/systemd/system ] || fail 'a running systemd system instance is required'
 [ "$(id -u)" -ne 0 ] || fail 'run as the unprivileged test user with passwordless sudo'
@@ -12,20 +12,20 @@ project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y busybox-static binutils make iproute2 iptables nftables util-linux conntrack apparmor-utils
 # Hosted runners may have Docker's FORWARD policy set to DROP. An accept in
-# mini-docker's nftables table cannot override a drop in another base chain.
+# casklet's nftables table cannot override a drop in another base chain.
 # Permit only the test bridge in the existing IPv4 forwarding chain, preserving
 # the host policy and unrelated rules. Repeated provisioning is idempotent.
 for direction in -i -o; do
-    sudo iptables -w -C FORWARD "$direction" mdocker0 -j ACCEPT 2>/dev/null ||
-        sudo iptables -w -I FORWARD 1 "$direction" mdocker0 -j ACCEPT
+    sudo iptables -w -C FORWARD "$direction" casklet0 -j ACCEPT 2>/dev/null ||
+        sudo iptables -w -I FORWARD 1 "$direction" casklet0 -j ACCEPT
 done
 sudo iptables -S FORWARD
-sudo install -m 0644 "$project/dev/apparmor/mini-docker" /etc/apparmor.d/mini-docker
-sudo apparmor_parser -r /etc/apparmor.d/mini-docker
+sudo install -m 0644 "$project/dev/apparmor/casklet" /etc/apparmor.d/casklet
+sudo apparmor_parser -r /etc/apparmor.d/casklet
 # Rootless tests need a live user manager with all workload controllers.
 user_unit="user@$(id -u).service"
 sudo install -d -m 0755 "/run/systemd/system/$user_unit.d"
-printf '[Service]\nDelegate=cpu memory pids\n' | sudo tee "/run/systemd/system/$user_unit.d/mini-docker.conf" >/dev/null
+printf '[Service]\nDelegate=cpu memory pids\n' | sudo tee "/run/systemd/system/$user_unit.d/casklet.conf" >/dev/null
 sudo systemctl daemon-reload
 sudo loginctl enable-linger "$(id -un)"
 sudo systemctl restart "$user_unit"

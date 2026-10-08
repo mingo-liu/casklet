@@ -10,13 +10,13 @@ import (
 func TestMachineRepairsCorruptExecutableEngine(t *testing.T) {
 	success(t, "doctor")
 	id := detached(t, "--", "/bin/sleep", "300")
-	const engine = "/usr/local/bin/mdocker"
-	backup, err := guestRootCommand(t, "mktemp", "/usr/local/bin/.mdocker-integrity-test-XXXXXXXX")
+	const engine = "/usr/local/bin/casklet"
+	backup, err := guestRootCommand(t, "mktemp", "/usr/local/bin/.casklet-integrity-test-XXXXXXXX")
 	if err != nil {
 		t.Fatal(err)
 	}
 	backup = strings.TrimSpace(backup)
-	if !strings.HasPrefix(backup, "/usr/local/bin/.mdocker-integrity-test-") {
+	if !strings.HasPrefix(backup, "/usr/local/bin/.casklet-integrity-test-") {
 		t.Fatalf("unexpected backup path: %q", backup)
 	}
 	t.Cleanup(func() {

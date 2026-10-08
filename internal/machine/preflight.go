@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
 // visitHostResources skips option values and never reads workload arguments.
@@ -67,7 +67,7 @@ func localPreflight(args []string) error {
 			}
 			root, err := rootfs.Validate(value)
 			if err != nil {
-				return fmt.Errorf("rootfs template %s: %w; export a valid template to a new directory with mdocker rootfs DIRECTORY", value, err)
+				return fmt.Errorf("rootfs template %s: %w; export a valid template to a new directory with casklet rootfs DIRECTORY", value, err)
 			}
 			canonicalRoot = root
 		case "mount":

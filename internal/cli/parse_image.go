@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func parseImage(r Request, args []string) (Request, error) {
@@ -15,7 +15,7 @@ func parseImage(r Request, args []string) (Request, error) {
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
-			return r, errors.New("image help takes no arguments; use mdocker help image COMMAND for a subcommand")
+			return r, errors.New("image help takes no arguments; use casklet help image COMMAND for a subcommand")
 		}
 		return Request{Action: "help", HelpTopic: "image"}, nil
 	}

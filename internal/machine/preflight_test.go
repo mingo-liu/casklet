@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func TestLocalPreflightFailsBeforeLima(t *testing.T) {
@@ -128,7 +128,7 @@ func TestUnsharedPathsDoNotStartOrCreateMachine(t *testing.T) {
 			stub := filepath.Join(t.TempDir(), "limactl")
 			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\n"
 			if existing {
-				script += "printf '%s\\n' '{\"name\":\"mini-docker-runtime\",\"status\":\"Stopped\",\"config\":{\"mounts\":[]}}'\n"
+				script += "printf '%s\\n' '{\"name\":\"casklet-runtime\",\"status\":\"Stopped\",\"config\":{\"mounts\":[]}}'\n"
 			}
 			if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 				t.Fatal(err)

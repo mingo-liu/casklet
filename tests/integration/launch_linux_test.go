@@ -39,7 +39,7 @@ func TestLaunchAutomaticScope(t *testing.T) {
 			args = append(args, "--")
 			args = append(args, test.command...)
 			cmd := exec.CommandContext(ctx, binary, args...)
-			cmd.Env = append(os.Environ(), "MINI_DOCKER_SCOPE_LAUNCHED=")
+			cmd.Env = append(os.Environ(), "CASKLET_SCOPE_LAUNCHED=")
 			cmd.Stdin = strings.NewReader(test.input)
 			var stdout, stderr strings.Builder
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -72,7 +72,7 @@ func TestLaunchAutomaticScope(t *testing.T) {
 
 func TestLaunchScopeFailureDoesNotRecurse(t *testing.T) {
 	require(t)
-	t.Setenv("MINI_DOCKER_SCOPE_LAUNCHED", "1")
+	t.Setenv("CASKLET_SCOPE_LAUNCHED", "1")
 	code, out, stderr := backgroundCLI(t, "doctor", "--rootfs", template)
 	if code != 125 || out != "" || !strings.Contains(stderr, "automatic cgroup delegation failed:") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)

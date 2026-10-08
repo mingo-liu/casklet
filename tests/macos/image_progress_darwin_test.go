@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/image"
 	"golang.org/x/sys/unix"
 )
 
@@ -31,7 +31,7 @@ func progressRegistry(t *testing.T) []string {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build registry helper: %v %s", err, output)
 	}
-	cmd := exec.CommandContext(ctx, "limactl", "shell", "mini-docker-runtime", "sudo", "-n", "--", binary)
+	cmd := exec.CommandContext(ctx, "limactl", "shell", "casklet-runtime", "sudo", "-n", "--", binary)
 	output, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func progressRegistry(t *testing.T) []string {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = exec.CommandContext(ctx, "limactl", "shell", "mini-docker-runtime", "sudo", "-n", "--", "kill", strconv.Itoa(fixture.PID)).Run()
+		_ = exec.CommandContext(ctx, "limactl", "shell", "casklet-runtime", "sudo", "-n", "--", "kill", strconv.Itoa(fixture.PID)).Run()
 	})
 	return fixture.References
 }

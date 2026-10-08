@@ -2,13 +2,13 @@
 
 ## Project Structure & Module Organization
 
-`cmd/mini-docker/` contains the macOS client and internal Linux engine entry point. `internal/machine` owns the product VM, embedded engine installation, host paths, and SSH transport; `internal/remote` owns guest signal sessions. `internal/cli` owns parsing and presentation; `internal/container` owns durable lifecycle management; `internal/runtime` owns process supervision and isolation. `internal/template` resolves rootfs/image sources and owns image leases, while `internal/rootfs`, `internal/image`, `internal/cgroup`, `internal/network`, and `internal/ipc` provide resource operations. See `ARCHITECTURE.md` for module boundaries and ownership. Unit tests live beside their packages; macOS end-to-end tests live in `tests/macos/`, and privileged Linux engine tests and bounded helpers live in `tests/integration/`. Development scripts are in `scripts/`, and the separate plain development VM configuration is in `dev/`.
+`cmd/casklet/` contains the macOS client and internal Linux engine entry point. `internal/machine` owns the product VM, embedded engine installation, host paths, and SSH transport; `internal/remote` owns guest signal sessions. `internal/cli` owns parsing and presentation; `internal/container` owns durable lifecycle management; `internal/runtime` owns process supervision and isolation. `internal/template` resolves rootfs/image sources and owns image leases, while `internal/rootfs`, `internal/image`, `internal/cgroup`, `internal/network`, and `internal/ipc` provide resource operations. See `ARCHITECTURE.md` for module boundaries and ownership. Unit tests live beside their packages; macOS end-to-end tests live in `tests/macos/`, and privileged Linux engine tests and bounded helpers live in `tests/integration/`. Development scripts are in `scripts/`, and the separate plain development VM configuration is in `dev/`.
 
 `README.md` is the quick start; maintained usage and development documentation lives in `guides/`. `docs/` contains local design notes and is excluded from Git. Do not force-add its contents. Keep generated `bin/`, `rootfs/`, and runtime state untracked.
 
 ## Build, Test, and Development Commands
 
-The public product supports macOS only. Use `make build` to compile the Darwin client with its native-architecture Linux engine embedded, `make rootfs` to export a BusyBox template, and `make test` / `make vet` for unit tests and static checks. Run `make test-macos` for the real client/VM path. Use `make engine` and `make test-integration` inside the dedicated Linux development VM to verify the internal engine. Install the client with `sudo make install`, then run `mdocker` as the regular Mac user without sudo. It automatically manages the product VM and obtains any required privileges inside that VM. `scripts/run-linux.sh` is an internal engine compatibility entry point. See `README.md` for setup and examples.
+The public product supports macOS only. Use `make build` to compile the Darwin client with its native-architecture Linux engine embedded, `make rootfs` to export a BusyBox template, and `make test` / `make vet` for unit tests and static checks. Run `make test-macos` for the real client/VM path. Use `make engine` and `make test-integration` inside the dedicated Linux development VM to verify the internal engine. Install the client with `sudo make install`, then run `casklet` as the regular Mac user without sudo. It automatically manages the product VM and obtains any required privileges inside that VM. `scripts/run-linux.sh` is an internal engine compatibility entry point. See `README.md` for setup and examples.
 
 ## Coding Style & Naming Conventions
 
@@ -62,7 +62,7 @@ Use Conventional Commits for this project. These rules are adapted from [vela's 
 ### Examples
 
 ```text
-docs: describe the mini-docker runtime architecture
+docs: describe the casklet runtime architecture
 feat(runtime): add PID and mount namespace isolation
 fix(rootfs): clean up temporary files after startup failure
 test(cgroup): verify memory and process limits
@@ -77,7 +77,7 @@ feat(cli)!: require a separator before the container command
 
 Separate runtime options from command arguments to remove parsing ambiguity.
 
-BREAKING CHANGE: Add -- before the command passed to mini-docker run.
+BREAKING CHANGE: Add -- before the command passed to casklet run.
 ```
 
 ### Pull Requests

@@ -4,7 +4,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/mingo-liu/mini-docker/internal/machine"
+	"github.com/mingo-liu/casklet/internal/machine"
 	"os"
 )
 
@@ -13,7 +13,7 @@ func remoteMode(args []string) (bool, int) {
 		return false, 0
 	}
 	if err := machine.Watchdog(args[1], args[2], args[3]); err != nil {
-		fmt.Fprintf(os.Stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(os.Stderr, "casklet: %v\n", err)
 		return true, 125
 	}
 	return true, 0

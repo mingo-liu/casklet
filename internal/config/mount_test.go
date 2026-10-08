@@ -39,7 +39,7 @@ func TestValidateMountPaths(t *testing.T) {
 			}
 		}
 	}
-	for _, source := range []string{"/proc", "/proc/1/root", "/sys", "/dev", "/var", "/var/lib", "/var/lib/mini-docker/runs", "/template", "/template/data"} {
+	for _, source := range []string{"/proc", "/proc/1/root", "/sys", "/dev", "/var", "/var/lib", "/var/lib/casklet/runs", "/template", "/template/data"} {
 		if err := ValidateMounts([]BindMount{{Source: source, Target: "/data"}}, "/template"); err == nil {
 			t.Errorf("accepted source %q", source)
 		}
@@ -78,7 +78,7 @@ func TestMountTargetOverlapAndLimits(t *testing.T) {
 }
 
 func TestMountRejectsMappedRuntimeStorage(t *testing.T) {
-	for _, source := range []string{"/tmp", "/tmp/mini-docker-userns", "/tmp/mini-docker-userns/run-a/rootfs"} {
+	for _, source := range []string{"/tmp", "/tmp/casklet-userns", "/tmp/casklet-userns/run-a/rootfs"} {
 		if err := ValidateMounts([]BindMount{{Source: source, Target: "/data"}}, ""); err == nil {
 			t.Fatalf("accepted mapped runtime storage %s", source)
 		}

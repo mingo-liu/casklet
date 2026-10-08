@@ -107,7 +107,7 @@ func TestPortPreflightDetectsTCPAndUDPConflicts(t *testing.T) {
 
 func TestMachineDiscoveryDoesNotAdoptDevelopmentVM(t *testing.T) {
 	stub := filepath.Join(t.TempDir(), "limactl")
-	script := "#!/bin/sh\nprintf '%s\\n' '{\"name\":\"mini-docker\",\"status\":\"Running\"}'\n"
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"name\":\"casklet\",\"status\":\"Running\"}'\n"
 	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestMachineDiscoveryDoesNotAdoptDevelopmentVM(t *testing.T) {
 	if err != nil || instance != nil {
 		t.Fatalf("adopted development VM: %+v, %v", instance, err)
 	}
-	script += "printf '%s\\n' '{\"name\":\"mini-docker-runtime\",\"status\":\"Stopped\"}'\n"
+	script += "printf '%s\\n' '{\"name\":\"casklet-runtime\",\"status\":\"Stopped\"}'\n"
 	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestInstallationCheckRequiresMatchingEngineAndMarker(t *testing.T) {
 			if err := os.MkdirAll(directory, 0755); err != nil {
 				t.Fatal(err)
 			}
-			engine := filepath.Join(directory, "mdocker")
+			engine := filepath.Join(directory, "casklet")
 			marker := filepath.Join(directory, "engine.sha256")
 			if err := os.WriteFile(engine, []byte("payload"), 0755); err != nil {
 				t.Fatal(err)

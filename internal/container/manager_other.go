@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func Start(context.Context, config.Config, string) (Record, error) {
@@ -23,7 +23,7 @@ func Exec(context.Context, string, config.Exec, *os.File, *os.File, *os.File, <-
 	return 125, errUnsupportedStore
 }
 func Supervisor(string, ...uint64) int {
-	fmt.Fprintln(os.Stderr, "mini-docker:", errUnsupportedStore)
+	fmt.Fprintln(os.Stderr, "casklet:", errUnsupportedStore)
 	return 125
 }
 

@@ -19,7 +19,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 

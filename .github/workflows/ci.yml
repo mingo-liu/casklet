@@ -65,7 +65,7 @@ jobs:
           go-version-file: go.mod
       - name: Prepare disposable integration VM
         env:
-          MINI_DOCKER_DEDICATED_VM: "1"
+          CASKLET_DEDICATED_VM: "1"
         run: ./scripts/prepare-integration-vm.sh
       - name: Prepare template and run privileged Linux suite
         run: make rootfs test-integration

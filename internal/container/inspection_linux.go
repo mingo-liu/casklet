@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // Snapshot reads state and configuration under one lock, so removal cannot split them.

@@ -2,7 +2,7 @@
 
 [Quick start](README.md) · [Usage](guides/usage.md) · [Development](guides/development.md)
 
-mini-docker is a macOS host application with an embedded Linux guest engine.
+casklet is a macOS host application with an embedded Linux guest engine.
 It separates VM management and host transport from command handling, durable
 container management, runtime supervision, and Linux resource adapters. The public CLI and versioned container
 records remain stable while these internal responsibilities evolve.
@@ -25,7 +25,7 @@ flowchart LR
 ```
 
 `machine` serializes creation, startup, and engine installation using a host
-file lock. It owns the `mini-docker-runtime` instance configuration and embeds
+file lock. It owns the `casklet-runtime` instance configuration and embeds
 the engine plus the rootfs preparation helper. The payload hash determines
 whether an engine update is needed. Installation atomically replaces the guest
 executable and preserves the Linux container/image stores. The writable Mac
@@ -70,7 +70,7 @@ the stopped generation intact. An already running `start` needs no check.
 
 ```mermaid
 flowchart TD
-    main[cmd/mini-docker] --> cli[cli: parse, launch, dispatch, output]
+    main[cmd/casklet] --> cli[cli: parse, launch, dispatch, output]
     main --> container[container: lifecycle and durable state]
     main --> runtime[runtime: supervisor and namespace children]
     cli --> container
@@ -94,7 +94,7 @@ while managed exec uses runtime resources and IPC.
 
 | Package | Owns | Keep out |
 | --- | --- | --- |
-| `cmd/mini-docker` | Process entry and private re-exec modes | Parsing and lifecycle policy |
+| `cmd/casklet` | Process entry and private re-exec modes | Parsing and lifecycle policy |
 | `cli` | Flags, privilege/delegation launch, signal contexts, presentation | Persistent state and Linux isolation |
 | `config` | Serializable execution values and validation | CLI output and resource allocation |
 | `container` | Records, generations, operation locks, systemd services, logs, inspection | Namespace setup and workload execution |

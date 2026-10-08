@@ -33,7 +33,7 @@ func TestConfigureDNSConfinesWrites(t *testing.T) {
 				case "directory":
 					err = os.Mkdir(resolver, 0755)
 				case "stale-stage":
-					err = os.Symlink(secret, filepath.Join(root, "etc/.mini-docker-resolv"))
+					err = os.Symlink(secret, filepath.Join(root, "etc/.casklet-resolv"))
 				default:
 					err = os.WriteFile(resolver, []byte("old"), 0644)
 				}

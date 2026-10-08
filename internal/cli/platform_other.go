@@ -10,7 +10,7 @@ import (
 func platformArguments(args []string) []string { return args }
 func platformUsage(topic string) (string, error) {
 	if hostHelpTopic(topic) {
-		return "", fmt.Errorf("help topic %q is available only on macOS; run mdocker help for supported commands", topic)
+		return "", fmt.Errorf("help topic %q is available only on macOS; run casklet help for supported commands", topic)
 	}
 	return scopedUsage(topic, false)
 }

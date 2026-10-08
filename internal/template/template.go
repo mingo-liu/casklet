@@ -8,13 +8,13 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/image"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/image"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
 // BuiltinPath is the managed BusyBox source on the product VM's Linux disk.
-const BuiltinPath = "/var/lib/mini-docker/templates/busybox"
+const BuiltinPath = "/var/lib/casklet/templates/busybox"
 
 // Template is a validated, canonical rootfs source. Keep it open until copying
 // or publishing a durable image reference completes. Directory sources must

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 func TestParseCommandBoundaries(t *testing.T) {
@@ -17,7 +17,7 @@ func TestParseCommandBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Config.Memory != 128<<20 || r.Config.PidsLimit != 64 || r.Config.Timeout != 2*time.Second {
+	if r.Config.Hostname != "casklet" || r.Config.Memory != 128<<20 || r.Config.PidsLimit != 64 || r.Config.Timeout != 2*time.Second {
 		t.Fatalf("unexpected defaults: %+v", r.Config)
 	}
 	want := []string{"/bin/sh", "-c", "echo '$HOME'; exit 7"}

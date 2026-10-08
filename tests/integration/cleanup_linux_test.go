@@ -22,7 +22,7 @@ func testCleanupFailureRetainsExitStatus(t *testing.T, exitCode int) {
 	name := backgroundName(t)
 	id := startBackground(t, name, nil, "/bin/sh", "-c", fmt.Sprintf("while [ ! -f /finish ]; do sleep 0.1; done; exit %d", exitCode))
 	record := waitBackground(t, id, "running")
-	if !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") || filepath.Base(filepath.Dir(record.Cgroup)) != "mini-docker-"+id+".service" {
+	if !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") || filepath.Base(filepath.Dir(record.Cgroup)) != "casklet-"+id+".service" {
 		t.Fatalf("unexpected workload identity: %q", record.Cgroup)
 	}
 	// An empty, unrecognized child must prevent recursive cgroup deletion.

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const commandOverview = `Usage: mdocker COMMAND [OPTIONS]
+const commandOverview = `Usage: casklet COMMAND [OPTIONS]
 
 Commands:
   run       Run a command in a new container
@@ -35,7 +35,7 @@ const runOptions = `Options:
   --progress     Image progress: auto, plain, or tty (default: auto)
   --entrypoint   Replace the image entrypoint; empty clears it and its default Cmd
   --hostname     Container hostname: 1-63 alphanumeric/hyphen characters,
-                 start and end alphanumeric (default: mini)
+                 start and end alphanumeric (default: casklet)
   --memory       Positive bytes or binary k/m/g units (default: 128m)
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
@@ -76,7 +76,7 @@ Notes:
 `
 
 var commandHelp = map[string]string{
-	"exec": `Usage: mdocker exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
+	"exec": `Usage: casklet exec [OPTIONS] ID|NAME -- COMMAND [ARGS...]
 
 Options:
   -i, --interactive  Forward stdin (default: no input)
@@ -92,10 +92,10 @@ Notes:
   Terminal output merges stdout and stderr; -it requires a terminal on stdin.
 
 Examples:
-  mdocker exec worker -- /bin/echo hello
-  mdocker exec -it worker -- /bin/sh
+  casklet exec worker -- /bin/echo hello
+  casklet exec -it worker -- /bin/sh
 `,
-	"ps": `Usage: mdocker ps [-a|--all] [--json]
+	"ps": `Usage: casklet ps [-a|--all] [--json]
 
 Options:
   -a, --all  Include completed containers (default: active containers only)
@@ -105,10 +105,10 @@ Notes:
   Container operations accept a full ID or exact name from this list.
 
 Examples:
-  mdocker ps
-  mdocker ps -a --json
+  casklet ps
+  casklet ps -a --json
 `,
-	"inspect": `Usage: mdocker inspect ID|NAME
+	"inspect": `Usage: casklet inspect ID|NAME
 
 Options:
   -h, --help  Show this help
@@ -118,10 +118,10 @@ Notes:
   Environment names are shown without values.
 
 Examples:
-  mdocker inspect worker
-  mdocker ps -a
+  casklet inspect worker
+  casklet ps -a
 `,
-	"stats": `Usage: mdocker stats [--json] [--interval DURATION] ID|NAME
+	"stats": `Usage: casklet stats [--json] [--interval DURATION] ID|NAME
 
 Options:
   --json      Print JSON statistics
@@ -132,10 +132,10 @@ Notes:
   Missing live metrics appear as N/A (JSON null).
 
 Examples:
-  mdocker stats worker
-  mdocker stats --json --interval 250ms worker
+  casklet stats worker
+  casklet stats --json --interval 250ms worker
 `,
-	"logs": `Usage: mdocker logs [--tail N] [-f|--follow] ID|NAME
+	"logs": `Usage: casklet logs [--tail N] [-f|--follow] ID|NAME
 
 Options:
   --tail        Print the last 0-1000000 lines (default: entire retained log)
@@ -146,10 +146,10 @@ Notes:
   Retention defaults to 16 MiB; configure it at run time with --log-max-*.
 
 Examples:
-  mdocker logs --tail 20 worker
-  mdocker logs -f worker
+  casklet logs --tail 20 worker
+  casklet logs -f worker
 `,
-	"stop": `Usage: mdocker stop [--timeout DURATION] ID|NAME
+	"stop": `Usage: casklet stop [--timeout DURATION] ID|NAME
 
 Options:
   --timeout  Override graceful shutdown, 0s-1m (default: container configuration)
@@ -159,10 +159,10 @@ Notes:
   Keeps the container's files and record for start, inspect, or rm.
 
 Examples:
-  mdocker stop worker
-  mdocker stop --timeout 10s worker
+  casklet stop worker
+  casklet stop --timeout 10s worker
 `,
-	"wait": `Usage: mdocker wait ID|NAME
+	"wait": `Usage: casklet wait ID|NAME
 
 Options:
   -h, --help  Show this help
@@ -171,10 +171,10 @@ Notes:
   Waits for the observed execution to finish, prints its exit code, and returns it.
 
 Examples:
-  mdocker wait worker
-  mdocker inspect worker
+  casklet wait worker
+  casklet inspect worker
 `,
-	"start": `Usage: mdocker start ID|NAME
+	"start": `Usage: casklet start ID|NAME
 
 Options:
   -h, --help  Show this help
@@ -184,10 +184,10 @@ Notes:
   Writes made by earlier executions are preserved; output uses retained logs.
 
 Examples:
-  mdocker start worker
-  mdocker logs -f worker
+  casklet start worker
+  casklet logs -f worker
 `,
-	"restart": `Usage: mdocker restart [--timeout DURATION] ID|NAME
+	"restart": `Usage: casklet restart [--timeout DURATION] ID|NAME
 
 Options:
   --timeout  Override graceful shutdown, 0s-1m (default: container configuration)
@@ -197,10 +197,10 @@ Notes:
   Retained filesystem changes are preserved; an exited container can be restarted.
 
 Examples:
-  mdocker restart worker
-  mdocker restart --timeout 10s worker
+  casklet restart worker
+  casklet restart --timeout 10s worker
 `,
-	"rm": `Usage: mdocker rm ID|NAME
+	"rm": `Usage: casklet rm ID|NAME
 
 Options:
   -h, --help  Show this help
@@ -210,10 +210,10 @@ Notes:
   Stop a running container before removal.
 
 Examples:
-  mdocker stop worker
-  mdocker rm worker
+  casklet stop worker
+  casklet rm worker
 `,
-	"image": `Usage: mdocker image COMMAND
+	"image": `Usage: casklet image COMMAND
 
 Commands:
   pull REFERENCE    Download or refresh a native Linux OCI/Docker image
@@ -224,14 +224,14 @@ Commands:
 Notes:
   run --image uses cached names or IDs; an uncached name is pulled automatically.
   image pull explicitly refreshes a mutable tag. Public registries are supported.
-  Run mdocker image COMMAND --help for the command's options and examples.
+  Run casklet image COMMAND --help for the command's options and examples.
 
 Examples:
-  mdocker image pull redis:8
-  mdocker image import ./rootfs/busybox
-  mdocker image ls
+  casklet image pull redis:8
+  casklet image import ./rootfs/busybox
+  casklet image ls
 `,
-	"image pull": `Usage: mdocker image pull [--progress auto|plain|tty] REFERENCE
+	"image pull": `Usage: casklet image pull [--progress auto|plain|tty] REFERENCE
 
 Options:
   --progress  Progress display: auto, plain, or tty (default: auto)
@@ -246,10 +246,10 @@ Notes:
   they differ from registry manifest digests. No Docker Engine is required.
 
 Examples:
-  mdocker image pull redis:8
-  mdocker run -d --name redis --image redis:8
+  casklet image pull redis:8
+  casklet run -d --name redis --image redis:8
 `,
-	"image import": `Usage: mdocker image import DIRECTORY
+	"image import": `Usage: casklet image import DIRECTORY
 
 Options:
   -h, --help  Show this help
@@ -260,10 +260,10 @@ Notes:
   Prints a full sha256: ID; later source changes do not modify the image.
 
 Examples:
-  mdocker image import ./rootfs/busybox
-  mdocker image ls --json
+  casklet image import ./rootfs/busybox
+  casklet image ls --json
 `,
-	"image ls": `Usage: mdocker image ls [--json]
+	"image ls": `Usage: casklet image ls [--json]
 
 Options:
   --json  Print JSON image records
@@ -272,10 +272,10 @@ Notes:
   Lists cached images and registry references. Use names or full IDs with run --image.
 
 Examples:
-  mdocker image ls
-  mdocker image ls --json
+  casklet image ls
+  casklet image ls --json
 `,
-	"image rm": `Usage: mdocker image rm ID
+	"image rm": `Usage: casklet image rm ID
 
 Options:
   -h, --help  Show this help
@@ -285,18 +285,18 @@ Notes:
   cannot be removed; remove referencing containers first.
 
 Examples:
-  mdocker image ls
-  mdocker image rm sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  casklet image ls
+  casklet image rm sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 `,
-	"help": `Usage: mdocker help [COMMAND [SUBCOMMAND]]
+	"help": `Usage: casklet help [COMMAND [SUBCOMMAND]]
 
 Notes:
   With no topic, lists commands. COMMAND --help and help COMMAND are equivalent.
   Help does not initialize the VM or require runtime privileges.
 
 Examples:
-  mdocker help run
-  mdocker help image import
+  casklet help run
+  casklet help image import
 `,
 }
 
@@ -325,18 +325,18 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 		if macOS {
 			text += "  machine   Manage the product VM and shared directories\n  rootfs    Export the built-in BusyBox template to a Mac directory\n"
 		}
-		return text + "\nRun mdocker COMMAND --help or mdocker help COMMAND for syntax and examples.\n", nil
+		return text + "\nRun casklet COMMAND --help or casklet help COMMAND for syntax and examples.\n", nil
 	}
 	if topic == "run" {
-		syntax := "mdocker run (--rootfs DIRECTORY | --image REFERENCE) [OPTIONS] [-- COMMAND [ARGS...]]"
+		syntax := "casklet run (--rootfs DIRECTORY | --image REFERENCE) [OPTIONS] [-- COMMAND [ARGS...]]"
 		platformNotes := `  Containers require Linux and a delegated cgroups v2 scope.
   Other than rootless mode, the engine uses sudo and creates a delegated scope.
 `
-		examples := `  mdocker run --rootfs ./rootfs/busybox -- /bin/echo hello
-  mdocker run -d --name worker --rootfs ./rootfs/busybox -- /bin/sleep 300
+		examples := `  casklet run --rootfs ./rootfs/busybox -- /bin/echo hello
+  casklet run -d --name worker --rootfs ./rootfs/busybox -- /bin/sleep 300
 `
 		if macOS {
-			syntax = "mdocker run [--rootfs DIRECTORY | --image REFERENCE] [OPTIONS] [-- COMMAND [ARGS...]]"
+			syntax = "casklet run [--rootfs DIRECTORY | --image REFERENCE] [OPTIONS] [-- COMMAND [ARGS...]]"
 			platformNotes = `  The default is builtin:busybox; explicit rootfs and bind sources are Mac paths.
   Run as your regular Mac user; requires macOS 13.5+ and Lima 2.0+.
   Install Lima with brew install lima. The client creates or starts its VM as needed.
@@ -344,22 +344,22 @@ func scopedUsage(topic string, macOS bool) (string, error) {
   Published ports support 0.0.0.0 and 127.0.0.1 on the Mac; port 22 is reserved.
   Rootless identities refer to the VM user; container state lives on the VM disk.
 `
-			examples = `  mdocker run -- /bin/echo hello
-  mdocker run -d --name worker -- /bin/sleep 300
-  mdocker run -it -- /bin/sh
-  mdocker run -d --name redis --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+			examples = `  casklet run -- /bin/echo hello
+  casklet run -d --name worker -- /bin/sleep 300
+  casklet run -it -- /bin/sh
+  casklet run -d --name redis --network bridge -p 127.0.0.1:6379:6379 --image redis:8
 `
 		}
 		return "Usage: " + syntax + "\n\n" + runOptions + platformNotes + "\nExamples:\n" + examples, nil
 	}
 	if topic == "doctor" {
-		syntax := "mdocker doctor --rootfs DIRECTORY"
+		syntax := "casklet doctor --rootfs DIRECTORY"
 		notes := "  Checks the template, Linux isolation capabilities, and delegated cgroups v2.\n  The engine uses sudo and obtains a delegated scope when needed.\n"
-		examples := "  mdocker doctor --rootfs ./rootfs/busybox\n"
+		examples := "  casklet doctor --rootfs ./rootfs/busybox\n"
 		if macOS {
-			syntax = "mdocker doctor [--rootfs DIRECTORY]"
+			syntax = "casklet doctor [--rootfs DIRECTORY]"
 			notes = "  Uses builtin:busybox by default. Explicit rootfs paths refer to Mac directories.\n  Creates or starts the product VM and checks runtime capabilities inside it.\n  Run as your regular Mac user; install Lima with brew install lima.\n"
-			examples = "  mdocker doctor\n  mdocker doctor --rootfs ./rootfs/busybox\n"
+			examples = "  casklet doctor\n  casklet doctor --rootfs ./rootfs/busybox\n"
 		}
 		return "Usage: " + syntax + "\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n\nNotes:\n" + notes + "\nExamples:\n" + examples, nil
 	}
@@ -374,5 +374,5 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 		}
 		return text, nil
 	}
-	return "", fmt.Errorf("unknown help topic %q; run mdocker help for available commands", topic)
+	return "", fmt.Errorf("unknown help topic %q; run casklet help for available commands", topic)
 }

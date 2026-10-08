@@ -41,7 +41,7 @@ done
 printf 'root:x:0:0:root:/:/bin/sh\n' > "$staging/etc/passwd"
 printf 'root:x:0:\n' > "$staging/etc/group"
 checksum=$(sha256sum "$staging/bin/busybox" | cut -d ' ' -f 1)
-cat > "$staging/.mini-docker-rootfs.json" <<METADATA
+cat > "$staging/.casklet-rootfs.json" <<METADATA
 {
   "architecture": "$architecture",
   "source": "installed Debian/Ubuntu package",
@@ -50,7 +50,7 @@ cat > "$staging/.mini-docker-rootfs.json" <<METADATA
   "sha256": "$checksum",
   "applets":
 METADATA
-printf '%s\n' "$applets" | awk 'BEGIN { printf "[" } $0 != "" && $0 != "busybox" { printf "%s\"%s\"", separator, $0; separator=", " } END { print "]\n}" }' >> "$staging/.mini-docker-rootfs.json"
+printf '%s\n' "$applets" | awk 'BEGIN { printf "[" } $0 != "" && $0 != "busybox" { printf "%s\"%s\"", separator, $0; separator=", " } END { print "]\n}" }' >> "$staging/.casklet-rootfs.json"
 # Commands using a numeric non-root identity must be able to traverse the root.
 chmod 0755 "$staging"
 mv "$staging" "$rootfs"

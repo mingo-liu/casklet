@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func executeImage(ctx context.Context, r Request, stdout io.Writer) (int, error) {

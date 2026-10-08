@@ -2,6 +2,6 @@ abi <abi/4.0>,
 
 # Permit user namespace creation on hosts that restrict unprivileged userns.
 # The kernel's UID/GID mapping and capability checks still apply.
-profile mini-docker-rootless /usr/local/bin/mdocker flags=(unconfined,attach_disconnected) {
+profile casklet-rootless /usr/local/bin/casklet flags=(unconfined,attach_disconnected) {
   userns,
 }

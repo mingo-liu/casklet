@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/image"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/image"
+	"github.com/mingo-liu/casklet/internal/rootfs"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
 	"golang.org/x/sys/unix"
 )
 

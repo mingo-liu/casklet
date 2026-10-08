@@ -51,7 +51,7 @@ exit %d`, status)
 				t.Fatal(err)
 			}
 			relative, ok := strings.CutPrefix(strings.TrimSpace(membership), "0::/")
-			if !ok || strings.Contains(relative, "..") || !strings.Contains(relative, "mini-docker-"+id+".service/") || !strings.HasPrefix(filepath.Base(relative), "exec-") {
+			if !ok || strings.Contains(relative, "..") || !strings.Contains(relative, "casklet-"+id+".service/") || !strings.HasPrefix(filepath.Base(relative), "exec-") {
 				t.Fatalf("unexpected exec cgroup: %q", membership)
 			}
 			if marker, err := reader.ReadString('\n'); err != nil || marker != "cleanup-ready\n" {

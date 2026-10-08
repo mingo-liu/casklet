@@ -54,7 +54,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 					}
 					continue
 				}
-				if code != 0 || diagnostic != "" || !strings.HasPrefix(out, "Usage: mdocker "+parts[0]) || !strings.Contains(out, "Examples:") {
+				if code != 0 || diagnostic != "" || !strings.HasPrefix(out, "Usage: casklet "+parts[0]) || !strings.Contains(out, "Examples:") {
 					t.Fatalf("scoped help: %d %q %q", code, out, diagnostic)
 				}
 				namedOut, namedDiagnostic, namedCode := helpExecution(t, named)
@@ -72,7 +72,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 	for _, macOS := range []bool{false, true} {
 		text, err := scopedUsage("", macOS)
-		if err != nil || strings.Count(text, "\n") > 28 || strings.Contains(text, "--uid-map") || !strings.Contains(text, "COMMAND --help") {
+		if err != nil || !strings.HasPrefix(text, "Usage: casklet COMMAND") || strings.Count(text, "\n") > 28 || strings.Contains(text, "--uid-map") || !strings.Contains(text, "COMMAND --help") {
 			t.Fatalf("verbose or incomplete overview: %q %v", text, err)
 		}
 		ps, err := scopedUsage("ps", macOS)
@@ -85,13 +85,13 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 				t.Errorf("run help missing %q: %q %v", detail, run, err)
 			}
 		}
-		if macOS && (!strings.Contains(run, "builtin:busybox") || !strings.Contains(run, "mdocker run -it -- /bin/sh") || !strings.Contains(run, "Lima 2.0+")) {
+		if macOS && (!strings.Contains(run, "builtin:busybox") || !strings.Contains(run, "casklet run -it -- /bin/sh") || !strings.Contains(run, "Lima 2.0+")) {
 			t.Fatalf("Mac run help lacks usable defaults or requirements: %q", run)
 		}
 		doctor, err := scopedUsage("doctor", macOS)
-		want := "mdocker doctor --rootfs DIRECTORY"
+		want := "casklet doctor --rootfs DIRECTORY"
 		if macOS {
-			want = "mdocker doctor [--rootfs DIRECTORY]"
+			want = "casklet doctor [--rootfs DIRECTORY]"
 		}
 		if err != nil || !strings.Contains(doctor, want) || strings.Contains(doctor, "--pids-limit") {
 			t.Fatalf("doctor help has wrong platform syntax: %q %v", doctor, err)

@@ -51,7 +51,7 @@ func parseExec(r Request, args []string) (Request, error) {
 		return r, errors.New("invalid container ID or name")
 	}
 	if separator < 0 {
-		return r, errors.New("a command is required after --; for example: mdocker exec worker -- /bin/echo hello")
+		return r, errors.New("a command is required after --; for example: casklet exec worker -- /bin/echo hello")
 	}
 	if workdirSpecified && r.Exec.Workdir == "" {
 		return r, errors.New("--workdir must be an absolute path")

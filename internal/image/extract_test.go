@@ -4,7 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"os"
 	"path/filepath"
 	"testing"

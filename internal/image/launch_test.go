@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func TestLaunchDefaultsAndOverrides(t *testing.T) {

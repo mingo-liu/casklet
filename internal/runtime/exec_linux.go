@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -90,7 +90,7 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 	// binary to descriptor 4. Replacing or deleting the launcher on disk
 	// cannot change the helper used by an already running container.
 	cmd := exec.Command("/proc/self/fd/4", "__enter")
-	cmd.Args[0] = "mini-docker"
+	cmd.Args[0] = "casklet"
 	cmd.Env = baseEnvironment
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.ExtraFiles = append([]*os.File{control, resources.Executable}, resources.Namespaces...)
@@ -220,7 +220,7 @@ func sealExecConfig(cfg config.Config) (*os.File, error) {
 	if len(data) > execConfigLimit {
 		return nil, errors.New("exec configuration exceeds 64 KiB")
 	}
-	fd, err := unix.MemfdCreate("mini-docker-exec", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	fd, err := unix.MemfdCreate("casklet-exec", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
 		return nil, fmt.Errorf("create exec configuration: %w", err)
 	}
@@ -269,7 +269,7 @@ func readExecConfig(fd int) (config.Config, error) {
 // target PID namespace and child cgroup before any user code can run.
 func EnterExec() int {
 	fail := func(err error) int {
-		fmt.Fprintln(os.Stderr, "mini-docker: exec:", err)
+		fmt.Fprintln(os.Stderr, "casklet: exec:", err)
 		return 125
 	}
 	if os.Geteuid() != 0 {
@@ -362,7 +362,7 @@ func EnterExec() int {
 		attributes.Sys.Setctty = true
 		attributes.Sys.Ctty = 0
 	}
-	process, err := os.StartProcess("/proc/self/fd/4", []string{"mini-docker", "__exec"}, attributes)
+	process, err := os.StartProcess("/proc/self/fd/4", []string{"casklet", "__exec"}, attributes)
 	control.Close()
 	binary.Close()
 	if !cfg.TTY {
@@ -416,7 +416,7 @@ func EnterExec() int {
 func ExecInit() int {
 	diagnostics := os.Stderr
 	fail := func(err error) int {
-		fmt.Fprintln(diagnostics, "mini-docker: exec:", err)
+		fmt.Fprintln(diagnostics, "casklet: exec:", err)
 		return 125
 	}
 	if os.Geteuid() != 0 || os.Getpid() == 1 {

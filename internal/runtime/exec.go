@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // ExecTerminal publishes a PTY and waits until its client is ready. It must

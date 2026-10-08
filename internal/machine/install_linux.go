@@ -9,7 +9,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
 // EnsureBuiltinTemplate is a private guest installation operation. Only the

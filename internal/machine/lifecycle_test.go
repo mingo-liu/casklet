@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/remote"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/remote"
 )
 
 func TestHostPortMappingsRejectInvalidGuestResources(t *testing.T) {

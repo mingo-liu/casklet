@@ -22,7 +22,7 @@ var binary, template string
 var sequence atomic.Uint64
 
 func TestMain(m *testing.M) {
-	if os.Getenv("MINI_DOCKER_INTEGRATION") != "1" {
+	if os.Getenv("CASKLET_INTEGRATION") != "1" {
 		os.Exit(m.Run())
 	}
 	if err := prepare(); err != nil {
@@ -55,9 +55,9 @@ func prepare() error {
 	if _, err := os.Stat("/run/systemd/system"); err != nil {
 		return errors.New("a running systemd system instance is required")
 	}
-	binary = os.Getenv("MINI_DOCKER_BINARY")
-	rootfs := os.Getenv("MINI_DOCKER_ROOTFS")
-	helper := os.Getenv("MINI_DOCKER_HELPER")
+	binary = os.Getenv("CASKLET_BINARY")
+	rootfs := os.Getenv("CASKLET_ROOTFS")
+	helper := os.Getenv("CASKLET_HELPER")
 	for _, path := range []string{binary, rootfs, helper} {
 		if !filepath.IsAbs(path) {
 			return fmt.Errorf("binary, rootfs, and helper must be configured as absolute paths: %q", path)
@@ -67,7 +67,7 @@ func prepare() error {
 		}
 	}
 	var err error
-	template, err = os.MkdirTemp("", "mini-docker-integration-rootfs-")
+	template, err = os.MkdirTemp("", "casklet-integration-rootfs-")
 	if err != nil {
 		return err
 	}
@@ -90,8 +90,8 @@ func prepare() error {
 
 func require(t *testing.T) {
 	t.Helper()
-	if os.Getenv("MINI_DOCKER_INTEGRATION") != "1" {
-		t.Skip("set MINI_DOCKER_INTEGRATION=1 through scripts/test-linux.sh for privileged Linux tests")
+	if os.Getenv("CASKLET_INTEGRATION") != "1" {
+		t.Skip("set CASKLET_INTEGRATION=1 through scripts/test-linux.sh for privileged Linux tests")
 	}
 }
 
@@ -107,7 +107,7 @@ func start(t *testing.T, input string, args ...string) *invocation {
 	t.Helper()
 	require(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	unit := fmt.Sprintf("mini-docker-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
+	unit := fmt.Sprintf("casklet-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
 	command := append([]string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary}, args...)
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-")
 	if err != nil {
@@ -118,7 +118,7 @@ func start(t *testing.T, input string, args ...string) *invocation {
 		t.Fatal(err)
 	}
 	cmd := exec.CommandContext(ctx, "systemd-run", command...)
-	cmd.Env = append(os.Environ(), "MINI_DOCKER_HOST_SECRET=host-only-secret")
+	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=host-only-secret")
 	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	call := &invocation{cmd: cmd, unit: unit, stdout: stdout, stderr: stderr, cancel: cancel}
@@ -213,7 +213,7 @@ func TestIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker, err := os.CreateTemp("/tmp", "mini-docker-host-marker-")
+	marker, err := os.CreateTemp("/tmp", "casklet-host-marker-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,9 +223,9 @@ func TestIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := success(t, []string{"--hostname", "isolated-mini"}, "/bin/sh", "-c", `
+	out := success(t, []string{"--hostname", "isolated-casklet"}, "/bin/sh", "-c", `
 set -eu
-[ "$(hostname)" = isolated-mini ]
+[ "$(hostname)" = isolated-casklet ]
 [ "$(cat /proc/1/comm)" != systemd ]
 [ ! -e "$1" ]
 for old in /.old-root-*; do [ ! -e "$old" ]; done
@@ -236,7 +236,7 @@ printf isolated > /tmp/container-write
 ip link | grep 'lo:'
 [ "$(ip link | grep -c '^[0-9]')" = 1 ]
 [ -z "$(ip route)" ]
-[ -z "${HTTPS_PROXY:-}${AWS_ACCESS_KEY_ID:-}${MINI_DOCKER_HOST_SECRET:-}" ]
+[ -z "${HTTPS_PROXY:-}${AWS_ACCESS_KEY_ID:-}${CASKLET_HOST_SECRET:-}" ]
 [ ! -e "/proc/$2" ]
 echo isolation-ok`, "sh", marker.Name(), strconv.Itoa(os.Getpid()))
 	if !strings.Contains(out, "isolation-ok") {
@@ -404,7 +404,7 @@ func TestParentDeathRecovery(t *testing.T) {
 func TestRunDirectoriesClean(t *testing.T) {
 	require(t)
 	success(t, nil, "/bin/echo", "cleanup")
-	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestSignalDuringPreparation(t *testing.T) {
 		t.Fatal(err)
 	}
 	previous := make(map[string]bool)
-	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
@@ -466,12 +466,12 @@ func TestSignalDuringPreparation(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	var interrupted string
 	for time.Now().Before(deadline) {
-		entries, _ := os.ReadDir("/var/lib/mini-docker/runs")
+		entries, _ := os.ReadDir("/var/lib/casklet/runs")
 		for _, entry := range entries {
 			if previous[entry.Name()] || !entry.IsDir() {
 				continue
 			}
-			path := filepath.Join("/var/lib/mini-docker/runs", entry.Name())
+			path := filepath.Join("/var/lib/casklet/runs", entry.Name())
 			copied := filepath.Join(path, "rootfs", "startup-payload")
 			if _, err := os.Stat(filepath.Join(copied, "payload-00000")); err != nil {
 				continue
@@ -513,7 +513,7 @@ func testSignalWhileWaitingForStateLock(t *testing.T, signal syscall.Signal) {
 	require(t)
 	// Publish the production coordination lock through a completed runtime run.
 	success(t, nil, "/bin/true")
-	lockPath := "/var/lib/mini-docker/runs/.lock"
+	lockPath := "/var/lib/casklet/runs/.lock"
 	lock, err := os.OpenFile(lockPath, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)

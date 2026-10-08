@@ -18,13 +18,13 @@ provision:
       apt-get update
       apt-get install -y busybox-static binutils ca-certificates curl make iproute2 nftables util-linux conntrack apparmor-utils
       # Scope unprivileged user namespace permission to the runtime executable.
-      cat > /etc/apparmor.d/mini-docker <<'APPARMOR'
+      cat > /etc/apparmor.d/casklet <<'APPARMOR'
       abi <abi/4.0>,
-      profile mini-docker-rootless /usr/local/bin/mdocker flags=(unconfined,attach_disconnected) {
+      profile casklet-rootless /usr/local/bin/casklet flags=(unconfined,attach_disconnected) {
         userns,
       }
       APPARMOR
-      apparmor_parser -r /etc/apparmor.d/mini-docker
+      apparmor_parser -r /etc/apparmor.d/casklet
       case $(uname -m) in
         aarch64)
           arch=arm64

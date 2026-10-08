@@ -47,7 +47,7 @@ set -eu
 [ "$HOME" = /custom-home ]
 [ "$PATH" = /bin:/usr/bin ]
 [ "$LANG" = C ]
-[ -z "${MINI_DOCKER_HOST_SECRET+x}" ]
+[ -z "${CASKLET_HOST_SECRET+x}" ]
 [ "$(env | grep -c '^VALUE=')" = 1 ]
 echo environment-ok`)
 	if out != "environment-ok\n" {

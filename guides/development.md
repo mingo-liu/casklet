@@ -9,12 +9,12 @@ Install Go 1.27.1+, Make, and Lima 2.0+ on macOS 13.5+:
 ```sh
 brew install lima
 make build
-./bin/mdocker doctor
+./bin/casklet doctor
 ```
 
 `make build` first cross-compiles the native-architecture Linux engine into an
 ignored embedded asset, then builds the Darwin client with that engine bundled.
-The resulting `bin/mdocker` is self-contained apart from Lima. Installing this
+The resulting `bin/casklet` is self-contained apart from Lima. Installing this
 file also installs its embedded engine payload; the end user needs neither Go
 nor a source checkout. `sudo make install` copies only the macOS executable.
 Do not run the client itself with sudo.
@@ -47,10 +47,16 @@ network access and fails on reachable vulnerable symbols. Review reported
 platform and input conditions before treating a finding as an exploit.
 
 The client maintains its initialization lock and generated VM configuration in
-`~/Library/Application Support/mini-docker`. Lima owns the VM disk and SSH
+`~/Library/Application Support/casklet`. Lima owns the VM disk and SSH
 configuration under its own instance directory. The product instance is
-`mini-docker-runtime`; it does not adopt or modify `mini-docker`, the existing
-development instance.
+`casklet-runtime`; the separate development instance is named `casklet`.
+
+The renamed client uses its own VM and state directories. It does not automatically
+adopt instances or data created under the previous project name. Existing VM disks
+and container/image data remain available in their original instances. Export any
+needed files before recreating workloads with the renamed client. Rebuild and
+reinstall the client, update scripts to use `casklet` and `CASKLET_*` variables,
+and regenerate exported BusyBox templates so they contain `.casklet-rootfs.json`.
 
 ## Internal Linux engine tests
 
@@ -63,12 +69,12 @@ engine prerequisites; its disabled sharing and forwarding intentionally differ
 from the product VM. Set up and transfer a fresh snapshot:
 
 ```sh
-limactl start --name mini-docker dev/lima.yaml
+limactl start --name casklet dev/lima.yaml
 set -o pipefail
-./scripts/snapshot.sh | limactl shell mini-docker sh -c \
-  'source_dir=$(mktemp -d "$HOME/mini-docker-source.XXXXXXXX") &&
+./scripts/snapshot.sh | limactl shell casklet sh -c \
+  'source_dir=$(mktemp -d "$HOME/casklet-source.XXXXXXXX") &&
     tar -xzf - -C "$source_dir" && printf "Source directory: %s\n" "$source_dir"'
-limactl shell mini-docker
+limactl shell casklet
 # Change to the directory printed above.
 make engine rootfs
 make fmt-check test vet test-race
@@ -117,9 +123,9 @@ suite does not. Pull staging and caches live on the VM disk.
 
 ## Troubleshooting
 
-- `mdocker machine status` reports the product VM without creating or starting it.
-- `mdocker doctor` checks the guest runtime with the default BusyBox template.
-- If startup was interrupted, retry `mdocker machine start`; engine installation
+- `casklet machine status` reports the product VM without creating or starting it.
+- `casklet doctor` checks the guest runtime with the default BusyBox template.
+- If startup was interrupted, retry `casklet machine start`; engine installation
   is repeatable and executable replacement preserves existing container storage.
 - The installed engine is checked against the bundled SHA-256 before reuse.
   A matching version marker alone does not bypass repair of damaged executable
@@ -138,7 +144,7 @@ suite does not. Pull staging and caches live on the VM disk.
 - Initialization flags apply only to a new machine. To change an existing VM,
   stop it, use Lima's configuration tools, then start it. Preserve the product's
   dedicated loopback forwarding rules and writable home share.
-- Guest diagnostics are available through `limactl shell mini-docker-runtime`.
+- Guest diagnostics are available through `limactl shell casklet-runtime`.
   VM image download and Ubuntu package installation require internet access.
 - Report integration checks that could not run. Unit tests and cross-compilation
   alone do not establish terminal, networking, or resource-limit behavior.

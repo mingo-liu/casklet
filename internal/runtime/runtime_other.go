@@ -10,11 +10,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func Check(_ string) error {
-	return errors.New("container execution requires Linux; run mini-docker inside the development VM")
+	return errors.New("container execution requires Linux; run casklet inside the development VM")
 }
 
 func Run(_ config.Config, _, _, _ *os.File) (int, error) {
@@ -33,7 +33,7 @@ func RecoverRun(_ context.Context, _ string) error          { return Check("") }
 func RecoverAbandoned(_ context.Context, _ io.Writer) error { return Check("") }
 
 func Init() int {
-	fmt.Fprintln(os.Stderr, "mini-docker: container init requires Linux")
+	fmt.Fprintln(os.Stderr, "casklet: container init requires Linux")
 	return 125
 }
 

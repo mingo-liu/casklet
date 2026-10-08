@@ -10,4 +10,4 @@ import "embed"
 //go:embed assets/*
 var engineAssets embed.FS
 
-func bundledEngine() ([]byte, error) { return engineAssets.ReadFile("assets/mdocker-engine") }
+func bundledEngine() ([]byte, error) { return engineAssets.ReadFile("assets/casklet-engine") }

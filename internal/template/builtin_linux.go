@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -122,7 +122,7 @@ func EnsureBuiltin(ctx context.Context, prepare func(context.Context, string) er
 	if os.Geteuid() != 0 {
 		return errors.New("builtin template repair requires guest root privileges")
 	}
-	for _, dir := range []string{"/var", "/var/lib", "/var/lib/mini-docker", filepath.Dir(BuiltinPath)} {
+	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", filepath.Dir(BuiltinPath)} {
 		if err := os.Mkdir(dir, 0755); err != nil && !errors.Is(err, os.ErrExist) {
 			return err
 		}
@@ -204,7 +204,7 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 		return err
 	}
 	defer root.Close()
-	metadata, err := root.OpenFile(".mini-docker-rootfs.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	metadata, err := root.OpenFile(".casklet-rootfs.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 		"tmp": os.ModeDir | os.ModeSticky | 0777, "etc": os.ModeDir | 0755,
 		"usr": os.ModeDir | 0755, "usr/bin": os.ModeDir | 0755,
 		"bin/busybox": 0755, "etc/passwd": 0644, "etc/group": 0644,
-		".mini-docker-rootfs.json": 0644,
+		".casklet-rootfs.json": 0644,
 	}
 	for _, applet := range record.Applets {
 		if applet == "" || applet == "." || applet == ".." || applet == "busybox" || strings.ContainsAny(applet, "/\x00") {

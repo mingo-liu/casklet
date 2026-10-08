@@ -15,7 +15,7 @@ func guestRootCommand(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "mini-docker-runtime", "sudo", "-n", "--"}, args...)...)
+	cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "casklet-runtime", "sudo", "-n", "--"}, args...)...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("guest command: %w: %s", err, output)
@@ -25,13 +25,13 @@ func guestRootCommand(t *testing.T, args ...string) (string, error) {
 
 func TestMachineRepairsBuiltinTemplate(t *testing.T) {
 	success(t, "doctor")
-	const template = "/var/lib/mini-docker/templates/busybox"
-	backup, err := guestRootCommand(t, "mktemp", "-d", "/var/lib/mini-docker/templates/.macos-test-backup-XXXXXXXX")
+	const template = "/var/lib/casklet/templates/busybox"
+	backup, err := guestRootCommand(t, "mktemp", "-d", "/var/lib/casklet/templates/.macos-test-backup-XXXXXXXX")
 	if err != nil {
 		t.Fatal(err)
 	}
 	backup = strings.TrimSpace(backup)
-	if !strings.HasPrefix(backup, "/var/lib/mini-docker/templates/.macos-test-backup-") {
+	if !strings.HasPrefix(backup, "/var/lib/casklet/templates/.macos-test-backup-") {
 		t.Fatalf("unexpected backup directory: %q", backup)
 	}
 	if _, err := guestRootCommand(t, "cp", "-a", "--", template, backup+"/rootfs"); err != nil {
@@ -63,7 +63,7 @@ func TestMachineRepairsBuiltinTemplate(t *testing.T) {
 			case "missing applet":
 				args = []string{"rm", "--", template + "/bin/cat"}
 			case "invalid metadata":
-				args = []string{"/bin/sh", "-c", `printf '{}' > "$1"`, "corrupt-template", template + "/.mini-docker-rootfs.json"}
+				args = []string{"/bin/sh", "-c", `printf '{}' > "$1"`, "corrupt-template", template + "/.casklet-rootfs.json"}
 			}
 			if _, err := guestRootCommand(t, args...); err != nil {
 				t.Fatal(err)

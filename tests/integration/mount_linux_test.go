@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/container"
 	"golang.org/x/sys/unix"
 )
 
@@ -222,7 +222,7 @@ func TestBindMountCleanupOnTimeoutAndSupervisorLoss(t *testing.T) {
 	id := startBackground(t, name, []string{"--mount", bindOption(source, "/data", false)}, "/bin/sleep", "300")
 	backgroundSuccess(t, "exec", name, "--", "/bin/sh", "-c", "printf recovery > /data/keep")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "mini-docker-"+id+".service").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "casklet-"+id+".service").CombinedOutput()
 	cancel()
 	if err != nil {
 		t.Fatalf("kill supervisor: %v: %s", err, output)

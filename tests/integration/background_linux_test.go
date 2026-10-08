@@ -167,7 +167,7 @@ func assertBackgroundExit(t *testing.T, record backgroundRecord, expected int) {
 
 func assertBackgroundUnitStopped(t *testing.T, id string) {
 	t.Helper()
-	unit := "mini-docker-" + id + ".service"
+	unit := "casklet-" + id + ".service"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for {
@@ -522,7 +522,7 @@ func TestBackgroundConcurrentManagement(t *testing.T) {
 
 func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 	name := backgroundName(t)
-	before, err := os.ReadDir("/var/lib/mini-docker/runs")
+	before, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
@@ -532,7 +532,7 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 	}
 	id := startBackground(t, name, nil, "/bin/sh", "-c", "echo ready; sleep 30")
 	waitBackground(t, id, "running")
-	unit := "mini-docker-" + id + ".service"
+	unit := "casklet-" + id + ".service"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	output, err := exec.CommandContext(ctx, "systemctl", "show", unit, "--property=ControlGroup", "--value").Output()
 	cancel()
@@ -552,7 +552,7 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 	}
 	assertBackgroundUnitStopped(t, id)
 	assertCgroupRemoved(t, group)
-	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,7 +578,7 @@ func TestBackgroundPreviousBootReconciliation(t *testing.T) {
 
 	// Rewrite only this test's stopped state to model an interrupted startup
 	// from a previous boot. A recent timestamp must not grant it scheduling grace.
-	dir := filepath.Join("/var/lib/mini-docker/containers", id)
+	dir := filepath.Join("/var/lib/casklet/containers", id)
 	// An interrupted execution has no receipt. Keeping the real completed
 	// execution's receipt would correctly recover its known exit status instead.
 	if err := os.Remove(filepath.Join(dir, "exit-0.json")); err != nil {
@@ -677,7 +677,7 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	var interrupted backgroundRecord
 	for time.Now().Before(deadline) {
-		entries, err := os.ReadDir("/var/lib/mini-docker/containers")
+		entries, err := os.ReadDir("/var/lib/casklet/containers")
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
@@ -686,7 +686,7 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 			if err != nil || len(decoded) != 16 {
 				continue
 			}
-			data, err := os.ReadFile(filepath.Join("/var/lib/mini-docker/containers", entry.Name(), "state.json"))
+			data, err := os.ReadFile(filepath.Join("/var/lib/casklet/containers", entry.Name(), "state.json"))
 			if err != nil {
 				continue // Records are published and replaced atomically.
 			}
@@ -694,7 +694,7 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 			if err := json.Unmarshal(data, &record); err != nil || record.Name != name || record.RunPath == "" {
 				continue
 			}
-			stages, err := filepath.Glob(filepath.Join("/var/lib/mini-docker/containers", record.ID, ".rootfs-*"))
+			stages, err := filepath.Glob(filepath.Join("/var/lib/casklet/containers", record.ID, ".rootfs-*"))
 			if err != nil || len(stages) != 1 {
 				continue
 			}

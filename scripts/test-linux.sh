@@ -8,8 +8,8 @@ command -v systemd-run >/dev/null 2>&1 || fail 'systemd-run is required'
 command -v readelf >/dev/null 2>&1 || fail 'readelf is required (install binutils)'
 project=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
-binary=${MINI_DOCKER_BINARY:-$project/bin/mdocker-engine}
-rootfs=${MINI_DOCKER_ROOTFS:-$project/rootfs/busybox}
+binary=${CASKLET_BINARY:-$project/bin/casklet-engine}
+rootfs=${CASKLET_ROOTFS:-$project/rootfs/busybox}
 canonical_binary=$(realpath -e -- "$binary" 2>/dev/null) || fail "runtime binary not found: $binary (run make engine first)"
 canonical_rootfs=$(realpath -e -- "$rootfs" 2>/dev/null) || fail "rootfs not found: $rootfs (run make rootfs first)"
 binary=$canonical_binary
@@ -28,6 +28,6 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go test -c -o bin/integration.tes
 CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go build -o bin/integration-helper ./tests/integration/testdata
 helper=$project/bin/integration-helper
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo env MINI_DOCKER_INTEGRATION=1 MINI_DOCKER_BINARY="$binary" MINI_DOCKER_ROOTFS="$rootfs" MINI_DOCKER_HELPER="$helper" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
+    exec sudo env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
 fi
-exec env MINI_DOCKER_INTEGRATION=1 MINI_DOCKER_BINARY="$binary" MINI_DOCKER_ROOTFS="$rootfs" MINI_DOCKER_HELPER="$helper" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
+exec env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"

@@ -23,7 +23,7 @@ func unitName(id string, generation ...uint64) string {
 	if len(generation) != 0 && generation[0] != 0 {
 		suffix = "-g" + strconv.FormatUint(generation[0], 10)
 	}
-	return "mini-docker-" + id + suffix + ".service"
+	return "casklet-" + id + suffix + ".service"
 }
 
 func (status unitStatus) live() bool {
@@ -32,7 +32,7 @@ func (status unitStatus) live() bool {
 
 func checkSystemd() error {
 	if os.Geteuid() != 0 {
-		return errors.New("container management requires root; run mdocker as root")
+		return errors.New("container management requires root; run casklet as root")
 	}
 	if _, err := os.Stat("/run/systemd/system"); err != nil {
 		return errors.New("background containers require a running systemd system instance")

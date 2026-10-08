@@ -21,7 +21,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
 func fixture() (v1.Image, error) {
@@ -81,7 +81,7 @@ func main() {
 	}
 	refs := make([]string, 2)
 	for i, tag := range []string{"plain", "tty"} {
-		ref, err := name.ParseReference(listener.Addr().String() + "/mini-docker/progress:" + tag)
+		ref, err := name.ParseReference(listener.Addr().String() + "/casklet/progress:" + tag)
 		if err != nil {
 			log.Fatal(err)
 		}

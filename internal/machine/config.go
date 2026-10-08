@@ -10,13 +10,13 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
-const Name = "mini-docker-runtime"
+const Name = "casklet-runtime"
 const BuiltinRootFS = "builtin:busybox"
 const guestRootFS = template.BuiltinPath
-const guestEngine = "/usr/local/bin/mdocker"
+const guestEngine = "/usr/local/bin/casklet"
 
 type Options struct {
 	CPUs   int
@@ -47,7 +47,7 @@ func stateDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Application Support", "mini-docker"), nil
+	return filepath.Join(home, "Library", "Application Support", "casklet"), nil
 }
 
 func configData(options Options) ([]byte, error) {
@@ -103,7 +103,7 @@ func configData(options Options) ([]byte, error) {
 		"images":    []map[string]string{{"location": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-" + imageArch + ".img", "arch": arch}},
 		"mountType": "virtiofs", "mounts": mounts, "containerd": map[string]bool{"system": false, "user": false},
 		"ssh": map[string]any{"forwardAgent": false, "loadDotSSHPubKeys": false, "overVsock": false},
-		// Dedicated guest loopback addresses expose only mini-docker's published
+		// Dedicated guest loopback addresses expose only casklet's published
 		// sockets. Other guest services never match the forwarding rules.
 		"portForwards": []map[string]any{
 			{"guestIP": "127.0.0.2", "hostIP": "0.0.0.0", "proto": "any"},
@@ -117,24 +117,24 @@ func configData(options Options) ([]byte, error) {
 
 const provisionScript = `#!/bin/sh
 set -eu
-if [ -f /usr/local/lib/mini-docker/provisioned-v1 ]; then exit 0; fi
+if [ -f /usr/local/lib/casklet/provisioned-v1 ]; then exit 0; fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y busybox-static binutils iproute2 nftables util-linux conntrack apparmor-utils
-cat > /etc/apparmor.d/mini-docker <<'PROFILE'
+cat > /etc/apparmor.d/casklet <<'PROFILE'
 abi <abi/4.0>,
-profile mini-docker-rootless /usr/local/bin/mdocker flags=(unconfined,attach_disconnected) {
+profile casklet-rootless /usr/local/bin/casklet flags=(unconfined,attach_disconnected) {
   userns,
 }
 PROFILE
-apparmor_parser -r /etc/apparmor.d/mini-docker
+apparmor_parser -r /etc/apparmor.d/casklet
 loginctl enable-linger '{{.User}}'
 mkdir -p '/etc/systemd/system/user@{{.UID}}.service.d'
-printf '[Service]\nDelegate=cpu memory pids\n' > '/etc/systemd/system/user@{{.UID}}.service.d/mini-docker.conf'
+printf '[Service]\nDelegate=cpu memory pids\n' > '/etc/systemd/system/user@{{.UID}}.service.d/casklet.conf'
 systemctl daemon-reload
 systemctl restart 'user@{{.UID}}.service'
-mkdir -p /usr/local/lib/mini-docker
-touch /usr/local/lib/mini-docker/provisioned-v1
+mkdir -p /usr/local/lib/casklet
+touch /usr/local/lib/casklet/provisioned-v1
 `
 
 func within(parent, child string) bool {
@@ -172,7 +172,7 @@ func (instance Instance) hostPath(path string) (string, error) {
 		}
 	}
 	if instance.Name == "" {
-		return "", fmt.Errorf("directory is not shared with the default machine: %s; create it with mdocker machine init --mount %s before retrying", absolute, quote(absolute))
+		return "", fmt.Errorf("directory is not shared with the default machine: %s; create it with casklet machine init --mount %s before retrying", absolute, quote(absolute))
 	}
-	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with mdocker machine stop, add it with mdocker machine share %s, then mdocker machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
+	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with casklet machine stop, add it with casklet machine share %s, then casklet machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
 }

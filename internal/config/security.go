@@ -85,7 +85,7 @@ func (c Config) ValidateSecurity() error {
 		if len(c.UIDMappings) != 1 || len(c.GIDMappings) != 1 || c.UIDMappings[0].ContainerID != 0 || c.GIDMappings[0].ContainerID != 0 || c.UIDMappings[0].Size != 1 || c.GIDMappings[0].Size != 1 {
 			return errors.New("rootless supports only a single caller UID/GID mapped to container 0:0")
 		}
-		state := fmt.Sprintf("/run/user/%d/mini-docker", c.UIDMappings[0].HostID)
+		state := fmt.Sprintf("/run/user/%d/casklet", c.UIDMappings[0].HostID)
 		for _, mount := range c.Mounts {
 			if pathsOverlap(mount.Source, state) {
 				return errors.New("mount source overlaps rootless runtime storage")

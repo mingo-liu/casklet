@@ -26,14 +26,14 @@ func foregroundRun(t *testing.T, membership string) (string, string) {
 		t.Fatalf("invalid workload cgroup: %q", membership)
 	}
 	cgroup := "/sys/fs/cgroup" + relative
-	script := `for path in /var/lib/mini-docker/runs/run-*; do
+	script := `for path in /var/lib/casklet/runs/run-*; do
   if [ -f "$path/state.json" ] && grep -Fq -- "\"cgroup\":\"$1\"" "$path/state.json"; then
     printf '%s\n' "$path"
   fi
 done`
 	output, err := guestRootCommand(t, "/bin/sh", "-c", script, "find-run", cgroup)
 	path := strings.TrimSpace(output)
-	if err != nil || !strings.HasPrefix(path, "/var/lib/mini-docker/runs/run-") || strings.Contains(path, "\n") {
+	if err != nil || !strings.HasPrefix(path, "/var/lib/casklet/runs/run-") || strings.Contains(path, "\n") {
 		t.Fatalf("resolve foreground run: %q %v", output, err)
 	}
 	return path, cgroup
@@ -53,7 +53,7 @@ func waitForegroundCleanup(t *testing.T, path, cgroup string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	sum := sha256.Sum256([]byte(filepath.Base(path)))
-	table := fmt.Sprintf("table ip mdocker_%x", sum[:6])
+	table := fmt.Sprintf("table ip casklet_%x", sum[:6])
 	output, err := guestRootCommand(t, "nft", "list", "tables")
 	if err != nil || strings.Contains(output, table) {
 		t.Fatalf("foreground NAT cleanup: %q %v", output, err)

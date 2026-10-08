@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
@@ -15,11 +15,11 @@ func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
 		args  []string
 		hints []string
 	}{
-		{[]string{"run", "--rootfs", "/template", "echo", "hello"}, []string{"-- /bin/echo hello", "mdocker run --help"}},
-		{[]string{"exec", "worker"}, []string{"mdocker exec worker -- /bin/echo hello", "mdocker exec --help"}},
-		{[]string{"logs", "worker", "--tail", "20"}, []string{"flags must precede", "mdocker logs --help"}},
-		{[]string{"image", "import"}, []string{"mdocker image import --help"}},
-		{[]string{"unknown"}, []string{"mdocker help"}},
+		{[]string{"run", "--rootfs", "/template", "echo", "hello"}, []string{"-- /bin/echo hello", "casklet run --help"}},
+		{[]string{"exec", "worker"}, []string{"casklet exec worker -- /bin/echo hello", "casklet exec --help"}},
+		{[]string{"logs", "worker", "--tail", "20"}, []string{"flags must precede", "casklet logs --help"}},
+		{[]string{"image", "import"}, []string{"casklet image import --help"}},
+		{[]string{"unknown"}, []string{"casklet help"}},
 	} {
 		_, err := Parse(tt.args)
 		if err == nil {
@@ -39,11 +39,11 @@ func TestOperationHintsPreserveErrorIdentity(t *testing.T) {
 		request Request
 		hint    string
 	}{
-		{container.ErrNotFound, Request{Action: "inspect", Reference: "worker"}, "mdocker ps -a"},
-		{container.ErrNotTerminal, Request{Action: "rm", Reference: "worker"}, "mdocker stop 'worker', then retry mdocker rm 'worker'"},
-		{container.ErrNameInUse, Request{Action: "run", Name: "worker"}, "mdocker inspect 'worker'"},
-		{image.ErrNotFound, Request{Action: "image-rm"}, "mdocker image ls"},
-		{image.ErrInUse, Request{Action: "image-rm"}, "mdocker inspect NAME"},
+		{container.ErrNotFound, Request{Action: "inspect", Reference: "worker"}, "casklet ps -a"},
+		{container.ErrNotTerminal, Request{Action: "rm", Reference: "worker"}, "casklet stop 'worker', then retry casklet rm 'worker'"},
+		{container.ErrNameInUse, Request{Action: "run", Name: "worker"}, "casklet inspect 'worker'"},
+		{image.ErrNotFound, Request{Action: "image-rm"}, "casklet image ls"},
+		{image.ErrInUse, Request{Action: "image-rm"}, "casklet inspect NAME"},
 	} {
 		wrapped := fmt.Errorf("operation failed: %w", tt.cause)
 		got := operationError(tt.request, wrapped)

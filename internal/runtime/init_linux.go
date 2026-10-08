@@ -15,14 +15,14 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
 func Init() int {
 	if os.Getpid() != 1 {
-		fmt.Fprintln(os.Stderr, "mini-docker: internal init requires container PID 1")
+		fmt.Fprintln(os.Stderr, "casklet: internal init requires container PID 1")
 		return 125
 	}
 	if err := unix.SetNonblock(3, true); err != nil {

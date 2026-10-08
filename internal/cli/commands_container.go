@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 func executeOperation(ctx context.Context, r Request, stdout io.Writer) (int, error) {

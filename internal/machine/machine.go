@@ -28,7 +28,7 @@ type Machine struct {
 
 func open(stderr io.Writer) (*Machine, error) {
 	if os.Geteuid() == 0 {
-		return nil, errors.New("run mdocker as your regular macOS user, without sudo")
+		return nil, errors.New("run casklet as your regular macOS user, without sudo")
 	}
 	lima, err := exec.LookPath("limactl")
 	if err != nil {
@@ -131,12 +131,12 @@ func (m *Machine) ensure(ctx context.Context, options Options, initialize bool) 
 		if err := os.WriteFile(config, data, 0600); err != nil {
 			return nil, err
 		}
-		fmt.Fprintln(m.stderr, "Creating the mini-docker runtime machine...")
+		fmt.Fprintln(m.stderr, "Creating the casklet runtime machine...")
 		if _, err := m.command(ctx, "start", "--name", Name, "--timeout", "10m", config); err != nil {
 			return nil, err
 		}
 	} else if instance.Status != "Running" {
-		fmt.Fprintln(m.stderr, "Starting the mini-docker runtime machine...")
+		fmt.Fprintln(m.stderr, "Starting the casklet runtime machine...")
 		if _, err := m.command(ctx, "start", "--timeout", "10m", Name); err != nil {
 			return nil, err
 		}
@@ -209,7 +209,7 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 		return err
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
-	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, "/usr/local/lib/mini-docker/engine.sha256", hash); err == nil {
+	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, "/usr/local/lib/casklet/engine.sha256", hash); err == nil {
 		_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-template")
 		return err
 	}
@@ -223,17 +223,17 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(stage, "mdocker"), payload, 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(stage, "casklet"), payload, 0700); err != nil {
 		return err
 	}
 	// Atomic executable replacement lets existing supervisors finish with their
 	// pinned binary. Persistent container/image storage is never replaced.
 	script := `set -eu
-install -d -m 0755 /usr/local/lib/mini-docker
-install -m 0755 "$1/mdocker" /usr/local/bin/mdocker.new
-mv /usr/local/bin/mdocker.new /usr/local/bin/mdocker
-/usr/local/bin/mdocker __ensure-template
-printf '%s\n' "$2" > /usr/local/lib/mini-docker/engine.sha256
+install -d -m 0755 /usr/local/lib/casklet
+install -m 0755 "$1/casklet" /usr/local/bin/casklet.new
+mv /usr/local/bin/casklet.new /usr/local/bin/casklet
+/usr/local/bin/casklet __ensure-template
+printf '%s\n' "$2" > /usr/local/lib/casklet/engine.sha256
 `
 	_, err = m.output(ctx, instance, "sudo", "-n", "--", "/bin/sh", "-c", script, "install", guestStage, hash)
 	return err
@@ -306,7 +306,7 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if err != nil {
-		return fmt.Errorf("%w\nHint: run mdocker %s --help for usage and examples.", err, hostCommandTopic(args))
+		return fmt.Errorf("%w\nHint: run casklet %s --help for usage and examples.", err, hostCommandTopic(args))
 	}
 	var parent string
 	if args[0] == "rootfs" {
@@ -381,7 +381,7 @@ func (m *Machine) rootfs(ctx context.Context, instance Instance, destination str
 	if err := os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(filepath.Dir(absolute), ".mdocker-rootfs-")
+	stage, err := os.MkdirTemp(filepath.Dir(absolute), ".casklet-rootfs-")
 	if err != nil {
 		return err
 	}

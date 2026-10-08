@@ -100,7 +100,7 @@ func startTerminalArguments(t *testing.T, cliArguments []string) *terminalInvoca
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	unit := fmt.Sprintf("mini-docker-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
+	unit := fmt.Sprintf("casklet-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
 	args := []string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary}
 	args = append(args, cliArguments...)
 	cmd := exec.CommandContext(ctx, "systemd-run", args...)
@@ -476,7 +476,7 @@ printf 'merged-stderr-end\n' >&2`)
 			t.Fatalf("terminal output drain iteration=%d exit=%d bytes=%d stderr=%q", i, code, len(out), stderr)
 		}
 	}
-	entries, err := os.ReadDir("/var/lib/mini-docker/runs")
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil {
 		t.Fatal(err)
 	}

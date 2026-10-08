@@ -54,7 +54,7 @@ echo "execution-$n"
 while :; do sleep .1; done`
 	id := startBackground(t, name, []string{"--rootfs", source, "--stop-timeout", "50ms", "--mount", "type=bind,source=" + data + ",target=/data"}, "/bin/sh", "-c", command)
 	lifecycleReady(t, id, "execution-1\n")
-	if err := os.Chown(filepath.Join("/var/lib/mini-docker/containers", id, "rootfs", "owned"), 1234, 2345); err != nil {
+	if err := os.Chown(filepath.Join("/var/lib/casklet/containers", id, "rootfs", "owned"), 1234, 2345); err != nil {
 		t.Fatal(err)
 	}
 	original := inspectBackground(t, id)
@@ -104,7 +104,7 @@ while :; do sleep .1; done`
 			t.Fatalf("missing appended logs: %q", logs)
 		}
 	}
-	path := filepath.Join("/var/lib/mini-docker/containers", id)
+	path := filepath.Join("/var/lib/casklet/containers", id)
 	for gen := 0; gen < 3; gen++ {
 		if _, err := os.Stat(filepath.Join(path, fmt.Sprintf("exit-%d.json", gen))); err != nil {
 			t.Fatal(err)
@@ -286,7 +286,7 @@ func TestLifecycleRetainedRootSafety(t *testing.T) {
 	name := backgroundName(t)
 	id := startBackground(t, name, nil, "/bin/true")
 	lifecycleWait(t, id, 0)
-	root := filepath.Join("/var/lib/mini-docker/containers", id, "rootfs")
+	root := filepath.Join("/var/lib/casklet/containers", id, "rootfs")
 	original := root + "-saved"
 	if err := os.Rename(root, original); err != nil {
 		t.Fatal(err)
@@ -346,7 +346,7 @@ func TestLifecycleSupervisorRecovery(t *testing.T) {
 	name := backgroundName(t)
 	id := startBackground(t, name, nil, "/bin/sh", "-c", `n=0; [ ! -e /recovery-counter ] || n=$(cat /recovery-counter); n=$((n+1)); echo "$n" > /recovery-counter; trap 'exit 23' TERM; echo "recovery-$n"; while :; do sleep .1; done`)
 	lifecycleReady(t, id, "recovery-1\n")
-	unit := "mini-docker-" + id + ".service"
+	unit := "casklet-" + id + ".service"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	out, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", unit).CombinedOutput()
 	cancel()

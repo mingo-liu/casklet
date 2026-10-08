@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mingo-liu/mini-docker/internal/machine"
+	"github.com/mingo-liu/casklet/internal/machine"
 )
 
 func platformArguments(args []string) []string {
@@ -55,7 +55,7 @@ func executeHostCommand(args []string, stdin, stdout, stderr *os.File) (bool, in
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := machine.HostCommand(ctx, args, stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return true, 125
 	}
 	return true, 0
@@ -66,13 +66,13 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 	defer cancel()
 	paths, err := hostPathArguments(args, request.Action)
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return true, 125
 	}
 	paths = guestProgressArguments(paths, request, stderr)
 	code, err := machine.Execute(ctx, machine.Invocation{Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}, stdin, stdout, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 	}
 	return true, code
 }

@@ -45,7 +45,7 @@ func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) erro
 		return err
 	}
 	if instance == nil {
-		return fmt.Errorf("runtime machine is not initialized; create it with mdocker machine init --mount %s", quote(path))
+		return fmt.Errorf("runtime machine is not initialized; create it with casklet machine init --mount %s", quote(path))
 	}
 	for _, mount := range instance.Config.Mounts {
 		if within(mount.Location, path) && mount.Writable {
@@ -57,7 +57,7 @@ func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) erro
 		}
 	}
 	if instance.Status != "Stopped" {
-		return fmt.Errorf("stop the runtime machine before adding a share: mdocker machine stop (terminates running containers and preserves their files); then retry mdocker machine share %s and run mdocker machine start", quote(path))
+		return fmt.Errorf("stop the runtime machine before adding a share: casklet machine stop (terminates running containers and preserves their files); then retry casklet machine share %s and run casklet machine start", quote(path))
 	}
 	mounts, err := json.Marshal([]map[string]any{{"location": path, "mountPoint": path, "writable": true}})
 	if err != nil {
@@ -66,6 +66,6 @@ func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) erro
 	if _, err := m.command(ctx, "edit", "--set", ".mounts += "+string(mounts), Name); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "Shared: %s\nStart the runtime machine with: mdocker machine start\n", path)
+	_, err = fmt.Fprintf(stdout, "Shared: %s\nStart the runtime machine with: casklet machine start\n", path)
 	return err
 }

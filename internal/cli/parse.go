@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 type Request struct {
@@ -44,7 +44,7 @@ func Parse(args []string) (request Request, err error) {
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
-			return Request{}, fmt.Errorf("%s takes no arguments; use mdocker help COMMAND for a topic", args[0])
+			return Request{}, fmt.Errorf("%s takes no arguments; use casklet help COMMAND for a topic", args[0])
 		}
 		return Request{Action: "help"}, nil
 	}
@@ -75,7 +75,7 @@ func parseFlagHelp(topic string, fs *flag.FlagSet, args []string) (Request, erro
 		name, _, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
 		if !inline && (name == "h" || name == "help") {
 			if i != len(args)-1 {
-				return Request{}, fmt.Errorf("%s help accepts no additional arguments; use mdocker help %s", topic, topic)
+				return Request{}, fmt.Errorf("%s help accepts no additional arguments; use casklet help %s", topic, topic)
 			}
 			return Request{Action: "help", HelpTopic: topic}, nil
 		}

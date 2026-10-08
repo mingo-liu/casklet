@@ -47,7 +47,7 @@ func startExec(t *testing.T, input string, options []string, reference string, c
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Stdin = strings.NewReader(input)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	cmd.Env = append(os.Environ(), "MINI_DOCKER_HOST_SECRET=exec-host-only-secret")
+	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=exec-host-only-secret")
 	call := &execInvocation{cmd: cmd, stdout: stdout, stderr: stderr, done: make(chan error, 1), cancel: cancel}
 	t.Cleanup(func() {
 		cancel()
@@ -226,7 +226,7 @@ echo namespaces-ok`)
 
 func TestExecSurvivesLauncherRemoval(t *testing.T) {
 	require(t)
-	launcher := filepath.Join(t.TempDir(), "mini-docker")
+	launcher := filepath.Join(t.TempDir(), "casklet")
 	source, err := os.Open(binary)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func TestExecEnvironmentWorkdirAndLookup(t *testing.T) {
 	if out := execSuccess(t, []string{"--env", "PATH=/overrides:/bin", "--env", "VALUE=first", "--env", "VALUE=last", "--workdir", "/overrides"}, id, "selected"); out != "override:/overrides:last\n" {
 		t.Fatalf("exec overrides were not applied: %q", out)
 	}
-	if out := execSuccess(t, nil, id, "/bin/sh", "-c", `[ "$VALUE" = base ] && [ "$PWD" = /workspace ] && [ "${EMPTY+x}" = x ] && [ -z "$EMPTY" ] && [ -z "${MINI_DOCKER_HOST_SECRET+x}" ] && echo environment-ok`); out != "environment-ok\n" {
+	if out := execSuccess(t, nil, id, "/bin/sh", "-c", `[ "$VALUE" = base ] && [ "$PWD" = /workspace ] && [ "${EMPTY+x}" = x ] && [ -z "$EMPTY" ] && [ -z "${CASKLET_HOST_SECRET+x}" ] && echo environment-ok`); out != "environment-ok\n" {
 		t.Fatalf("exec leaked client variables or changed saved defaults: %q", out)
 	}
 	for _, test := range []struct {
@@ -563,7 +563,7 @@ func TestExecSupervisorLossRecoversSession(t *testing.T) {
 	call := startExec(t, "", nil, name, "/bin/sh", "-c", "cat /proc/self/cgroup; echo supervisor-loss-ready; sleep 30")
 	group := execCgroup(t, call.ready(t, "supervisor-loss-ready\n"))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "mini-docker-"+id+".service").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "casklet-"+id+".service").CombinedOutput()
 	cancel()
 	if err != nil {
 		t.Fatalf("kill exec supervisor: %v: %s", err, output)

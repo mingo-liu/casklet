@@ -10,7 +10,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 const PortCheckLimit = 16 << 10

@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
-const storeRoot = "/var/lib/mini-docker/images"
+const storeRoot = "/var/lib/casklet/images"
 
 // Store coordinates publication, readers and deletion across processes.
 type Store struct {
@@ -32,7 +32,7 @@ func OpenStore() (*Store, error) {
 		return nil, errors.New("local image management requires root privileges")
 	}
 	store := &Store{root: storeRoot, owner: 0}
-	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/mini-docker", storeRoot} {
+	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", storeRoot} {
 		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
@@ -191,7 +191,7 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	for _, forbidden := range []string{"/proc", "/dev", "/sys", "/var/lib/mini-docker", store.root} {
+	for _, forbidden := range []string{"/proc", "/dev", "/sys", "/var/lib/casklet", store.root} {
 		if absolute == "/" || overlaps(absolute, forbidden) {
 			return Record{}, errors.New("image source overlaps protected host storage")
 		}

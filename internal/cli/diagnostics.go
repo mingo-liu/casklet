@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func argumentError(args []string, err error) error {
@@ -22,9 +22,9 @@ func argumentError(args []string, err error) error {
 			}
 		}
 	}
-	command := "mdocker help"
+	command := "casklet help"
 	if topic != "" {
-		command = "mdocker " + topic + " --help"
+		command = "casklet " + topic + " --help"
 	}
 	return fmt.Errorf("%w\nHint: run %s for usage and examples.", err, command)
 }
@@ -38,17 +38,17 @@ func operationError(r Request, err error) error {
 	ref := quoteCLIArgument(r.Reference)
 	switch {
 	case errors.Is(err, container.ErrNotFound):
-		hint = "list available containers with mdocker ps -a; use their full ID or exact name."
+		hint = "list available containers with casklet ps -a; use their full ID or exact name."
 	case errors.Is(err, container.ErrNotTerminal):
-		hint = "stop the container with mdocker stop " + ref + ", then retry mdocker rm " + ref + "."
+		hint = "stop the container with casklet stop " + ref + ", then retry casklet rm " + ref + "."
 	case errors.Is(err, container.ErrNameInUse):
-		hint = "choose another --name, or inspect the existing container with mdocker inspect " + quoteCLIArgument(r.Name) + "."
+		hint = "choose another --name, or inspect the existing container with casklet inspect " + quoteCLIArgument(r.Name) + "."
 	case errors.Is(err, container.ErrBusy):
-		hint = "another lifecycle operation is still active; inspect the container with mdocker inspect " + ref + " and retry after it finishes."
+		hint = "another lifecycle operation is still active; inspect the container with casklet inspect " + ref + " and retry after it finishes."
 	case errors.Is(err, image.ErrNotFound):
-		hint = "list cached images with mdocker image ls; use a full sha256: ID or pull a registry reference with mdocker image pull NAME."
+		hint = "list cached images with casklet image ls; use a full sha256: ID or pull a registry reference with casklet image pull NAME."
 	case errors.Is(err, image.ErrInUse):
-		hint = "find referencing containers with mdocker ps -a and mdocker inspect NAME; remove those containers before retrying image deletion."
+		hint = "find referencing containers with casklet ps -a and casklet inspect NAME; remove those containers before retrying image deletion."
 	}
 	if hint == "" {
 		return err

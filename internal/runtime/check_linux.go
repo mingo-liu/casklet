@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -53,14 +53,14 @@ func checkConfig(cfg config.Config) error {
 // Probe runs only in a temporary namespace child created by Check.
 func Probe() int {
 	if os.Getpid() != 1 {
-		fmt.Fprintln(os.Stderr, "mini-docker: namespace probe requires container PID 1")
+		fmt.Fprintln(os.Stderr, "casklet: namespace probe requires container PID 1")
 		return 125
 	}
 	if err := enableLoopback(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 125
 	}
-	if err := unix.Sethostname([]byte("mini-probe")); err != nil {
+	if err := unix.Sethostname([]byte("casklet-probe")); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 125
 	}

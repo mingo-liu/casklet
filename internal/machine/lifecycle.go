@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/remote"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/remote"
 )
 
 func probePort(mapping config.PortMapping) error {

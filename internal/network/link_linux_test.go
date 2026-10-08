@@ -12,12 +12,12 @@ import (
 )
 
 func TestLinkOwnership(t *testing.T) {
-	if os.Getenv("MINI_DOCKER_NETWORK_TEST") != "1" {
+	if os.Getenv("CASKLET_NETWORK_TEST") != "1" {
 		t.Skip("requires root in the dedicated Linux VM")
 	}
 	name := fmt.Sprintf("mdt%d", os.Getpid())
 	ctx := context.Background()
-	if err := addLink(name, "mini-docker-test", "bridge", ""); err != nil {
+	if err := addLink(name, "casklet-test", "bridge", ""); err != nil {
 		t.Fatal(err)
 	}
 	defer command(ctx, "ip", "", "link", "delete", name)
@@ -30,7 +30,7 @@ func TestLinkOwnership(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := json.Unmarshal(out, &device); err != nil || len(device) != 1 || device[0].Group != ownershipGroup("mini-docker-test") {
+		if err := json.Unmarshal(out, &device); err != nil || len(device) != 1 || device[0].Group != ownershipGroup("casklet-test") {
 			t.Fatalf("lost ownership: %s %v", out, err)
 		}
 	}

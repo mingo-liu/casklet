@@ -24,12 +24,12 @@ import (
 
 func client(t *testing.T) string {
 	t.Helper()
-	if os.Getenv("MINI_DOCKER_MACOS_INTEGRATION") != "1" {
-		t.Skip("set MINI_DOCKER_MACOS_INTEGRATION=1 or run make test-macos")
+	if os.Getenv("CASKLET_MACOS_INTEGRATION") != "1" {
+		t.Skip("set CASKLET_MACOS_INTEGRATION=1 or run make test-macos")
 	}
-	path := os.Getenv("MINI_DOCKER_MACOS_BINARY")
+	path := os.Getenv("CASKLET_MACOS_BINARY")
 	if path == "" {
-		path = "../../bin/mdocker"
+		path = "../../bin/casklet"
 	}
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -64,7 +64,7 @@ func success(t *testing.T, args ...string) string {
 	t.Helper()
 	out, diagnostic, code := command(t, args...)
 	if code != 0 {
-		t.Fatalf("mdocker %q returned %d: %s %s", args, code, out, diagnostic)
+		t.Fatalf("casklet %q returned %d: %s %s", args, code, out, diagnostic)
 	}
 	return out
 }
@@ -75,7 +75,7 @@ func hostDirectory(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	directory, err := os.MkdirTemp(home, ".mdocker-macos-test-")
+	directory, err := os.MkdirTemp(home, ".casklet-macos-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,13 +119,13 @@ func TestMachineRepairsNonExecutableEngine(t *testing.T) {
 	guest := func(args ...string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "mini-docker-runtime", "sudo", "-n", "--"}, args...)...)
+		cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "casklet-runtime", "sudo", "-n", "--"}, args...)...)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("guest command: %w: %s", err, output)
 		}
 		return nil
 	}
-	const engine = "/usr/local/bin/mdocker"
+	const engine = "/usr/local/bin/casklet"
 	t.Cleanup(func() {
 		if err := guest("chmod", "0755", engine); err != nil {
 			t.Error(err)
@@ -196,7 +196,7 @@ func TestLiveBindAndLocalImage(t *testing.T) {
 
 func TestRootlessUsesGuestIdentity(t *testing.T) {
 	out := success(t, "run", "--rootless", "--", "/bin/sh", "-c", "id -u; cat /proc/self/gid_map")
-	guest := exec.Command("limactl", "shell", "mini-docker-runtime", "id", "-g")
+	guest := exec.Command("limactl", "shell", "casklet-runtime", "id", "-g")
 	data, err := guest.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -375,7 +375,7 @@ func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 	_ = cmd.Wait()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		probe := exec.CommandContext(ctx, "limactl", "shell", "mini-docker-runtime", "ps", "-eo", "args")
+		probe := exec.CommandContext(ctx, "limactl", "shell", "casklet-runtime", "ps", "-eo", "args")
 		data, err := probe.Output()
 		if err != nil {
 			t.Fatal(err)

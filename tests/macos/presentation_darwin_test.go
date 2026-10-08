@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/machine"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/machine"
 )
 
 type hostInspection struct {
@@ -59,7 +59,7 @@ func TestInspectHostPathsSurviveSourceRemoval(t *testing.T) {
 func TestInspectBuiltinTemplate(t *testing.T) {
 	id := detached(t, "--", "/bin/sleep", "60")
 	inspection := inspectHost(t, id)
-	if inspection.Config.RootFS != machine.BuiltinRootFS || inspection.GuestResources.RootFS != "/var/lib/mini-docker/templates/busybox" {
+	if inspection.Config.RootFS != machine.BuiltinRootFS || inspection.GuestResources.RootFS != "/var/lib/casklet/templates/busybox" {
 		t.Fatalf("builtin template: %+v", inspection)
 	}
 }

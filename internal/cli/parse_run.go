@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
@@ -67,7 +67,7 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.Config.TTY, "tty", false, "allocate a terminal")
 		fs.BoolVar(&r.Config.TTY, "t", false, "allocate a terminal")
 		fs.StringVar(&r.Name, "name", "", "detached container name")
-		fs.StringVar(&r.Config.Hostname, "hostname", "mini", "hostname")
+		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
 		fs.Func("stop-timeout", "graceful shutdown duration", func(value string) error {

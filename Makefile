@@ -10,20 +10,19 @@ DESTDIR ?=
 build:
 	test "$(GOOS)" = darwin
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -o internal/machine/assets/mdocker-engine ./cmd/mini-docker
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -o bin/mdocker ./cmd/mini-docker
-	ln -sf mdocker bin/mini-docker
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -o internal/machine/assets/casklet-engine ./cmd/casklet
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -o bin/casklet ./cmd/casklet
 
 # Internal guest engine, also used by the privileged Linux test suite.
 engine:
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -o bin/mdocker-engine ./cmd/mini-docker
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -o bin/casklet-engine ./cmd/casklet
 
 install:
 	test "$$(uname -s)" = Darwin
-	test -x bin/mdocker
+	test -x bin/casklet
 	install -d "$(DESTDIR)$(PREFIX)/bin"
-	install -m 0755 bin/mdocker "$(DESTDIR)$(PREFIX)/bin/mdocker"
+	install -m 0755 bin/casklet "$(DESTDIR)$(PREFIX)/bin/casklet"
 
 fmt:
 	gofmt -w cmd internal tests
@@ -45,12 +44,12 @@ vuln:
 
 test-macos: build
 	test "$$(uname -s)" = Darwin
-	./bin/mdocker doctor
-	MINI_DOCKER_MACOS_INTEGRATION=1 MINI_DOCKER_MACOS_BINARY="$(abspath bin/mdocker)" $(GO) test -v -timeout 10m ./tests/macos
+	./bin/casklet doctor
+	CASKLET_MACOS_INTEGRATION=1 CASKLET_MACOS_BINARY="$(abspath bin/casklet)" $(GO) test -v -timeout 10m ./tests/macos
 
 rootfs:
-	@if [ "$$(uname -s)" = Darwin ]; then ./bin/mdocker rootfs "$(ROOTFS)"; else ./scripts/prepare-rootfs.sh "$(ROOTFS)"; fi
+	@if [ "$$(uname -s)" = Darwin ]; then ./bin/casklet rootfs "$(ROOTFS)"; else ./scripts/prepare-rootfs.sh "$(ROOTFS)"; fi
 
 test-integration:
 	$(MAKE) engine GOARCH=$$($(GO) env GOHOSTARCH)
-	MINI_DOCKER_ROOTFS="$(abspath $(ROOTFS))" ./scripts/test-linux.sh
+	CASKLET_ROOTFS="$(abspath $(ROOTFS))" ./scripts/test-linux.sh

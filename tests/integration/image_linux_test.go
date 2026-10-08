@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 	"golang.org/x/sys/unix"
 )
 
@@ -200,7 +200,7 @@ func TestImageImportSafetyAndRollback(t *testing.T) {
 	if err := os.Symlink(source, link); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/", "/proc", "/var/lib/mini-docker", link, link + "/bin", source + "/missing"} {
+	for _, path := range []string{"/", "/proc", "/var/lib/casklet", link, link + "/bin", source + "/missing"} {
 		code, out, stderr := backgroundCLI(t, "image", "import", path)
 		if code != 125 || out != "" {
 			t.Fatalf("unsafe import %s exit=%d stdout=%q stderr=%q", path, code, out, stderr)
@@ -240,11 +240,11 @@ func TestImageImportSafetyAndRollback(t *testing.T) {
 		t.Fatalf("mounted-source import exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
 	// Direct paths must not bypass image reference protection.
-	code, _, stderr = run(t, []string{"--rootfs", filepath.Join("/var/lib/mini-docker/images", strings.TrimPrefix(id, "sha256:"), "rootfs")}, "/bin/true")
+	code, _, stderr = run(t, []string{"--rootfs", filepath.Join("/var/lib/casklet/images", strings.TrimPrefix(id, "sha256:"), "rootfs")}, "/bin/true")
 	if code != 125 || !strings.Contains(stderr, "require --image") {
 		t.Fatalf("raw image path bypass exit=%d stderr=%q", code, stderr)
 	}
-	entries, err := os.ReadDir("/var/lib/mini-docker/images")
+	entries, err := os.ReadDir("/var/lib/casklet/images")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestImageRemovalRefusesMountedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := importImage(t, source)
-	target := filepath.Join("/var/lib/mini-docker/images", strings.TrimPrefix(id, "sha256:"), "rootfs/data")
+	target := filepath.Join("/var/lib/casklet/images", strings.TrimPrefix(id, "sha256:"), "rootfs/data")
 	if err := unix.Mount("tmpfs", target, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "size=1m"); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +335,7 @@ func TestImageSupervisorRecoveryRetainsReference(t *testing.T) {
 	name := backgroundName(t)
 	containerID := startImageContainer(t, name, id, "/bin/sleep", "300")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "mini-docker-"+containerID+".service").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "casklet-"+containerID+".service").CombinedOutput()
 	cancel()
 	if err != nil {
 		t.Fatalf("kill image supervisor: %v: %s", err, output)

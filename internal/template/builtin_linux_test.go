@@ -61,7 +61,7 @@ func builtinFixture(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".mini-docker-rootfs.json"), metadata, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".casklet-rootfs.json"), metadata, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(root, path); err != nil {
@@ -112,9 +112,9 @@ func TestBuiltinRepairAndHealthyReuse(t *testing.T) {
 				case "missing directory":
 					err = os.Remove(filepath.Join(path, "proc"))
 				case "invalid metadata":
-					err = os.WriteFile(filepath.Join(path, ".mini-docker-rootfs.json"), []byte("invalid"), 0644)
+					err = os.WriteFile(filepath.Join(path, ".casklet-rootfs.json"), []byte("invalid"), 0644)
 				case "legacy metadata":
-					err = os.WriteFile(filepath.Join(path, ".mini-docker-rootfs.json"), []byte(`{"package":"busybox-static"}`), 0644)
+					err = os.WriteFile(filepath.Join(path, ".casklet-rootfs.json"), []byte(`{"package":"busybox-static"}`), 0644)
 				case "unexpected entry":
 					err = os.WriteFile(filepath.Join(path, "extra"), []byte("unexpected"), 0600)
 				}

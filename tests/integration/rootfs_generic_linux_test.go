@@ -14,7 +14,7 @@ func TestGenericRootfsWithoutBusyBoxOrMountTargets(t *testing.T) {
 	if err := os.Chmod(tree, 0755); err != nil {
 		t.Fatal(err)
 	}
-	program, err := os.ReadFile(os.Getenv("MINI_DOCKER_HELPER"))
+	program, err := os.ReadFile(os.Getenv("CASKLET_HELPER"))
 	if err != nil {
 		t.Fatal(err)
 	}

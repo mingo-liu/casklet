@@ -51,7 +51,7 @@ func delegation(cpuQuota int64) (string, error) {
 	marker := make([]byte, 32)
 	n, err := unix.Getxattr(dir, "user.delegate", marker)
 	if os.Geteuid() == 0 && (err != nil || string(marker[:n]) != "1") {
-		return "", fmt.Errorf("cgroup %s is not marked user.delegate=1; run mdocker to create a delegated scope", dir)
+		return "", fmt.Errorf("cgroup %s is not marked user.delegate=1; run casklet to create a delegated scope", dir)
 	}
 	if os.Geteuid() != 0 {
 		var stat unix.Stat_t

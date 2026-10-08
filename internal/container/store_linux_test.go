@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -83,7 +83,7 @@ func TestStorePersistsConfigurationAndReferences(t *testing.T) {
 		t.Fatalf("short ID must not resolve: %v", err)
 	}
 	auto := createTestRecord(t, store, "")
-	if auto.Name != "mini-"+auto.ID[:12] {
+	if auto.Name != "casklet-"+auto.ID[:12] {
 		t.Fatalf("unexpected generated name: %q", auto.Name)
 	}
 	records, err := store.List(context.Background())

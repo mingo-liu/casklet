@@ -359,7 +359,7 @@ func TestExecTerminalSupervisorLossRestoresHost(t *testing.T) {
 	call := startExecTerminal(t, nil, name, "/bin/sh", "-c", "cat /proc/self/cgroup; echo exec-terminal-loss-ready; sleep 30")
 	group := execTerminalCgroup(t, call, "exec-terminal-loss-ready\r\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "mini-docker-"+id+".service").CombinedOutput()
+	output, err := exec.CommandContext(ctx, "systemctl", "kill", "--kill-whom=main", "--signal=SIGKILL", "casklet-"+id+".service").CombinedOutput()
 	cancel()
 	if err != nil {
 		t.Fatalf("kill terminal exec supervisor: %v: %s", err, output)

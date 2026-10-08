@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func testRootFS(t *testing.T) string {

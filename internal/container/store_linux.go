@@ -16,13 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	storeRoot            = "/var/lib/mini-docker/containers"
+	storeRoot            = "/var/lib/casklet/containers"
 	maxRecordBytes int64 = 64 * 1024
 	maxConfigBytes int64 = 1024 * 1024
 )
@@ -39,7 +39,7 @@ func OpenStore() (*Store, error) {
 		return nil, errors.New("container management requires root privileges")
 	}
 	store := &Store{root: storeRoot, owner: 0}
-	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/mini-docker", storeRoot} {
+	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", storeRoot} {
 		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
@@ -170,7 +170,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	}
 	id := hex.EncodeToString(random[:])
 	if name == "" {
-		name = "mini-" + id[:12]
+		name = "casklet-" + id[:12]
 	}
 	records, err := store.listLocked()
 	if err != nil {

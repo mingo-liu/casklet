@@ -2,16 +2,16 @@
 
 [Quick start](../README.md) · [Development](development.md) · [Architecture](../ARCHITECTURE.md)
 
-Run `mdocker help` for the command overview. Each command has a focused reference:
+Run `casklet help` for the command overview. Each command has a focused reference:
 
 ```sh
-mdocker run --help
-mdocker help logs
-mdocker help image import
-mdocker machine share --help
+casklet run --help
+casklet help logs
+casklet help image import
+casklet machine share --help
 ```
 
-`mdocker help COMMAND` and `mdocker COMMAND --help` show the same reference,
+`casklet help COMMAND` and `casklet COMMAND --help` show the same reference,
 including options, defaults, constraints, and examples. Help works without Lima
 and does not create or start the VM. Management flags precede
 the container ID or exact name. Put `--` before an explicit `run` or `exec` command;
@@ -25,13 +25,13 @@ and for an existing VM it suggests the stop/share/start recovery flow.
 ## macOS execution environment
 
 Run every public command on the Mac as your regular user. The client creates or
-starts the `mini-docker-runtime` Lima VM as needed and installs its bundled
-mini-docker Linux engine. The default rootfs is the VM's static BusyBox template:
+starts the `casklet-runtime` Lima VM as needed and installs its bundled
+casklet Linux engine. The default rootfs is the VM's static BusyBox template:
 
 ```sh
-mdocker run -- /bin/sh
-mdocker doctor
-mdocker rootfs ./rootfs/busybox
+casklet run -- /bin/sh
+casklet doctor
+casklet rootfs ./rootfs/busybox
 ```
 
 An explicit `--rootfs DIRECTORY`, `image import DIRECTORY`, or bind source refers
@@ -42,17 +42,17 @@ container paths are passed unchanged; shell expansion happens only when you
 explicitly run a shell in the container.
 
 The home directory is shared writable with the VM. Additional directories can
-be configured before first use with `mdocker machine init --mount DIRECTORY`.
+be configured before first use with `casklet machine init --mount DIRECTORY`.
 To add a directory to an existing VM, stop it, add the share, and start it:
 
 ```sh
-mdocker machine stop
-mdocker machine share /Volumes/Projects
-mdocker machine start
+casklet machine stop
+casklet machine share /Volumes/Projects
+casklet machine start
 ```
 
 Stopping the VM terminates running containers and preserves their files. Restart
-retained containers with `mdocker start NAME`. Adding a share preserves the VM
+retained containers with `casklet start NAME`. Adding a share preserves the VM
 disk, resources, forwarding rules, and existing shares. Sharing an already
 covered writable directory is a no-op. Overlapping or read-only shares are
 rejected rather than replaced.
@@ -63,10 +63,10 @@ provide live access to shared Mac files. File ownership, executable permissions,
 case sensitivity, and filesystem events follow the shared filesystem's behavior.
 
 ```sh
-mdocker machine init --cpus 4 --memory 4 --disk 20
-mdocker machine status
-mdocker machine stop
-mdocker machine start
+casklet machine init --cpus 4 --memory 4 --disk 20
+casklet machine status
+casklet machine stop
+casklet machine start
 ```
 
 Initialization creates the VM and applies resources; `start` is repeatable.
@@ -98,7 +98,7 @@ architecture; macOS binaries are not container workloads.
 ## Resource and execution options
 
 ```sh
-mdocker run --rootfs ./rootfs/busybox \
+casklet run --rootfs ./rootfs/busybox \
   --memory 128m --pids-limit 64 --cpus 0.5 --timeout 30s \
   --env MODE=demo --workdir /tmp --user 1000:1000 --read-only \
   -- /bin/sh -c 'id; pwd; echo "$MODE"; echo hello > result; cat result'
@@ -123,9 +123,9 @@ Init, commands, descendants, and managed exec sessions share aggregate limits.
 ## OCI/Docker images
 
 ```sh
-mdocker run -d --name redis --image redis:8
-mdocker run -d --name web --network bridge -p 127.0.0.1:8080:80 --image nginx:stable
-mdocker run -d --name database --memory 512m --env POSTGRES_PASSWORD=example-password \
+casklet run -d --name redis --image redis:8
+casklet run -d --name web --network bridge -p 127.0.0.1:8080:80 --image nginx:stable
+casklet run -d --name database --memory 512m --env POSTGRES_PASSWORD=example-password \
   --image postgres:17
 ```
 
@@ -157,10 +157,10 @@ the private root before execution. Image `EXPOSE` and `VOLUME` metadata do not p
 ports or provision storage; provide `--network bridge -p ...` and `--mount` explicitly.
 
 ```sh
-mdocker image pull redis:8 # Refresh the cached tag explicitly.
-mdocker image ls --json
-mdocker run --image redis:8 -- --version
-mdocker run --image redis:8 --entrypoint '' -- /bin/sh -c 'id; pwd'
+casklet image pull redis:8 # Refresh the cached tag explicitly.
+casklet image ls --json
+casklet run --image redis:8 -- --version
+casklet run --image redis:8 --entrypoint '' -- /bin/sh -c 'id; pwd'
 ```
 
 Both `run --image` and `image pull` report per-layer download, verification,
@@ -172,9 +172,9 @@ show `Using cached image`; an unchanged explicit pull shows `Image is up to date
 after verification. Failed or canceled layers never report pull completion.
 
 ```sh
-mdocker image pull --progress=plain redis:8
-mdocker run -d --name redis --progress=auto --image redis:8
-image_id=$(mdocker image pull redis:8 2>pull.log)
+casklet image pull --progress=plain redis:8
+casklet run -d --name redis --progress=auto --image redis:8
+image_id=$(casklet image pull redis:8 2>pull.log)
 ```
 
 Use `--progress=tty` to force dynamic bars or `--progress=plain` for plain text.
@@ -190,9 +190,9 @@ start/restart preserves its writes and does not re-resolve its original tag.
 ### Directory imports
 
 ```sh
-image_id=$(mdocker image import ./rootfs/busybox)
-mdocker run --image "$image_id" -- /bin/echo hello
-mdocker image rm "$image_id"
+image_id=$(casklet image import ./rootfs/busybox)
+casklet run --image "$image_id" -- /bin/echo hello
+casklet image rm "$image_id"
 ```
 
 Directory imports have no default command. Imports copy a stable Linux filesystem;
@@ -205,9 +205,9 @@ cache miss on the next run.
 ## Persistent data
 
 ```sh
-mkdir -p "$HOME/mini-docker-data"
-mdocker run --rootfs ./rootfs/busybox \
-  --mount "type=bind,source=$HOME/mini-docker-data,target=/data" \
+mkdir -p "$HOME/casklet-data"
+casklet run --rootfs ./rootfs/busybox \
+  --mount "type=bind,source=$HOME/casklet-data,target=/data" \
   -- /bin/sh -c 'echo hello > /data/message'
 ```
 
@@ -222,12 +222,12 @@ host identity; bind ownership is not remapped.
 ## Terminals and exec
 
 ```sh
-mdocker run -it --rootfs ./rootfs/busybox -- /bin/sh
-mdocker run -d --name worker --rootfs ./rootfs/busybox -- /bin/sleep 300
-mdocker exec -it worker -- /bin/sh
-mdocker exec --env MODE=check --workdir /tmp --timeout 10s \
+casklet run -it --rootfs ./rootfs/busybox -- /bin/sh
+casklet run -d --name worker --rootfs ./rootfs/busybox -- /bin/sleep 300
+casklet exec -it worker -- /bin/sh
+casklet exec --env MODE=check --workdir /tmp --timeout 10s \
   worker -- /bin/sh -c 'pwd; echo "$MODE"'
-printf 'hello\n' | mdocker exec -i worker -- /bin/cat
+printf 'hello\n' | casklet exec -i worker -- /bin/cat
 ```
 
 `-t` allocates a terminal and merges stdout/stderr; add `-i` for input. `-it`
@@ -247,16 +247,16 @@ exec sessions; client disconnect and timeout clean up that session's descendants
 ## Background lifecycle and diagnostics
 
 ```sh
-mdocker ps -a --json
-mdocker logs --tail 20 worker
-mdocker inspect worker
-mdocker stats --json --interval 250ms worker
-mdocker stop --timeout 2s worker
-mdocker start worker
-mdocker restart worker
-mdocker stop worker
-mdocker wait worker
-mdocker rm worker
+casklet ps -a --json
+casklet logs --tail 20 worker
+casklet inspect worker
+casklet stats --json --interval 250ms worker
+casklet stop --timeout 2s worker
+casklet start worker
+casklet restart worker
+casklet stop worker
+casklet wait worker
+casklet rm worker
 ```
 
 `ps` lists active containers; `-a` includes completed ones. `stop` sends SIGTERM
@@ -304,7 +304,7 @@ subtrees are preserved; unsafe artifacts produce a diagnostic.
 ## IPv4 networking
 
 ```sh
-mdocker run -d --name web --rootfs ./rootfs/busybox \
+casklet run -d --name web --rootfs ./rootfs/busybox \
   --network bridge --dns 8.8.8.8 -p 127.0.0.1:8080:80 \
   -- /bin/httpd -f -p 80 -h /tmp
 ```
@@ -336,7 +336,7 @@ For foreground user namespaces, provide nonoverlapping UID/GID mappings that
 cover container root and the selected command identity:
 
 ```sh
-mdocker run --rootfs ./rootfs/busybox --userns \
+casklet run --rootfs ./rootfs/busybox --userns \
   --uid-map 0:200000:2000 --gid-map 0:300000:2000 --user 1000:1000 \
   -- /bin/sh -c 'id; cat /proc/self/uid_map'
 ```
@@ -348,7 +348,7 @@ User namespaces support foreground execution and loopback networking only.
 For rootless execution, run the macOS client as your regular user:
 
 ```sh
-mdocker run --rootless --rootfs ./rootfs/busybox -- /bin/sh -c 'id; hostname'
+casklet run --rootless --rootfs ./rootfs/busybox -- /bin/sh -c 'id; hostname'
 ```
 
 Rootless mode maps container `0:0` to the VM login user's UID/GID and uses a

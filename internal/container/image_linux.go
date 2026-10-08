@@ -7,7 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // ImageReferenced checks all retained records, including completed and failed

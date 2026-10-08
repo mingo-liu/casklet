@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 // ResolveExecution resolves a name to an immutable identity and applies its

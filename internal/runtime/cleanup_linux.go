@@ -29,7 +29,7 @@ func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer)
 		return errors.Join(result, cleanupFailure("cgroup.empty", err))
 	}
 	if oom, err := group.OOMKilled(); err == nil && oom {
-		fmt.Fprintln(stderr, "mini-docker: container exceeded its memory limit (OOM)")
+		fmt.Fprintln(stderr, "casklet: container exceeded its memory limit (OOM)")
 	}
 	if err := group.Close(); err != nil {
 		// Keep the cgroup identity for a later recovery attempt even when empty.

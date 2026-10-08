@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 type Invocation struct {
@@ -221,7 +221,7 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 			_, controlErr := m.output(controlCtx, *instance, engineCommand(invocation.Rootless, "__signal", token, strconv.Itoa(int(signal.(syscall.Signal))))...)
 			cancel()
 			if controlErr != nil {
-				fmt.Fprintf(stderr, "mdocker: signal forwarding: %v\n", controlErr)
+				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)
 			}
 			if shutdown == nil {
 				shutdown = time.After(75 * time.Second)

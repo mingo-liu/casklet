@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // ConfigureDNS replaces the resolver in the private copy, before mounting it
@@ -32,14 +32,14 @@ func ConfigureDNS(path string, servers []string) error {
 	}
 	// Reclaim this reserved staging name after an interrupted startup. Remove
 	// unlinks leaf symlinks and hardlinks without changing their targets.
-	if err := root.Remove("etc/.mini-docker-resolv"); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := root.Remove("etc/.casklet-resolv"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove stale resolver staging file: %w", err)
 	}
-	file, err := root.OpenFile("etc/.mini-docker-resolv", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	file, err := root.OpenFile("etc/.casklet-resolv", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		return fmt.Errorf("create container resolver: %w", err)
 	}
-	defer root.Remove("etc/.mini-docker-resolv")
+	defer root.Remove("etc/.casklet-resolv")
 	var contents strings.Builder
 	for _, server := range servers {
 		fmt.Fprintf(&contents, "nameserver %s\n", server)
@@ -51,5 +51,5 @@ func ConfigureDNS(path string, servers []string) error {
 	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
 		return err
 	}
-	return root.Rename("etc/.mini-docker-resolv", "etc/resolv.conf")
+	return root.Rename("etc/.casklet-resolv", "etc/resolv.conf")
 }

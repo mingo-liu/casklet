@@ -1,4 +1,4 @@
-module github.com/mingo-liu/mini-docker
+module github.com/mingo-liu/casklet
 
 go 1.27.1
 

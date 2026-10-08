@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/image"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func TestProgressOptionsAndGuestModePreserveCommands(t *testing.T) {

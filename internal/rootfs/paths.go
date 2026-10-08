@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 // ResolveContainerPath gives symlinks container semantics: absolute targets are relative

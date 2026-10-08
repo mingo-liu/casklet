@@ -4,9 +4,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/mingo-liu/mini-docker/internal/cli"
-	"github.com/mingo-liu/mini-docker/internal/container"
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/cli"
+	"github.com/mingo-liu/casklet/internal/container"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
 )
 
 func main() {

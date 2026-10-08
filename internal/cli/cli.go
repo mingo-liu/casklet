@@ -7,10 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mingo-liu/mini-docker/internal/container"
-	"github.com/mingo-liu/mini-docker/internal/image"
-	containerruntime "github.com/mingo-liu/mini-docker/internal/runtime"
-	"github.com/mingo-liu/mini-docker/internal/template"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
+	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/template"
 )
 
 func Execute(args []string, stdin, stdout, stderr *os.File) int {
@@ -20,7 +20,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	args = platformArguments(args)
 	r, err := Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	if r.Action == "help" {
@@ -29,7 +29,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 			_, err = fmt.Fprint(stdout, text)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "mdocker: %v\n", err)
+			fmt.Fprintf(stderr, "casklet: %v\n", err)
 			return 125
 		}
 		return 0
@@ -38,13 +38,13 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return code
 	}
 	if err := prepareLaunch(args, r); err != nil {
-		fmt.Fprintf(stderr, "mdocker: %v\n", err)
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	switch r.Action {
 	case "doctor":
 		if err := containerruntime.Check(r.Config.RootFS); err != nil {
-			fmt.Fprintf(stderr, "mdocker: %v\n", err)
+			fmt.Fprintf(stderr, "casklet: %v\n", err)
 			return 125
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
@@ -57,7 +57,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		defer signal.Stop(signals)
 		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
 		if err != nil {
-			fmt.Fprintf(stderr, "mdocker: %v\n", operationError(r, err))
+			fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
 			if code == 0 {
 				return 125
 			}
@@ -87,14 +87,14 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		code, err := containerruntime.Run(r.Config, stdin, stdout, stderr)
 		if err != nil {
-			fmt.Fprintf(stderr, "mdocker: %v\n", err)
+			fmt.Fprintf(stderr, "casklet: %v\n", err)
 			if code == 0 {
 				return 125
 			}
 		}
 		return code
 	default:
-		fmt.Fprintf(stderr, "mdocker: unknown command %q\n", r.Action)
+		fmt.Fprintf(stderr, "casklet: unknown command %q\n", r.Action)
 		return 125
 	}
 }

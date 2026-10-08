@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 var errStatsInterval = errors.New("--interval must be between 10ms and 1m")

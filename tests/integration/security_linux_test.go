@@ -64,7 +64,7 @@ func TestSecurityUserNamespaces(t *testing.T) {
 			}
 		})
 	}
-	data, err := os.MkdirTemp("/tmp", "mini-docker-security-bind-")
+	data, err := os.MkdirTemp("/tmp", "casklet-security-bind-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestSecurityUserNamespaces(t *testing.T) {
 		success(t, mappedOptions(), "/bin/echo", "recovered")
 	})
 
-	entries, err := os.ReadDir("/tmp/mini-docker-userns")
+	entries, err := os.ReadDir("/tmp/casklet-userns")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,18 +143,18 @@ func TestSecurityUserNamespaces(t *testing.T) {
 
 func TestSecurityRootless(t *testing.T) {
 	require(t)
-	uid := os.Getenv("MINI_DOCKER_ROOTLESS_UID")
+	uid := os.Getenv("CASKLET_ROOTLESS_UID")
 	if uid == "" {
 		uid = os.Getenv("SUDO_UID")
 	}
 	if uid == "" || uid == "0" {
-		t.Fatal("rootless integration requires SUDO_UID or MINI_DOCKER_ROOTLESS_UID for a logged-in unprivileged user")
+		t.Fatal("rootless integration requires SUDO_UID or CASKLET_ROOTLESS_UID for a logged-in unprivileged user")
 	}
 	account, err := user.LookupId(uid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := os.MkdirTemp("/tmp", "mini-docker-rootless-template-")
+	source, err := os.MkdirTemp("/tmp", "casklet-rootless-template-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestSecurityRootless(t *testing.T) {
 		// Ubuntu's optional userns restriction requires the scoped development profile.
 		policy, _ := os.ReadFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
 		if strings.TrimSpace(string(policy)) == "1" {
-			args = append(args, "aa-exec", "-p", "mini-docker-rootless", "--")
+			args = append(args, "aa-exec", "-p", "casklet-rootless", "--")
 		}
 		args = append(args, binary, "run", "--rootless", "--rootfs", source)
 		args = append(args, options...)
@@ -181,7 +181,7 @@ func TestSecurityRootless(t *testing.T) {
 		args = append(args, command...)
 		// A real rootless invocation inherits caller-owned output descriptors.
 		// runuser's root-owned capture pipe cannot be reopened by a TTY bridge.
-		capture, err := os.CreateTemp("/tmp", "mini-docker-rootless-output-")
+		capture, err := os.CreateTemp("/tmp", "casklet-rootless-output-")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,7 +245,7 @@ func TestSecurityRootless(t *testing.T) {
 			}
 		})
 	}
-	data, err := os.MkdirTemp("/tmp", "mini-docker-rootless-bind-")
+	data, err := os.MkdirTemp("/tmp", "casklet-rootless-bind-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestSecurityRootless(t *testing.T) {
 	if output, err := os.ReadFile(filepath.Join(data, "result")); err != nil || string(output) != "persistent\n" {
 		t.Fatalf("bind data was not retained: %s, %v", output, err)
 	}
-	root := "/run/user/" + uid + "/mini-docker/runs"
+	root := "/run/user/" + uid + "/casklet/runs"
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)

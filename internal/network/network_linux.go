@@ -20,16 +20,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/config"
+	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	bridge         = "mdocker0"
+	bridge         = "casklet0"
 	gateway        = "10.231.0.1"
 	subnet         = "10.231.0.0/24"
-	bridgeAlias    = "mini-docker bridge v1"
-	runsRoot       = "/var/lib/mini-docker/runs"
+	bridgeAlias    = "casklet bridge v1"
+	runsRoot       = "/var/lib/casklet/runs"
 	forwardingPath = "/proc/sys/net/ipv4/ip_forward"
 )
 
@@ -87,14 +87,14 @@ func validBoot(id string) bool {
 func identity(path string) (string, string) {
 	sum := sha256.Sum256([]byte(filepath.Base(path)))
 	suffix := hex.EncodeToString(sum[:])[:12]
-	return "md" + suffix, "mdocker_" + suffix
+	return "cs" + suffix, "casklet_" + suffix
 }
 
 func checkPath(path string) error {
 	if filepath.Dir(path) != runsRoot || filepath.Clean(path) != path || !strings.HasPrefix(filepath.Base(path), "run-") || len(filepath.Base(path)) <= 4 {
 		return errors.New("invalid network run directory")
 	}
-	for _, dir := range []string{"/var/lib/mini-docker", runsRoot, path} {
+	for _, dir := range []string{"/var/lib/casklet", runsRoot, path} {
 		var stat unix.Stat_t
 		if err := unix.Lstat(dir, &stat); err != nil {
 			return err
@@ -336,7 +336,7 @@ func ensureBridge(ctx context.Context) error {
 	for _, device := range devices {
 		if device.Name == bridge {
 			if fresh || device.Group != ownershipGroup(bridgeAlias) || device.Info.Kind != "bridge" {
-				return errors.New("mdocker0 already exists or is not owned by mini-docker")
+				return errors.New("casklet0 already exists or is not owned by casklet")
 			}
 			exists = true
 		}

@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mingo-liu/mini-docker/internal/cgroup"
-	"github.com/mingo-liu/mini-docker/internal/network"
+	"github.com/mingo-liu/casklet/internal/cgroup"
+	"github.com/mingo-liu/casklet/internal/network"
 
 	"golang.org/x/sys/unix"
 )
 
 const (
-	runsRoot      = "/var/lib/mini-docker/runs"
+	runsRoot      = "/var/lib/casklet/runs"
 	maxStateBytes = 4096
 )
 
@@ -60,7 +60,7 @@ func ownedDirectory(path string, owner uint32) error {
 }
 
 func ensureRunsRoot() error {
-	for _, dir := range []string{"/var", "/var/lib", "/var/lib/mini-docker", runsRoot} {
+	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", runsRoot} {
 		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return err
 		}
@@ -194,11 +194,11 @@ func recoverRunsAt(ctx context.Context, stderr io.Writer, paths statePaths) erro
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			fmt.Fprintf(stderr, "mini-docker: leave unrecognized run directory %s: %v\n", path, err)
+			fmt.Fprintf(stderr, "casklet: leave unrecognized run directory %s: %v\n", path, err)
 			continue
 		}
 		if err := reclaimRunAt(path, paths); err != nil {
-			fmt.Fprintf(stderr, "mini-docker: preserve stale run %s: %v\n", path, err)
+			fmt.Fprintf(stderr, "casklet: preserve stale run %s: %v\n", path, err)
 		}
 		lock.Close()
 	}
@@ -457,7 +457,7 @@ func executionRunsRoot(rootless, userns bool) (string, error) {
 		if !userns {
 			return runsRoot, ensureRunsRoot()
 		}
-		root := "/tmp/mini-docker-userns"
+		root := "/tmp/casklet-userns"
 		if err := os.Mkdir(root, 0711); err != nil && !errors.Is(err, os.ErrExist) {
 			return "", err
 		}
@@ -470,7 +470,7 @@ func executionRunsRoot(rootless, userns bool) (string, error) {
 	if err := secureDirectory(base); err != nil {
 		return "", fmt.Errorf("rootless requires a login session with a private /run/user directory: %w", err)
 	}
-	root := filepath.Join(base, "mini-docker", "runs")
+	root := filepath.Join(base, "casklet", "runs")
 	for _, dir := range []string{filepath.Dir(root), root} {
 		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return "", err
