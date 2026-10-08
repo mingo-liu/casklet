@@ -21,3 +21,7 @@ func EnterExec() int {
 }
 
 func ExecInit() int { return EnterExec() }
+
+func ExecuteProbe(context.Context, ExecResources, []string, *os.File) (int, error) {
+	return 125, Check("")
+}

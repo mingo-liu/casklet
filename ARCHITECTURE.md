@@ -97,10 +97,11 @@ while managed exec uses runtime resources and IPC.
 | `cmd/casklet` | Process entry and private re-exec modes | Parsing and lifecycle policy |
 | `cli` | Flags, privilege/delegation launch, signal contexts, presentation | Persistent state and Linux isolation |
 | `config` | Serializable execution values and validation | CLI output and resource allocation |
-| `container` | Records, generations, operation locks, systemd services, logs, inspection | Namespace setup and workload execution |
+| `container` | Records, generations, operation locks, systemd services, logs, health monitoring, inspection | Namespace setup and workload execution |
 | `runtime` | Startup handshake, PID 1, signals, exec sessions, run recovery and cleanup | User-facing command parsing and container records |
 | `template` | Directory/image selection, canonical validation, image lease ownership | Copies, mounts, and lifecycle state |
 | `image` | Registry resolution, platform selection, layer application, startup defaults, content identity, atomic publication and deletion leases | Runtime supervision |
+| `volume` | Private volume metadata, usage leases, tar streams, staged restore publication | Container lifecycle and host paths |
 | `rootfs` | Confined filesystem access, copying, mounts and DNS files | Image lookup and container management |
 | `cgroup`, `network`, `ipc` | Their Linux resource/protocol operations | CLI and durable lifecycle policy |
 
@@ -230,6 +231,12 @@ an exclusive lease and checks all container configurations. Lock order is volume
 store then container store; lifecycle operations never acquire volume locks while
 holding container metadata locks. User namespaces are currently excluded.
 
+Volume tar export holds an exclusive usage lease without requiring retained
+references to disappear. Restore extracts to leased private staging outside the
+global volume lock, validates a complete bounded archive, fsyncs it, and publishes
+a new name under that lock. Transaction recovery skips leased staging. The CLI
+uses stdout/stdin streams, so macOS archives need no filesystem share.
+
 ## Guest disk accounting
 
 `storage` measures allocated blocks using pinned no-follow directories and
@@ -240,8 +247,15 @@ preview selection and presentation; disk reporting never deletes workloads or
 volumes. Filesystem availability covers the guest OS disk, while category totals
 cover only casklet storage and exclude host shares.
 
-Volume tar export holds an exclusive usage lease without requiring retained
-references to disappear. Restore extracts to leased private staging outside the
-global volume lock, validates a complete bounded archive, fsyncs it, and publishes
-a new name under that lock. Transaction recovery skips leased staging. The CLI
-uses stdout/stdin streams, so macOS archives need no filesystem share.
+## Container health
+
+Image launch defaults retain the Docker Healthcheck extension and custom shell;
+raw config decoding preserves StartInterval independently of registry-library
+coverage. Config owns validated probe tests, timing defaults, and field overrides.
+Each detached supervisor starts one monitor after publishing command startup.
+The monitor uses pinned exec resources, a dedicated child cgroup, and immediate
+deadline/cancellation kills. It finishes before exec descriptors or workload
+resources close. Generation-fenced state updates retain five bounded results,
+without probe output. Container inspection separates health from lifecycle state;
+restart resets health while retaining configuration. Foreground execution has no
+durable health monitor. Health transitions do not change restart policy.

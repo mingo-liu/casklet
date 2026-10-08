@@ -139,7 +139,15 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if err != nil {
 		return Record{}, err
 	}
-	launch := &LaunchConfig{Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User, StopSignal: cf.Config.StopSignal}
+	launch := &LaunchConfig{Shell: cf.Config.Shell, Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User, StopSignal: cf.Config.StopSignal}
+	rawConfig, err := img.RawConfigFile()
+	if err != nil {
+		return Record{}, err
+	}
+	launch.Healthcheck, err = imageHealthcheck(rawConfig)
+	if err != nil {
+		return Record{}, err
+	}
 	if err := validateLaunch(launch); err != nil {
 		return Record{}, err
 	}
@@ -152,7 +160,7 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 	if err := store.recoverLocked(); err != nil {
 		return Record{}, err
 	}
-	if cached, err := store.resolveLocked(ref); err == nil && cached.ManifestDigest == digest.String() {
+	if cached, err := store.resolveLocked(ref); err == nil && cached.ManifestDigest == digest.String() && sameLaunchConfig(cached.Config, launch) {
 		reportProgress(ctx, Progress{Stage: ProgressVerifyingImage, Reference: ref})
 		if err := store.verify(ctx, cached); err != nil {
 			return Record{}, err

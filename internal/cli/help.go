@@ -41,8 +41,8 @@ const runOptions = `Options:
   --memory       Positive bytes or binary k/m/g units (default: 128m)
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
-  --config      Strict JSON run options; CLI scalars override config values
-  --env-file    Repeatable KEY=VALUE file; explicit --env values take precedence
+  --config       Strict JSON run options; CLI scalars override config values
+  --env-file     Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
   --workdir      Absolute working directory (image default, otherwise /)
   --user         Numeric UID[:GID]; overrides image User (otherwise 0:0)
@@ -60,6 +60,14 @@ const runOptions = `Options:
   --gid-map      CONTAINER_ID:HOST_ID:SIZE; repeat for independent ranges
   --rootless     Map container 0:0 to caller IDs without sudo (foreground only)
   --read-only    Mount the root filesystem read-only; /tmp stays writable
+  --health-cmd   Override the image healthcheck with a container shell command
+  --no-healthcheck  Disable the image healthcheck
+  --health-interval  Delay after each probe, 1ms-24h (image value or 30s)
+  --health-timeout   Probe deadline, 1ms-24h (image value or 30s)
+  --health-retries   Consecutive failures, 1-1000 (image value or 3)
+  --health-start-period  Ignore initial failures, 0s-24h (image value or 0s)
+  --health-start-interval  Initial probe delay, 1ms-24h (image value or 5s)
+                 Health options require --detach; ps/inspect show health separately
   --restart      no (default), on-failure[:1-1000], always, or unless-stopped
                  Detached only; automatic retries back off from 1s to 30s
   --stop-signal  Linux signal name or 1-64 (image StopSignal, otherwise SIGTERM)
@@ -77,6 +85,8 @@ Notes:
   OCI images require execution without user namespaces; rootless uses directories.
   Terminal options require a foreground run; -it requires a terminal on stdin.
   Detached containers receive no input; stdout and stderr share a retained log.
+  Detached image Healthcheck defaults apply automatically; foreground checks are ignored.
+  Unhealthy does not restart a container; run -d waits for process startup, not readiness.
   on-failure retries nonzero/unknown exits; :N caps consecutive automatic attempts.
   always/unless-stopped also restart successful exits and resume on VM boot.
   Manual stop pauses retries; only always resumes a manual stop on the next boot.
@@ -212,7 +222,7 @@ Examples:
 Options:
   -i, --interactive  Forward stdin (default: no input)
   -t, --tty          Allocate a terminal; combine with -i as -it for input
-  --env-file        Repeatable KEY=VALUE file; explicit --env takes precedence
+  --env-file         Repeatable KEY=VALUE file; explicit --env takes precedence
   --env             Override KEY=VALUE; repeat to add variables
   --workdir         Existing absolute directory (default: container configuration)
   --timeout         Nonnegative command duration; 0 disables it (default: 0)
@@ -248,6 +258,8 @@ Options:
 Notes:
   Prints JSON configuration and lifecycle state for a full ID or exact name.
   Includes restart_policy, restart_count, restart_at, and stopped_by_user.
+  Health includes status, consecutive failures, and five recent probe results.
+  Probe output is discarded; unhealthy does not change the restart policy.
   Environment names are shown without values.
 
 Examples:
@@ -484,6 +496,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
   casklet run -d --name worker -- /bin/sleep 300
   casklet run -it -- /bin/sh
   casklet run -d --name redis --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+  casklet run -d --name checked --health-cmd 'test -f /tmp/ready' -- /bin/sleep 300
 `
 		}
 		return "Usage: " + syntax + "\n\n" + runOptions + platformNotes + "\nExamples:\n" + examples, nil

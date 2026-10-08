@@ -198,21 +198,26 @@ func allowedExecSignal(signal syscall.Signal) bool {
 }
 
 type execServer struct {
-	store     *Store
-	id        string
-	resources containerruntime.ExecResources
-	ctx       context.Context
-	cancel    context.CancelFunc
-	listener  *net.UnixListener
-	mu        sync.Mutex
-	clients   map[*net.UnixConn]struct{}
-	workers   sync.WaitGroup
-	slots     chan struct{}
+	store      *Store
+	id         string
+	generation uint64
+	resources  containerruntime.ExecResources
+	ctx        context.Context
+	cancel     context.CancelFunc
+	listener   *net.UnixListener
+	mu         sync.Mutex
+	clients    map[*net.UnixConn]struct{}
+	workers    sync.WaitGroup
+	slots      chan struct{}
 }
 
-func newExecServer(store *Store, id string) *execServer {
+func newExecServer(store *Store, id string, generations ...uint64) *execServer {
+	generation := uint64(0)
+	if len(generations) > 0 {
+		generation = generations[0]
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &execServer{store: store, id: id, ctx: ctx, cancel: cancel, clients: make(map[*net.UnixConn]struct{}), slots: make(chan struct{}, maxExecSessions)}
+	return &execServer{store: store, id: id, generation: generation, ctx: ctx, cancel: cancel, clients: make(map[*net.UnixConn]struct{}), slots: make(chan struct{}, maxExecSessions)}
 }
 
 func (server *execServer) Start(resources containerruntime.ExecResources) error {

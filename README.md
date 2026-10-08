@@ -56,6 +56,11 @@ to override it. Anonymous-access registries are supported; private-registry logi
 and OCI rootless execution are not currently supported. See the
 [image guide](guides/usage.md#ocidocker-images).
 
+Detached containers inherit image `Healthcheck` metadata; `--health-cmd` overrides
+the probe, and `--no-healthcheck` disables it. `ps` and `inspect` show health separately
+from process status. Probe failures do not trigger automatic restart. See
+[health checks](guides/usage.md#container-health-checks) for timing and readiness.
+
 Application settings can also come from `run --config redis.json` and repeatable
 `--env-file application.env` on `run` or `exec`. JSON uses long option names; CLI
 scalars override the file, and explicit `--env` overrides env-files. Files are read

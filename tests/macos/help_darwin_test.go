@@ -12,6 +12,7 @@ func TestScopedHelpMatchesNamedHelp(t *testing.T) {
 		{"run"}, {"exec"}, {"doctor"}, {"ps"}, {"inspect"}, {"stats"},
 		{"wait"}, {"start"}, {"restart"}, {"stop"}, {"logs"}, {"rm"},
 		{"image"}, {"image", "pull"}, {"image", "import"}, {"image", "ls"}, {"image", "rm"},
+		{"volume"}, {"volume", "export"}, {"volume", "restore"},
 		{"machine"}, {"machine", "init"}, {"machine", "start"}, {"machine", "stop"},
 		{"machine", "status"}, {"machine", "share"}, {"rootfs"},
 	} {

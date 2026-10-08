@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -27,7 +28,7 @@ import (
 
 // The registry fixture uses a relocated static toolbox instead of bin/busybox.
 // No network registry, Docker Engine, or external image is required by CI.
-func ociRegistryFixture(t *testing.T) (string, func()) {
+func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) {
 	t.Helper()
 	require(t)
 	source := executionTemplate(t)
@@ -123,6 +124,11 @@ func ociRegistryFixture(t *testing.T) (string, func()) {
 	cf.OS = "linux"
 	cf.Architecture = runtime.GOARCH
 	cf.Config = v1.Config{Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`printf '%s:%s:%s\n' "$IMAGE_VALUE" "$1" "$PWD"`, "entry", "default"}, Env: []string{"IMAGE_VALUE=image", "PATH=/usr/bin:/bin"}, WorkingDir: "/new-work", User: "app:data", StopSignal: "SIGUSR1"}
+	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD-SHELL", `test "$(id -u):$(id -g)" = 123:456 && test "$IMAGE_VALUE:$PWD" = image:/new-work`}, Interval: 50 * time.Millisecond, Timeout: time.Second, Retries: 2}
+	if len(healthTests) > 0 {
+		cf.Config.Healthcheck.Test = healthTests[0]
+	}
+	cf.Config.Shell = []string{"/bin/sh", "-ec"}
 	img, err = mutate.ConfigFile(img, cf)
 	if err != nil {
 		t.Fatal(err)

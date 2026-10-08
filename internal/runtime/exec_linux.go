@@ -28,6 +28,16 @@ const execConfigSeals = unix.F_SEAL_SEAL | unix.F_SEAL_WRITE | unix.F_SEAL_GROW 
 // ExecuteInContainer isolates each added command in a child cgroup. The
 // namespace descriptors come from the live init, rather than a reusable PID.
 func ExecuteInContainer(ctx context.Context, resources ExecResources, request config.Exec, stdin, stdout, stderr *os.File, signals <-chan syscall.Signal, terminal ExecTerminal) (code int, runErr error) {
+	return executeInContainer(ctx, resources, request, stdin, stdout, stderr, signals, terminal, false)
+}
+
+// ExecuteProbe uses the normal exec isolation but kills immediately on deadline
+// or cancellation. Its streams are discarded; descendants share a child cgroup.
+func ExecuteProbe(ctx context.Context, resources ExecResources, command []string, null *os.File) (int, error) {
+	return executeInContainer(ctx, resources, config.Exec{Command: command}, null, null, null, nil, nil, true)
+}
+
+func executeInContainer(ctx context.Context, resources ExecResources, request config.Exec, stdin, stdout, stderr *os.File, signals <-chan syscall.Signal, terminal ExecTerminal, hardStop bool) (code int, runErr error) {
 	code = 125
 	if err := request.Validate(); err != nil {
 		return code, err
@@ -140,7 +150,12 @@ func ExecuteInContainer(ctx context.Context, resources ExecResources, request co
 	done := ctx.Done()
 	beginStop := func(sig syscall.Signal) {
 		cancelTerminal()
-		_ = cmd.Process.Signal(sig)
+		if hardStop {
+			_ = group.Kill()
+			_ = cmd.Process.Kill()
+		} else {
+			_ = cmd.Process.Signal(sig)
+		}
 		if grace == nil {
 			grace = time.NewTimer(stopGrace)
 			forced = grace.C

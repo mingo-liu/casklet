@@ -26,6 +26,7 @@ func (e Exec) Validate() error {
 // Apply preserves container isolation and resource settings and replaces only
 // command-specific options. Empty Workdir inherits the configured directory.
 func (e Exec) Apply(base Config) Config {
+	base.Healthcheck = nil // Additional commands do not schedule nested health probes.
 	base.Command = append([]string(nil), e.Command...)
 	base.Env = append(append([]string(nil), base.Env...), e.Env...)
 	if e.Workdir != "" {

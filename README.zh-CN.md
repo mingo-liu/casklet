@@ -48,6 +48,10 @@ OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会
 目前支持允许匿名访问的仓库，暂不支持私有仓库登录和 OCI 镜像的 rootless 运行。
 详细说明见[镜像指南](guides/usage.md#ocidocker-images)（英文）。
 
+后台容器继承镜像的 `Healthcheck` 配置，可用 `--health-cmd` 覆盖探针，
+或用 `--no-healthcheck` 禁用。`ps` 和 `inspect` 单独显示健康状态；探针失败
+不会触发自动重启。时序与就绪语义见[健康检查指南](guides/usage.md#container-health-checks)（英文）。
+
 应用配置也可以通过 `run --config redis.json` 和 `run`/`exec` 的可重复
 `--env-file application.env` 读取。JSON 使用长选项名称，命令行标量覆盖配置文件，
 显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。详见

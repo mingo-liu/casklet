@@ -250,6 +250,7 @@ func List(ctx context.Context, all bool) ([]Record, error) {
 			return nil, err
 		}
 		if all || !record.Terminal() {
+			record.Health = record.effectiveHealth()
 			result = append(result, record)
 		}
 	}

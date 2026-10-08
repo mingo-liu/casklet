@@ -2,6 +2,8 @@ package image
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,16 +16,24 @@ import (
 
 // LaunchConfig contains the execution defaults covered by an OCI image identity.
 type LaunchConfig struct {
-	StopSignal string   `json:"stop_signal,omitempty"`
-	Entrypoint []string `json:"entrypoint,omitempty"`
-	Cmd        []string `json:"cmd,omitempty"`
-	Env        []string `json:"env,omitempty"`
-	Workdir    string   `json:"workdir,omitempty"`
-	User       string   `json:"user,omitempty"`
+	Shell       []string             `json:"shell,omitempty"`
+	Healthcheck *config.HealthConfig `json:"healthcheck,omitempty"`
+	StopSignal  string               `json:"stop_signal,omitempty"`
+	Entrypoint  []string             `json:"entrypoint,omitempty"`
+	Cmd         []string             `json:"cmd,omitempty"`
+	Env         []string             `json:"env,omitempty"`
+	Workdir     string               `json:"workdir,omitempty"`
+	User        string               `json:"user,omitempty"`
 }
 
 func validateLaunch(defaults *LaunchConfig) error {
-	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir, StopSignal: defaults.StopSignal}
+	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir, StopSignal: defaults.StopSignal, Healthcheck: defaults.Healthcheck}
+	if cfg.Healthcheck.Enabled() {
+		cfg.Healthcheck = config.MergeHealth(nil, cfg.Healthcheck)
+		if len(cfg.Healthcheck.Shell) == 0 {
+			cfg.Healthcheck.Shell = defaults.Shell
+		}
+	}
 	if len(cfg.Command) == 0 {
 		cfg.Command = []string{"/no-image-default"}
 	}
@@ -39,6 +49,17 @@ func validateLaunch(defaults *LaunchConfig) error {
 func (defaults LaunchConfig) Apply(cfg config.Config, tree string, entrypoint *string) (config.Config, error) {
 	if cfg.StopSignal == "" {
 		cfg.StopSignal = defaults.StopSignal
+	}
+	healthOverrides := cfg.Healthcheck
+	cfg.Healthcheck = config.MergeHealth(defaults.Healthcheck, cfg.Healthcheck)
+	if healthOverrides != nil && len(healthOverrides.Test) == 0 && !cfg.Healthcheck.Enabled() {
+		return cfg, errors.New("healthcheck options require an enabled image test or --health-cmd")
+	}
+	if cfg.Healthcheck.Enabled() && len(cfg.Healthcheck.Shell) == 0 {
+		cfg.Healthcheck.Shell = append([]string(nil), defaults.Shell...)
+	}
+	if cfg.Healthcheck != nil && len(cfg.Healthcheck.Test) == 0 {
+		return cfg, errors.New("healthcheck options require an image test or --health-cmd")
 	}
 	args := cfg.Command
 	entry := defaults.Entrypoint
@@ -161,4 +182,11 @@ func resolveUser(tree, value string) (*config.User, error) {
 		return nil, fmt.Errorf("group %q is absent from /etc/group", group)
 	}
 	return identity, nil
+}
+
+// Compare canonical serialization so omitted empty slices remain compatible.
+func sameLaunchConfig(a, b *LaunchConfig) bool {
+	first, _ := json.Marshal(a)
+	second, _ := json.Marshal(b)
+	return bytes.Equal(first, second)
 }

@@ -17,7 +17,7 @@ func platformArguments(args []string) []string {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor") {
 		return args
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true}
+	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		if len(arg) < 2 || arg[0] != '-' || arg == "--" {

@@ -52,6 +52,9 @@ func Supervisor(id string, generations ...uint64) int {
 	defer cancel()
 	if err := store.Complete(ctx, id, generation, func(record *Record) {
 		record.CleanupFailures = containerruntime.CleanupStages(runErr)
+		if record.Health != nil {
+			record.Health.Status = HealthStopped
+		}
 		finished := time.Now().UTC()
 		record.FinishedAt, record.ExitCode, record.LogTruncated = &finished, &code, truncated
 		record.State = StateFailed
@@ -121,10 +124,11 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 		completed <- captureResult{log.truncated, errors.Join(err, log.Sync())}
 	}()
 
+	executor := newExecServer(store, id, generation)
 	observer := func(event containerruntime.Event) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return store.Update(ctx, id, func(record *Record) error {
+		err := store.Update(ctx, id, func(record *Record) error {
 			if record.Terminal() || record.Generation != generation {
 				return errors.New("container was finalized before startup")
 			}
@@ -135,6 +139,9 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 			if event.Phase == "started" {
 				started := time.Now().UTC()
 				record.StartedAt = &started
+				if cfg.Healthcheck.Enabled() {
+					record.Health = &Health{Status: HealthStarting, Checks: []HealthResult{}}
+				}
 				if record.State != StateStopping {
 					record.State = StateRunning
 				}
@@ -143,8 +150,12 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 			}
 			return nil
 		})
+		if err == nil && event.Phase == "started" {
+			executor.startHealth()
+		}
+		return err
 	}
-	code, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, newExecServer(store, id), root, func() time.Duration {
+	code, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, executor, root, func() time.Duration {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		record, err := store.Get(ctx, id)

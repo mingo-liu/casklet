@@ -15,6 +15,7 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
+	Health             *Health          `json:"health"`
 	StoppedByUser      bool             `json:"stopped_by_user"`
 	RestartCount       uint64           `json:"restart_count"`
 	RestartAt          *time.Time       `json:"restart_at"`
@@ -35,28 +36,29 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
-	RestartPolicy    string               `json:"restart_policy"`
-	StopSignal       string               `json:"stop_signal"`
-	LogMaxSize       int64                `json:"log_max_size"`
-	LogMaxFiles      int                  `json:"log_max_files"`
-	Seccomp          string               `json:"seccomp"`
-	Network          string               `json:"network"`
-	DNS              []string             `json:"dns"`
-	Publish          []config.PortMapping `json:"publish"`
-	StopTimeout      string               `json:"stop_timeout"`
-	Image            string               `json:"image,omitempty"`
-	OCI              bool                 `json:"oci,omitempty"`
-	Mounts           []config.BindMount   `json:"mounts"`
-	RootFS           string               `json:"rootfs"`
-	Hostname         string               `json:"hostname"`
-	Command          []string             `json:"command"`
-	EnvironmentNames []string             `json:"environment_names"`
-	Workdir          string               `json:"workdir"`
-	User             config.User          `json:"user"`
-	ReadOnly         bool                 `json:"read_only"`
-	Interactive      bool                 `json:"interactive"`
-	TTY              bool                 `json:"tty"`
-	Timeout          string               `json:"timeout"`
+	Healthcheck      *InspectionHealthConfig `json:"healthcheck"`
+	RestartPolicy    string                  `json:"restart_policy"`
+	StopSignal       string                  `json:"stop_signal"`
+	LogMaxSize       int64                   `json:"log_max_size"`
+	LogMaxFiles      int                     `json:"log_max_files"`
+	Seccomp          string                  `json:"seccomp"`
+	Network          string                  `json:"network"`
+	DNS              []string                `json:"dns"`
+	Publish          []config.PortMapping    `json:"publish"`
+	StopTimeout      string                  `json:"stop_timeout"`
+	Image            string                  `json:"image,omitempty"`
+	OCI              bool                    `json:"oci,omitempty"`
+	Mounts           []config.BindMount      `json:"mounts"`
+	RootFS           string                  `json:"rootfs"`
+	Hostname         string                  `json:"hostname"`
+	Command          []string                `json:"command"`
+	EnvironmentNames []string                `json:"environment_names"`
+	Workdir          string                  `json:"workdir"`
+	User             config.User             `json:"user"`
+	ReadOnly         bool                    `json:"read_only"`
+	Interactive      bool                    `json:"interactive"`
+	TTY              bool                    `json:"tty"`
+	Timeout          string                  `json:"timeout"`
 }
 
 type ResourceLimits struct {
@@ -87,11 +89,12 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	}
 	logSize, logFiles := cfg.LogRetention()
 	return Inspection{
+		Health:        record.effectiveHealth(),
 		StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount, RestartAt: record.RestartAt,
 		CleanupFailures: append([]string{}, record.CleanupFailures...),
 		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,
@@ -127,4 +130,22 @@ func ValidateStatsInterval(interval time.Duration) error {
 		return errStatsInterval
 	}
 	return nil
+}
+
+// InspectionHealthConfig exposes scheduling without probe output.
+type InspectionHealthConfig struct {
+	Shell         []string `json:"shell"`
+	Test          []string `json:"test"`
+	Interval      string   `json:"interval"`
+	Timeout       string   `json:"timeout"`
+	StartPeriod   string   `json:"start_period"`
+	StartInterval string   `json:"start_interval"`
+	Retries       int      `json:"retries"`
+}
+
+func inspectHealth(h *config.HealthConfig) *InspectionHealthConfig {
+	if !h.Enabled() {
+		return nil
+	}
+	return &InspectionHealthConfig{Shell: append([]string{}, h.Shell...), Test: append([]string(nil), h.Test...), Interval: h.IntervalValue().String(), Timeout: h.TimeoutValue().String(), StartPeriod: h.StartPeriodValue().String(), StartInterval: h.StartIntervalValue().String(), Retries: h.RetriesValue()}
 }

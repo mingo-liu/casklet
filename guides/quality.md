@@ -6,6 +6,33 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Detached container health and image HEALTHCHECK support
+
+Added independent starting/healthy/unhealthy/stopped health state to ps/inspect,
+with five bounded probe results and no probe output. Image launch defaults retain
+the Docker Healthcheck extension, exec/shell/NONE tests, custom shells, all timing
+fields including raw StartInterval, and identity coverage. Explicit flags and
+JSON configuration merge field overrides. Explicit pulls refresh newly understood
+launch metadata even when the source manifest has not changed, preserving old
+immutable IDs and retained configurations.
+
+One supervisor-owned monitor uses pinned container exec resources and a child
+cgroup, with immediate timeout/cancellation killing and no overlapping probes.
+Probe identity, environment, workdir, mounts, security, and resource limits match
+the workload. Grace-period failures, early success, retries, recovery, metadata
+contention, stop state, restart resets, and generation-fenced results preserve
+lifecycle semantics. Health failure does not trigger restart policies. Foreground
+runs do not schedule health checks. Documentation and focused help describe these
+boundaries, migration, timing limits, and readiness separately from process startup.
+
+Validation across all three additions: Darwin arm64 build, formatting, complete
+unit/race suites, and vet passed; Linux arm64 unit/race suites, vet, and the full
+privileged integration suite passed. The full real macOS suite passed, including
+configuration/env-files, binary volume archives, health transitions, and probe
+cleanup. The VM reboot test skipped to preserve other active workloads. Final image
+metadata upgrade, OCI health, and help regressions passed after the cache-compatibility
+adjustment. Intel execution was not run.
+
 ## 2026-10-08: Atomic named-volume backups and restores
 
 Added stdout tar export and stdin restore, including transport through the Mac

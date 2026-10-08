@@ -27,6 +27,7 @@ type User struct {
 
 // Config contains the validated options for one container execution.
 type Config struct {
+	Healthcheck   *HealthConfig  `json:"healthcheck,omitempty"`
 	RestartPolicy string         `json:"restart_policy,omitempty"`
 	StopSignal    string         `json:"stop_signal,omitempty"`
 	LogMaxSize    int64          `json:"log_max_size,omitempty"`
@@ -70,12 +71,22 @@ func (c Config) ValidateRunRequest() error {
 	if len(c.Command) == 0 {
 		c.Command = []string{"/image-default-command"}
 	}
+	if c.Healthcheck != nil && len(c.Healthcheck.Test) == 0 {
+		c.Healthcheck = MergeHealth(nil, c.Healthcheck)
+		c.Healthcheck.Test = []string{"NONE"}
+	}
 	return c.ValidateExecution()
 }
 
 // ValidateExecution validates options used when starting the container command.
 // It also protects the init process from invalid options in its control protocol.
 func (c Config) ValidateExecution() error {
+	if c.Healthcheck != nil && len(c.Healthcheck.Test) == 0 {
+		return errors.New("healthcheck options require a test")
+	}
+	if err := c.Healthcheck.Validate(); err != nil {
+		return err
+	}
 	if c.UserNS && len(VolumeNames(c.Mounts)) > 0 {
 		return errors.New("named volumes require execution without user namespaces")
 	}

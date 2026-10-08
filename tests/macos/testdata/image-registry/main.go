@@ -63,6 +63,7 @@ func fixture() (v1.Image, error) {
 	}
 	cf.OS, cf.Architecture = "linux", runtime.GOARCH
 	cf.Config.Cmd = []string{"/bin/busybox", "echo", "image-progress-ok"}
+	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD", "/bin/busybox", "test", "-f", "/fixture"}, Interval: 50 * time.Millisecond, Timeout: time.Second, Retries: 2}
 	return mutate.ConfigFile(img, cf)
 }
 

@@ -22,7 +22,7 @@ func writeRecords(out io.Writer, records []container.Record, asJSON bool) error 
 		return json.NewEncoder(out).Encode(records)
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tEXIT\tCREATED\tCOMMAND"); err != nil {
+	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tHEALTH\tEXIT\tCREATED\tCOMMAND"); err != nil {
 		return err
 	}
 	for _, record := range records {
@@ -30,7 +30,11 @@ func writeRecords(out io.Writer, records []container.Record, asJSON bool) error 
 		if record.ExitCode != nil {
 			exit = strconv.Itoa(*record.ExitCode)
 		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", record.ID, record.Name, record.State, exit, record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
+		health := "-"
+		if record.Health != nil {
+			health = record.Health.Status
+		}
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", record.ID, record.Name, record.State, health, exit, record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
 			return err
 		}
 	}

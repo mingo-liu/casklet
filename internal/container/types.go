@@ -31,6 +31,7 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
+	Health          *Health          `json:"health,omitempty"`
 	RestartBootID   string           `json:"restart_boot_id,omitempty"`
 	StoppedBootID   string           `json:"stopped_boot_id,omitempty"`
 	StoppedByUser   bool             `json:"stopped_by_user,omitempty"`
@@ -88,6 +89,9 @@ func validateReference(ref string) error {
 
 func validateRecord(record Record, id string) error {
 	if err := validateID(id); err != nil {
+		return err
+	}
+	if err := record.Health.validate(); err != nil {
 		return err
 	}
 	if record.StopTimeout != nil && (*record.StopTimeout < 0 || *record.StopTimeout > time.Minute) {

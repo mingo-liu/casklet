@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,26 @@ func parseRun(r Request, args []string) (Request, error) {
 	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
 	if r.Action == "run" {
+		fs.String("health-cmd", "", "container shell health probe")
+		fs.Bool("no-healthcheck", false, "disable image health probe")
+		health := &config.HealthConfig{}
+		for name, target := range map[string]**time.Duration{"health-interval": &health.Interval, "health-timeout": &health.Timeout, "health-start-period": &health.StartPeriod, "health-start-interval": &health.StartInterval} {
+			fs.Func(name, "healthcheck duration", func(value string) error {
+				d, err := time.ParseDuration(value)
+				if err == nil {
+					*target = &d
+				}
+				return err
+			})
+		}
+		fs.Func("health-retries", "consecutive healthcheck failures", func(value string) error {
+			n, err := strconv.Atoi(value)
+			if err == nil {
+				health.Retries = &n
+			}
+			return err
+		})
+		r.Config.Healthcheck = health
 		fs.StringVar(&r.Config.Seccomp, "seccomp", "default", "seccomp profile")
 		fs.BoolVar(&r.Config.UserNS, "userns", false, "user namespace")
 		fs.BoolVar(&r.Config.Rootless, "rootless", false, "rootless foreground execution")
@@ -245,6 +266,33 @@ func parseRun(r Request, args []string) (Request, error) {
 	fs.Visit(func(f *flag.Flag) { workdirSpecified = workdirSpecified || f.Name == "workdir" })
 	if workdirSpecified && r.Config.Workdir == "" {
 		return r, errors.New("--workdir must be an absolute path")
+	}
+	commandSpecified, disabled := false, false
+	fs.Visit(func(f *flag.Flag) {
+		commandSpecified = commandSpecified || f.Name == "health-cmd"
+		if f.Name == "no-healthcheck" {
+			disabled = f.Value.String() == "true"
+		}
+	})
+	if disabled {
+		other := false
+		fs.Visit(func(f *flag.Flag) { other = other || strings.HasPrefix(f.Name, "health-") })
+		if other {
+			return r, errors.New("--no-healthcheck cannot be combined with healthcheck options")
+		}
+		r.Config.Healthcheck.Test = []string{"NONE"}
+	} else if commandSpecified {
+		r.Config.Healthcheck.Test = []string{"CMD-SHELL", fs.Lookup("health-cmd").Value.String()}
+	}
+	configured := disabled || commandSpecified || r.Config.Healthcheck.Interval != nil || r.Config.Healthcheck.Timeout != nil || r.Config.Healthcheck.StartPeriod != nil || r.Config.Healthcheck.StartInterval != nil || r.Config.Healthcheck.Retries != nil
+	if !configured {
+		r.Config.Healthcheck = nil
+	}
+	if configured && !r.Detach {
+		return r, errors.New("healthcheck options require --detach")
+	}
+	if r.Config.Image == "" && r.Config.Healthcheck != nil && len(r.Config.Healthcheck.Test) == 0 {
+		return r, errors.New("healthcheck options require --health-cmd with directory templates")
 	}
 	if r.Config.Seccomp == "" {
 		return r, errors.New("--seccomp requires default or unconfined")

@@ -539,3 +539,56 @@ published volume; abandoned private staging is reclaimed by the next store opera
 Restore runs independently of other volume operations and rechecks the destination
 name before publication. Retarget a replacement container's volume mount to use the
 restored data; retained container configuration is immutable.
+
+## Container health checks
+
+After upgrading from an engine without health support, run `image pull REFERENCE`
+to refresh cached launch metadata, then recreate retained containers to adopt it.
+Existing immutable image IDs and container configurations remain unchanged.
+
+Detached containers inherit the Docker `Healthcheck` extension carried by OCI/Docker
+image configuration. It is a Docker extension, not a core OCI image-spec field.
+`CMD` executes argv directly, `CMD-SHELL` uses the image's `Shell` or `/bin/sh -c`,
+and `NONE` disables checks. Directory templates can supply `--health-cmd`.
+
+```sh
+casklet run -d --name redis-ready --image redis:8 \
+  --health-cmd 'redis-cli ping | grep -q PONG' \
+  --health-interval 5s --health-timeout 2s --health-retries 3 \
+  --health-start-period 10s --health-start-interval 1s
+casklet ps
+casklet inspect redis-ready
+casklet run -d --name unchecked --image redis:8 --no-healthcheck
+```
+
+Explicit health fields override only their corresponding image fields. Commands
+supplied by `--health-cmd` use shell form; disable cannot be combined with other
+health flags. Timing options without `--health-cmd` require an image with a check.
+Flags also work as JSON run-config fields. Defaults are interval/timeout `30s`,
+retries `3`, start period `0s`, and start interval `5s`. Interval, timeout, and
+start interval accept `1ms`–`24h`; start period accepts `0s`–`24h`; retries accept
+`1`–`1000`. Image zero values inherit defaults; explicit `--health-start-period 0s`
+clears an image's start period. Health flags require `--detach`. Foreground runs
+use image execution defaults but do not schedule health checks or publish health state.
+
+Health starts as `starting`. Exit 0 means `healthy`; any nonzero result, timeout,
+or execution failure counts towards consecutive failures. Reaching retries means
+`unhealthy`; a subsequent success resets the counter and recovers to `healthy`.
+During the start period, failures are ignored until the first success. The first
+probe runs after the selected interval (start interval during the start period),
+and subsequent probes run that interval after the previous probe finishes. Probes
+never overlap. They use the container's namespaces, network, mounts, environment,
+working directory, user, security settings, and aggregate resource limits. A timeout
+immediately kills the probe's child cgroup, including descendants.
+
+`ps` displays a separate HEALTH column and includes `health` in JSON. `inspect`
+exposes effective scheduling, state, consecutive failure count, and the last five
+probe timestamps, exit codes, timeout flags, and execution-failure flags. Probe
+output is discarded and never added to workload logs or inspection. Use a manual
+`exec` of the probe for output diagnostics. A stopped container reports `stopped`;
+containers without checks have no health state. Restart keeps the saved probe config
+but resets health/results for the new generation. Health failures do not terminate
+containers or trigger restart policies; `run -d` waits for process startup, not readiness.
+Temporary files under `/tmp` are reset on each execution, so readiness probes must
+account for that lifecycle. See the [Docker HEALTHCHECK reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
+for the source image configuration semantics.

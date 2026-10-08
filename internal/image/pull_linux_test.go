@@ -5,6 +5,7 @@ package image
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -332,5 +334,85 @@ func TestPullCanceledByProgressPreservesCacheAndCleansStaging(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".import-") {
 			t.Fatalf("canceled staging leaked: %s", entry.Name())
 		}
+	}
+}
+
+func TestPullPreservesHealthcheckDefaults(t *testing.T) {
+	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "native"}))
+	cf, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD", "/app"}, Interval: 2 * time.Second, Timeout: time.Second, StartPeriod: 4 * time.Second, Retries: 2}
+	cf.Config.Shell = []string{"/bin/custom", "-c"}
+	img, err = mutate.ConfigFile(img, cf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.pullImage(context.Background(), "localhost/health:test", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Config.Healthcheck == nil || record.Config.Healthcheck.IntervalValue() != 2*time.Second || record.Config.Healthcheck.Test[1] != "/app" {
+		t.Fatalf("pulled: %+v", record)
+	}
+	read, err := store.Resolve(context.Background(), record.ID)
+	if err != nil || read.Config.Healthcheck.RetriesValue() != 2 {
+		t.Fatalf("persisted: %+v %v", read, err)
+	}
+}
+
+// Model the previous engine's decoded view of the same registry manifest.
+type legacyHealthImage struct {
+	v1.Image
+	cf *v1.ConfigFile
+}
+
+func (i legacyHealthImage) ConfigFile() (*v1.ConfigFile, error) { return i.cf, nil }
+func (i legacyHealthImage) RawConfigFile() ([]byte, error)      { return json.Marshal(i.cf) }
+
+func TestPullRefreshesLegacyHealthMetadataWithoutManifestChange(t *testing.T) {
+	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "same"}))
+	cf, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD", "/app"}, Interval: time.Second}
+	img, err = mutate.ConfigFile(img, cf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := cf.DeepCopy()
+	legacy.Config.Healthcheck = nil
+	old, err := store.pullImage(context.Background(), "localhost/upgrade:test", legacyHealthImage{Image: img, cf: legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.pullImage(context.Background(), "localhost/upgrade:test", img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.ManifestDigest != current.ManifestDigest || old.ID == current.ID || current.Config.Healthcheck == nil {
+		t.Fatalf("did not refresh metadata: old=%+v new=%+v", old, current)
+	}
+	pinned, err := store.Resolve(context.Background(), old.ID)
+	if err != nil || pinned.Config.Healthcheck != nil {
+		t.Fatal("modified old immutable image")
+	}
+	latest, err := store.Resolve(context.Background(), "localhost/upgrade:test")
+	if err != nil || latest.ID != current.ID {
+		t.Fatalf("reference not refreshed: %+v %v", latest, err)
+	}
+	again, err := store.pullImage(context.Background(), "localhost/upgrade:test", img)
+	if err != nil || again.ID != current.ID || !again.CreatedAt.Equal(current.CreatedAt) {
+		t.Fatalf("unchanged image republished: %+v %v", again, err)
 	}
 }

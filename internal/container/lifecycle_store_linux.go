@@ -184,6 +184,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	} else {
 		record.RestartCount = 0
 	}
+	record.Health = nil
 	record.Generation++
 	record.LaunchAt = &now
 	record.PreviousExit = &previous
