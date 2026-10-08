@@ -195,12 +195,16 @@ type logCursor struct {
 }
 
 type logSegment struct {
-	file  *os.File
-	inode uint64
-	size  int64
+	file   *os.File
+	inode  uint64
+	size   int64
+	offset int64
 }
 
 func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64) ([]byte, logCursor, error) {
+	if cursor.offset < 0 {
+		return nil, cursor, errors.New("invalid log cursor offset")
+	}
 	lock, record, err := store.lockLog(ctx, id, true)
 	if err != nil {
 		return nil, cursor, err
@@ -241,25 +245,38 @@ func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Confi
 			file.Close()
 			return nil, cursor, errors.New("container log exceeds the retained size limit")
 		}
+		offset := int64(0)
 		if stat.Ino == cursor.inode {
 			start = len(segments)
+			if cursor.offset <= stat.Size {
+				offset = cursor.offset
+			}
 		}
-		segments = append(segments, logSegment{file, stat.Ino, stat.Size})
+		segments = append(segments, logSegment{file: file, inode: stat.Ino, size: stat.Size, offset: offset})
 	}
-	var data []byte
+	// Sizes are validated under the log lock. Allocate only the unread bytes
+	// once, avoiding per-file growth buffers and repeated concatenation copies.
+	if err := ctx.Err(); err != nil {
+		return nil, cursor, err
+	}
+	var length int64
 	for _, segment := range segments[start:] {
-		offset := int64(0)
-		if segment.inode == cursor.inode && cursor.offset <= segment.size {
-			offset = cursor.offset
-		}
-		if _, err := segment.file.Seek(offset, io.SeekStart); err != nil {
+		length += segment.size - segment.offset
+	}
+	data := make([]byte, length)
+	var position int64
+	for _, segment := range segments[start:] {
+		if err := ctx.Err(); err != nil {
 			return nil, cursor, err
 		}
-		chunk, err := io.ReadAll(io.LimitReader(segment.file, segment.size-offset))
-		if err != nil {
+		if _, err := segment.file.Seek(segment.offset, io.SeekStart); err != nil {
 			return nil, cursor, err
 		}
-		data = append(data, chunk...)
+		end := position + segment.size - segment.offset
+		if _, err := io.ReadFull(segment.file, data[position:end]); err != nil {
+			return nil, cursor, err
+		}
+		position = end
 		cursor.inode, cursor.offset = segment.inode, segment.size
 	}
 	if len(segments) > 0 {

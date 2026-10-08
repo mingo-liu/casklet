@@ -331,6 +331,44 @@ func TestLogTailSpansRotatedFiles(t *testing.T) {
 	}
 }
 
+func TestLargeLogSnapshotPreservesSegmentsAndCursorSuffix(t *testing.T) {
+	store := testStore(t)
+	cfg := testConfig()
+	cfg.LogMaxSize, cfg.LogMaxFiles = 128<<10, 3
+	record, err := store.Create(context.Background(), cfg, "large-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected bytes.Buffer
+	for i := cfg.LogMaxFiles - 1; i >= 0; i-- {
+		data := bytes.Repeat([]byte{byte('a' + i)}, (i+1)*35*1024)
+		if err := os.WriteFile(filepath.Join(store.root, record.ID, logName(i)), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		expected.Write(data)
+	}
+	var cursor logCursor
+	defer func() {
+		if cursor.pin != nil {
+			cursor.pin.Close()
+		}
+	}()
+	if got := snapshotLogs(t, store, record, cfg, &cursor); got != expected.String() {
+		t.Fatal("large snapshot changed segment order or content")
+	}
+	if got := snapshotLogs(t, store, record, cfg, &cursor); got != "" {
+		t.Fatal("unchanged large snapshot repeated output")
+	}
+	log := &rotatingLog{store: store, id: record.ID, cfg: cfg}
+	suffix := strings.Repeat("suffix\n", 6000)
+	if _, err := log.Write([]byte(suffix)); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshotLogs(t, store, record, cfg, &cursor); got != suffix {
+		t.Fatal("large snapshot cursor skipped or repeated appended bytes")
+	}
+}
+
 func TestLogRotationRejectsUnsafeArtifactsWithoutMutating(t *testing.T) {
 	for _, kind := range []string{"symlink", "hardlink", "public"} {
 		t.Run(kind, func(t *testing.T) {

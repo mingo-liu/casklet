@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Allocate log snapshots once
+
+Log snapshots allocate one buffer sized to validated unread bytes and read each
+retained segment directly into it. This removes growing per-segment buffers and
+concatenation copies. Per-container locking, legacy writer compatibility,
+retention bounds, inode pinning, generation fencing, and follower offsets remain
+in place. Cancellation is checked before allocation and between segment reads.
+
+`TestLargeLogSnapshotPreservesSegmentsAndCursorSuffix` verifies multi-buffer
+segments, chronological content, unchanged snapshots, and appended suffixes.
+Existing rotation, retention-overrun, unsafe-artifact, legacy, lock contention,
+and concurrent snapshot tests passed. `BenchmarkLogSnapshot` reads four 4 MiB
+segments: Linux arm64 allocation fell from about 87.26 MB to 16.78 MB per
+snapshot (81%). Three ten-iteration samples were run before and after; this
+measures allocations for the fixture rather than total process memory.
+
+Final cumulative validation for engine integrity and the two allocation
+optimizations: `make build fmt-check test vet test-race` passed on macOS arm64;
+formatting, unit tests, vet, race checks, and the complete privileged integration
+suite passed in the Linux arm64 VM. `make test-macos` passed, including VM
+stop/start, corruption repair, local images, log rotation/follow cancellation,
+signals, lifecycle ports, and interactive terminals. The final fault-test cleanup
+adjustment passed its macOS end-to-end test and vet again. Intel Mac and Linux
+amd64 execution were not run locally.
+
 ## 2026-10-08: Reuse image identity read buffers
 
 Image identity hashing uses one 32 KiB buffer per traversal across regular
