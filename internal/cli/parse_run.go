@@ -20,6 +20,10 @@ var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za
 func parseRun(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	if r.Action == "run" {
+		fs.String("env-file", "", "environment assignments file")
+		fs.String("config", "", "JSON run configuration")
+	}
 	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
 	if r.Action == "run" {

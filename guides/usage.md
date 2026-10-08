@@ -460,3 +460,48 @@ rootfs and supports foreground execution with loopback-only networking.
 The product VM automatically configures the private user runtime directory,
 cgroup delegation, and AppArmor user namespace permission for the guest engine.
 Explicit UID/GID mapping ranges refer to guest Linux identities, not Mac accounts.
+
+## Repeatable deployment configuration
+
+`run --config FILE` reads a strict JSON object using long option names as keys.
+String options take strings (including durations and limits), boolean options take
+booleans, and repeatable options take string arrays. `command` is a nonempty argv
+array. Unknown/duplicate keys, nulls, wrong types, and files larger than 1 MiB fail
+before VM startup. No shell evaluation or variable interpolation occurs.
+
+```json
+{
+  "image": "redis:8",
+  "detach": true,
+  "name": "redis",
+  "memory": "256m",
+  "restart": "unless-stopped",
+  "env-file": ["application.env"],
+  "env": ["MODE=production"],
+  "mount": ["type=volume,source=app-data,target=/data"]
+}
+```
+
+```sh
+casklet run --config redis.json
+casklet run --config redis.json --name redis-test --memory 128m
+casklet run --env-file application.env --env MODE=test -- /bin/sh -c 'echo "$MODE"'
+casklet exec --env-file application.env redis -- /bin/sh -c 'echo "$MODE"'
+```
+
+CLI scalar options override file options, including explicit `false` booleans;
+either CLI source option replaces the configured image/rootfs. Repeated options
+append to the configuration. An explicit command after `--` replaces `command`.
+Config rootfs, bind sources, and env-file paths resolve relative to the JSON file;
+CLI paths resolve against the current directory. On macOS, omitting both sources
+uses the builtin BusyBox rootfs. Files are read locally before transport; config
+and environment files do not need a VM share. Bind sources and rootfs still do.
+
+Environment files contain one `KEY=VALUE` per line; empty lines and lines whose
+first non-space character is `#` are ignored. LF and CRLF are accepted. Names use
+POSIX syntax; empty values are valid. Values preserve spaces, quotes, `$`, `=`, and
+`#` literally. `export`, interpolation, multiline values, and bare keys are not
+supported. Precedence is image defaults, env-files in order, config `env`, then CLI
+`--env`, regardless of where env-file flags appear. Restart uses the saved merged
+configuration, so it does not reopen these files. Keep files containing credentials
+out of version control and restrict their permissions.

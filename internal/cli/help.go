@@ -41,6 +41,8 @@ const runOptions = `Options:
   --memory       Positive bytes or binary k/m/g units (default: 128m)
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
+  --config      Strict JSON run options; CLI scalars override config values
+  --env-file    Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
   --workdir      Absolute working directory (image default, otherwise /)
   --user         Numeric UID[:GID]; overrides image User (otherwise 0:0)
@@ -178,6 +180,7 @@ Examples:
 Options:
   -i, --interactive  Forward stdin (default: no input)
   -t, --tty          Allocate a terminal; combine with -i as -it for input
+  --env-file        Repeatable KEY=VALUE file; explicit --env takes precedence
   --env             Override KEY=VALUE; repeat to add variables
   --workdir         Existing absolute directory (default: container configuration)
   --timeout         Nonnegative command duration; 0 disables it (default: 0)

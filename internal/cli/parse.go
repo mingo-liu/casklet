@@ -34,6 +34,10 @@ func Parse(args []string) (request Request, err error) {
 			err = argumentError(args, err)
 		}
 	}()
+	args, err = expandFileArguments(args)
+	if err != nil {
+		return Request{}, err
+	}
 	if len(args) == 0 {
 		return Request{Action: "help"}, nil
 	}

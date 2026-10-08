@@ -17,6 +17,12 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	if handled, code := executeHostCommand(args, stdin, stdout, stderr); handled {
 		return code
 	}
+	var err error
+	args, err = expandFileArguments(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "casklet: %v\n", err)
+		return 125
+	}
 	args = platformArguments(args)
 	r, err := Parse(args)
 	if err != nil {

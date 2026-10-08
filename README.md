@@ -56,6 +56,11 @@ to override it. Anonymous-access registries are supported; private-registry logi
 and OCI rootless execution are not currently supported. See the
 [image guide](guides/usage.md#ocidocker-images).
 
+Application settings can also come from `run --config redis.json` and repeatable
+`--env-file application.env` on `run` or `exec`. JSON uses long option names; CLI
+scalars override the file, and explicit `--env` overrides env-files. Files are read
+on the Mac. See [deployment configuration](guides/usage.md#repeatable-deployment-configuration).
+
 ## Pull progress and image management
 
 Automatic pulls and explicit `image pull` show per-layer download, verification,

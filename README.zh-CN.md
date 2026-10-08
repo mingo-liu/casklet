@@ -48,6 +48,11 @@ OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会
 目前支持允许匿名访问的仓库，暂不支持私有仓库登录和 OCI 镜像的 rootless 运行。
 详细说明见[镜像指南](guides/usage.md#ocidocker-images)（英文）。
 
+应用配置也可以通过 `run --config redis.json` 和 `run`/`exec` 的可重复
+`--env-file application.env` 读取。JSON 使用长选项名称，命令行标量覆盖配置文件，
+显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。详见
+[部署配置](guides/usage.md#repeatable-deployment-configuration)（英文）。
+
 ## 拉取进度与镜像管理
 
 自动拉取和显式 `image pull` 都会在 stderr 显示逐层下载、校验和解包进度。

@@ -6,6 +6,20 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-08: Repeatable run configuration and environment files
+
+Added strict JSON `run --config` and repeatable `run/exec --env-file` options.
+Local expansion precedes VM initialization, privilege delegation, and transport;
+retained executions save merged values. CLI scalars and explicit commands override
+config defaults; repeated options append. Relative file paths use the config's
+directory, and all explicit env values override env-files. Bounded regular-file
+reads, duplicate/unknown-key rejection, literal values, CRLF, and sanitized env-file
+errors are covered by regressions. Focused help and bilingual quick starts agree.
+
+Validation: Darwin arm64 build, unit tests, vet, and formatting passed. The real
+macOS configuration/env-file test passed, including CLI overrides, exec, and restart
+after deleting the local files. Linux runtime behavior is unchanged by this step.
+
 ## 2026-10-08: Durable automatic restart policies
 
 Detached containers now accept `--restart no|on-failure[:1-1000]|always|unless-stopped`.

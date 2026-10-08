@@ -11,6 +11,7 @@ import (
 func parseExec(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	fs.String("env-file", "", "environment assignments file")
 	fs.BoolVar(&r.Exec.Interactive, "interactive", false, "forward stdin")
 	fs.BoolVar(&r.Exec.Interactive, "i", false, "forward stdin")
 	fs.BoolVar(&r.Exec.TTY, "tty", false, "allocate a terminal")
