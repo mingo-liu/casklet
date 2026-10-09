@@ -201,7 +201,21 @@ casklet image prune
 
 清理包括未使用的带标签镜像，保留容器与数据卷，并跳过存在活动租约或被保留容器引用的镜像。
 同时清理未被拉取操作使用的压缩层缓存。`--dry-run` 保留镜像与压缩层，只输出可清理的镜像 ID。
-`system df` 将下载缓存计入镜像实际占用空间。
+`system df` 用 `images` 展示解包镜像占用，用 `image-cache` 单独展示下载存储占用。
+
+可独立管理压缩层下载缓存，保留镜像和容器：
+
+```sh
+casklet image cache ls --json
+casklet image cache prune --dry-run
+casklet image cache prune
+casklet image cache limit 1g
+```
+
+默认最多保留 2 GiB 压缩数据；`limit 0` 关闭自动淘汰。设置保存在虚拟机中，修改容量和
+拉取结束时会按最近使用时间淘汰空闲层。活动租约可能暂时超额；下载临时文件、锁文件
+开销和解包镜像不计入此限制。拉取仍需要足够的下载与解包空间。清理预览只报告可回收的
+实际分配字节数及层、临时文件数量，不删除数据。
 
 镜像的 `StopSignal` 会保留用于后台容器关闭，可用 `--stop-signal SIGQUIT` 覆盖。
 停止和重启会先发送该 Linux 信号，超过配置的停止宽限时间后强制终止。

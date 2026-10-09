@@ -31,6 +31,7 @@ type Request struct {
 	Entrypoint  *string
 	DryRun      bool
 	Progress    string
+	CacheLimit  int64
 }
 
 func Parse(args []string) (request Request, err error) {

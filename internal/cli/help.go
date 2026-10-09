@@ -118,12 +118,74 @@ Options:
 
 Notes:
   Counts allocated blocks; includes all retained container roots and logs.
+  images excludes .blobs; image-cache reports compressed blobs, staging, and cache locks.
   Does not follow symlinks; excludes mounted subtrees. Live writes may change sampled totals.
   Low space means less than 1 GiB or 10% available on the guest filesystem.
   Host bind data and Mac sparse VM disk allocation are outside these totals.
 
 Examples:
   casklet system df --json
+`,
+	"image cache": `Usage: casklet image cache COMMAND
+
+Commands:
+  ls [--json]                  Show retained compressed blobs and capacity policy
+  prune [--dry-run] [--json]    Reclaim idle blobs and abandoned download staging
+  limit [--json] SIZE          Save capacity and evict least recently used idle blobs
+
+Notes:
+  Independent cache cleanup preserves unpacked images and all containers.
+  The default limit is 2 GiB of retained compressed data; 0 disables eviction.
+
+Examples:
+  casklet image cache ls
+  casklet image cache prune --dry-run
+  casklet image cache limit 1g
+`,
+	"image cache ls": `Usage: casklet image cache ls [--json]
+
+Options:
+  --json  Print policy, compressed/allocated bytes, idle allocation, and blob entries
+
+Notes:
+  Shows digest, last verified use, and sampled lease state for retained blobs.
+  Allocation excludes staging and lock overhead; system df includes those in image-cache.
+  Reclaimable allocation is a snapshot; deletion always rechecks leases.
+
+Examples:
+  casklet image cache ls --json
+`,
+	"image cache prune": `Usage: casklet image cache prune [--dry-run] [--json]
+
+Options:
+  --dry-run  Preview reclaimed allocated bytes and blob/staging counts
+  --json     Print the result as JSON, including partial completion on failure
+
+Notes:
+  Removes idle compressed blobs and abandoned staging, preserving images and containers.
+  Skips active download, verification, and extraction leases; stable lock files remain.
+  Preview preserves data; cancellation or storage errors may leave partial cleanup.
+
+Examples:
+  casklet image cache prune --dry-run
+  casklet image cache prune --json
+`,
+	"image cache limit": `Usage: casklet image cache limit [--json] SIZE
+
+Options:
+  --json  Print the resulting cache report as JSON
+
+Notes:
+  SIZE accepts positive bytes, binary k/m/g units, or 0 for unlimited; default: 2g.
+  Saves the policy in the VM and immediately evicts least recently used idle blobs.
+  Pull completion also enforces the limit, including failure and cancellation.
+  Active blobs can temporarily exceed the limit; download staging is excluded.
+  Large pulls may need additional disk space. Images and containers are preserved.
+  A cleanup failure returns an error but leaves the saved policy in effect.
+
+Examples:
+  casklet image cache limit 1g
+  casklet image cache limit 0
 `,
 	"image prune": `Usage: casklet image prune [--dry-run]
 
@@ -463,6 +525,7 @@ Commands:
   ls [--json]       List cached images and registry references
   rm ID             Remove an unused image
   prune [--dry-run]  Remove unused images and idle compressed download blobs
+  cache COMMAND     Inspect, independently clean, or limit compressed download data
 
 Notes:
   run --image uses cached names or IDs; an uncached name is pulled automatically.
@@ -536,7 +599,7 @@ Examples:
   casklet image ls
   casklet image rm 406e742c72ac
 `,
-	"help": `Usage: casklet help [COMMAND [SUBCOMMAND]]
+	"help": `Usage: casklet help [COMMAND [SUBCOMMAND ...]]
 
 Notes:
   With no topic, lists commands. COMMAND --help and help COMMAND are equivalent.
@@ -564,7 +627,7 @@ func helpRequest(topics []string) (Request, error) {
 	if _, exists := commandHelp[topic]; exists || topic == "run" || topic == "doctor" || hostHelpTopic(topic) {
 		return Request{Action: "help", HelpTopic: topic}, nil
 	}
-	return Request{}, fmt.Errorf("unknown help topic %q; choose one command, optionally followed by its subcommand", topic)
+	return Request{}, fmt.Errorf("unknown help topic %q; choose a command, optionally followed by its subcommands", topic)
 }
 
 func scopedUsage(topic string, macOS bool) (string, error) {

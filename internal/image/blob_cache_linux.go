@@ -123,6 +123,11 @@ func (store *Store) acquireBlob(ctx context.Context, dir string, layer v1.Layer,
 		}
 		file, err := store.openVerifiedBlob(ctx, dir, d)
 		if err == nil {
+			if err := touchCachedBlob(file); err != nil {
+				file.Close()
+				lease.Close()
+				return nil, err
+			}
 			event.Stage, event.Current = ProgressLayerCached, 0
 			reportProgress(ctx, event)
 			return &cachedBlob{file: file, lease: lease, descriptor: d}, nil
@@ -164,6 +169,10 @@ func (store *Store) fillBlobLocked(ctx context.Context, dir string, layer v1.Lay
 	}()
 	file, err := store.openVerifiedBlob(ctx, dir, d)
 	if err == nil {
+		if err := touchCachedBlob(file); err != nil {
+			file.Close()
+			return nil, err
+		}
 		if _, err := waitFileLock(ctx, lease, true); err != nil {
 			file.Close()
 			return nil, err
@@ -381,79 +390,6 @@ func closeBlobs(blobs []*cachedBlob) {
 // currently being downloaded, validated or extracted. Immutable image roots
 // remain usable after compressed cache data is reclaimed.
 func (store *Store) pruneBlobs(ctx context.Context, dryRun bool) error {
-	dir, err := store.blobDirectory(false)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		name := entry.Name()
-		digest := name
-		if strings.HasPrefix(name, ".lock-") {
-			digest = strings.TrimPrefix(name, ".lock-")
-		}
-		if strings.HasPrefix(name, ".stage-") {
-			parts := strings.SplitN(strings.TrimPrefix(name, ".stage-"), "-", 2)
-			if len(parts) != 2 || parts[1] == "" {
-				return errors.New("invalid compressed layer staging name")
-			}
-			digest = parts[0]
-		}
-		if ValidateID("sha256:"+digest) != nil {
-			return errors.New("invalid compressed layer cache entry")
-		}
-		if seen[digest] {
-			continue
-		}
-		seen[digest] = true
-		if err := store.pruneBlob(ctx, dir, digest, dryRun); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (store *Store) pruneBlob(ctx context.Context, dir, digest string, dryRun bool) error {
-	file, err := store.openFile(filepath.Join(dir, ".lock-"+digest), unix.O_RDWR|unix.O_CREAT)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-	if errors.Is(err, unix.EWOULDBLOCK) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, digest)
-	blob, err := store.openFile(path, unix.O_RDONLY)
-	if err == nil {
-		blob.Close()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if dryRun {
-		return store.recoverBlobStagesLocked(dir, digest, true)
-	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := store.recoverBlobStagesLocked(dir, digest); err != nil {
-		return err
-	}
-	return syncDirectory(dir)
+	_, err := store.PruneCache(ctx, dryRun)
+	return err
 }

@@ -230,7 +230,23 @@ Pruning includes unused tagged images, preserves containers and volumes, and
 refuses images with active leases or references from retained containers.
 It also clears compressed download blobs not in use by a pull. `--dry-run` leaves
 both images and blobs intact and prints eligible image IDs only. `system df`
-includes the download cache in allocated image storage.
+reports unpacked image storage as `images` and download storage as `image-cache`.
+
+Manage compressed downloads independently of retained images and containers:
+
+```sh
+casklet image cache ls --json
+casklet image cache prune --dry-run
+casklet image cache prune
+casklet image cache limit 1g
+```
+
+The default limit is 2 GiB of retained compressed data; `limit 0` disables automatic
+eviction. Settings persist in the VM. Setting a limit and completing a pull evict
+least recently used idle blobs. Active leases can temporarily exceed the limit;
+download staging, lock overhead, and unpacked images are excluded. Pulls still need
+enough disk space for their downloads and extraction. Preview reports eligible
+allocated bytes and blob/staging counts without deleting data.
 
 Image `StopSignal` is retained for managed shutdown. Override it with
 `--stop-signal SIGQUIT`; stop/restart uses that Linux signal before the configured

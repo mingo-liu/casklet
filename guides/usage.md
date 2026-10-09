@@ -283,12 +283,48 @@ can download independently.
 Compressed data is limited to 4 GiB per layer and 16 GiB per image; the existing
 uncompressed limits also apply. Failed or canceled pulls join all download workers
 and remove partial staging. Fully verified blobs may remain reusable after a
-later extraction failure. Corrupt cached blobs fail explicitly; use `image prune`
+later extraction failure. Corrupt cached blobs fail explicitly; use `image cache prune`
 to reclaim unused cache data before retrying. Images retain independent unpacked
 roots, so this cache saves registry downloads without sharing their filesystem
-layers. Download blobs can occupy additional VM disk space; `system df` includes
-them in image storage. `image prune` clears blobs not leased by an active pull;
+layers. Download blobs can occupy additional VM disk space; `system df` reports
+them separately as `image-cache`. `image prune` clears blobs not leased by an active pull;
 `--dry-run` preserves both images and blobs and prints only eligible image IDs.
+
+```sh
+casklet image cache ls
+casklet image cache ls --json
+casklet image cache prune --dry-run --json
+casklet image cache prune
+casklet image cache limit 1g
+casklet image cache limit 0
+```
+
+`image cache ls` reports the persistent capacity policy, retained compressed bytes,
+allocated blob bytes, sampled idle allocation, and per-blob digest/size/last-use/
+lease state. JSON retains full digests and exact byte counts. Last use is the
+latest download or verified cache hit, recorded on the pinned blob descriptor.
+Idle allocation is a snapshot; cleanup rechecks each lease before deletion.
+
+The default limit is 2 GiB. `image cache limit SIZE` accepts positive bytes or
+binary `k/m/g` units, or `0` for unlimited. The VM stores the setting atomically;
+reopening the engine retains it. Changing the limit immediately evicts least
+recently used idle blobs, and resolved pulls enforce it on completion, including
+unchanged images, download cancellation, and extraction failure. Maintenance is
+bounded to five seconds after pull cleanup. Active downloads, validation, and
+extraction remain protected: their leases can temporarily keep retained data over
+the limit, until later maintenance can reclaim idle candidates. Download staging,
+lock/policy overhead, and unpacked roots are excluded from the compressed-byte
+limit. The limit is not a reservation or a hard disk-space bound for active pulls.
+A cleanup failure returns an error; an already saved limit remains in effect.
+
+Independent `image cache prune` removes idle compressed blobs and abandoned
+download staging without removing image roots, references, or containers. Preview
+preserves data and reports eligible allocated bytes plus blob/staging counts.
+`--json` reports `dry_run`, `blobs`, `staging_files`, and `reclaimed_bytes`; on an
+error these describe completed work (or previewed work), and the command exits
+nonzero. Stable digest and management lock files remain. Cache allocation excludes
+directory/lock/staging overhead in `cache ls`; `system df` includes that overhead
+in its `image-cache` category. Cached images remain usable after cache cleanup.
 
 ## Persistent data
 
@@ -564,8 +600,11 @@ casklet image prune
 ```
 
 `system df` reports guest filesystem capacity/free/available bytes and allocated
-blocks for images, retained containers (including logs), named volumes, transient
-runs, and templates. Hardlinks are counted once within a category, sparse files
+blocks for unpacked images, compressed download storage (`image-cache`), retained
+containers (including logs), named volumes, transient runs, and templates. The
+`images` category excludes `.blobs`; `image-cache` includes blobs, download staging,
+and digest locks, without double counting image allocation. Hardlinks are counted
+once within a category (and across the image/cache partition), sparse files
 use allocated blocks, symlinks are not followed, and mounted descendants are
 excluded. Live workloads make this a sampled report rather than an atomic snapshot.
 Host bind data and the Mac's sparse VM disk file are outside these totals. A

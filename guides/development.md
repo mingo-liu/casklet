@@ -120,6 +120,13 @@ Blob-cache regressions count registry GETs across images, bound simultaneous
 downloads, preserve ordered whiteouts, cancel/join workers, and protect cache data
 with usage leases during prune. Mac progress tests count actual guest registry
 downloads for cold and warm pulls and check both pipe and host terminal output.
+Cache-management regressions cover persistent/default/unlimited policies, verified
+hit LRU ordering, active lease and download protection, independent prune previews,
+image survival after eviction, failed/canceled pull maintenance, unsafe policy
+artifacts, and cancelable management locks. Disk tests partition image/cache
+allocation without double counting. Privileged CLI checks preserve images during
+cache-only cleanup, exercise persisted limits, and verify post-pull eviction;
+macOS checks sample status and preview without deleting the user's cache.
 
 Image cleanup regressions pause deletion after its internal lease disappears and
 verify that listing, acquisition, import, pull, and same-ID publication still

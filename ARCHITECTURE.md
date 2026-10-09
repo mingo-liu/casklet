@@ -231,6 +231,18 @@ blob publication, and cache hits hash the pinned file again. DiffIDs and whiteou
 remain checked/applied in manifest order. Prune skips active blob leases and clears
 idle blobs independently of unpacked image references. The cache is not part of
 the local image identity, and unpacked roots remain independent across images.
+An independent stable `.cache-lock` serializes cache policy, inventories, pruning,
+and eviction; these operations never hold the image metadata lock or block on
+digest leases. `.cache-policy` is atomically synced and defaults to 2 GiB of
+retained compressed payload; zero disables automatic eviction. Verified hits
+update use time on the pinned descriptor. Policy changes and resolved pull
+completion evict oldest idle blobs, rechecking their current lease and use time.
+Pull maintenance is bounded to five seconds after leases close, including errors.
+Active blobs may exceed this retention limit; staging and metadata are excluded.
+Independent cache pruning preserves image roots and references, reports allocated
+bytes and blob/staging counts, and keeps all stable lock files. Storage scans
+partition `images` and `image-cache` using pinned no-cross-mount opens and shared
+inode accounting, so `.blobs` allocation is reported once.
 Network preparation precedes workload startup deadlines.
 Operation-scoped image observers emit layer phases and throttled byte counts from
 compressed streams and archive reads. The CLI owns rendering on stderr, preserving

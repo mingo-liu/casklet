@@ -6,6 +6,50 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-10: Independent bounded download-cache management
+
+Added `image cache ls/prune/limit` with focused help and JSON output. Cache-only
+cleanup preserves unpacked images, references, and containers; previews report
+eligible allocated bytes and blob/staging counts. Stable digest locks remain.
+The persistent VM policy defaults to 2 GiB of retained compressed payload, with
+zero disabling automatic eviction. Verified reuse updates last-use time through
+the pinned descriptor. Policy changes and resolved pull completion evict least
+recently used idle blobs, including unchanged pulls, cancellation, and extraction
+failure. Active leases are skipped without waiting; they may temporarily exceed
+the limit, which excludes download staging and metadata. Pull maintenance uses
+a five-second cleanup context. Atomic policy writes and an independent stable
+management lock preserve ownership, no-follow, permission, and link-count checks.
+
+`system df` now partitions unpacked `images` and `image-cache` allocation, including
+cache directories, locks, and staging in the latter. Pinned no-cross-mount scans
+share inode accounting to avoid double counting. Cache reports expose retained
+payload and allocated blob bytes separately; reclaimable totals are snapshots.
+
+Regressions cover policy persistence and unsafe artifacts, verified-hit LRU,
+protected leases/downloads, independent previews and image survival, unlimited
+capacity, success/failure/cancellation maintenance, cancelable locks, CLI bounds,
+help parity, JSON results, and partitioned sparse allocation. Privileged CLI
+tests exercise cache-only pruning and quota enforcement; real Mac checks preserve
+the user's cache by using preview only.
+
+Validation:
+
+- `make fmt-check test vet test-race` passed on macOS arm64 and in the dedicated
+  Linux arm64 development VM. The complete image and storage unit suites also
+  passed as root. The added mounted-cache partition test passed with a real
+  same-filesystem bind mount.
+- The complete privileged Linux integration suite passed, including independent
+  cache preview/removal, image survival, persisted capacity, automatic post-pull
+  eviction, and the pinned legacy supervisor regression.
+- `make test-macos` passed through the real client/VM path, including cache status
+  and data-preserving previews, nested help parity, cold/warm registry request
+  counts, retained containers, and VM stop/start. The product VM's capacity policy
+  was left unchanged; cache-only deletion and policy updates ran in the dedicated
+  Linux development VM.
+- Native and amd64 Darwin client/embedded Linux engine builds passed; the local
+  binary was restored to native arm64 afterward. Intel Mac execution and Linux
+  amd64 privileged execution were not performed locally.
+
 ## 2026-10-09: Image deletion and abandoned recovery outside the metadata lock
 
 Removal checks image leases, retained container references, and mounted storage

@@ -154,7 +154,7 @@ func (store *Store) lockReference(ctx context.Context, ref string) (*os.File, er
 	return waitFileLock(ctx, file, false)
 }
 
-func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Image, cancelSource ...context.CancelFunc) (Record, error) {
+func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Image, cancelSource ...context.CancelFunc) (result Record, resultErr error) {
 	cf, err := img.ConfigFile()
 	if err != nil {
 		return Record{}, err
@@ -192,6 +192,14 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 	if err := validateLaunch(launch); err != nil {
 		return Record{}, err
 	}
+	// Maintenance runs after all blob leases close, including worker failures.
+	// A canceled pull still leaves the retained cache within its configured bound
+	// whenever idle candidates suffice. Active peers are never waited on.
+	defer func() {
+		maintenance, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resultErr = errors.Join(resultErr, store.enforceCacheLimit(maintenance))
+	}()
 	reportProgress(ctx, Progress{Stage: ProgressWaiting, Reference: ref})
 	lock, err := store.lock(ctx, true)
 	if err != nil {
@@ -221,6 +229,7 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 	}
 	defer lease.Close()
 	defer store.cleanupImport(stage, transaction)
+
 	tree := filepath.Join(stage, "rootfs")
 	if err := os.Mkdir(tree, 0755); err != nil {
 		return Record{}, err

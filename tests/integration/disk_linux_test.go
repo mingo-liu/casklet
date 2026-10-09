@@ -27,7 +27,7 @@ func TestDiskUsageAndUnusedImagePrune(t *testing.T) {
 	if err := json.Unmarshal([]byte(backgroundSuccess(t, "system", "df", "--json")), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Filesystem.TotalBytes == 0 || len(report.Categories) != 5 {
+	if report.Filesystem.TotalBytes == 0 || len(report.Categories) != 6 {
 		t.Fatalf("report %+v", report)
 	}
 	removed := backgroundSuccess(t, "image", "prune")

@@ -15,6 +15,22 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer) (int, error)
 		return 125, err
 	}
 	switch r.Action {
+	case "image-cache-ls", "image-cache-limit":
+		var report image.CacheReport
+		if r.Action == "image-cache-limit" {
+			report, err = store.SetCacheLimit(ctx, r.CacheLimit)
+		} else {
+			report, err = store.CacheUsage(ctx)
+		}
+		if err == nil {
+			err = writeCacheReport(stdout, report, r.JSON)
+		}
+	case "image-cache-prune":
+		var result image.CachePruneResult
+		result, err = store.PruneCache(ctx, r.DryRun)
+		if writeErr := writeCachePrune(stdout, result, r.JSON); writeErr != nil {
+			return 125, writeErr
+		}
 	case "image-pull":
 		var record image.Record
 		record, err = store.Pull(ctx, r.Reference)

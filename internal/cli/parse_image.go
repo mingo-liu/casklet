@@ -11,13 +11,16 @@ import (
 
 func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("image requires pull, import, ls, rm, or prune")
+		return r, errors.New("image requires pull, import, ls, rm, prune, or cache")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
 			return r, errors.New("image help takes no arguments; use casklet help image COMMAND for a subcommand")
 		}
 		return Request{Action: "help", HelpTopic: "image"}, nil
+	}
+	if args[0] == "cache" {
+		return parseImageCache(r, args[1:])
 	}
 	r.Action = "image-" + args[0]
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)

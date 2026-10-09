@@ -26,9 +26,9 @@ func AllocatedBytes(ctx context.Context, path string) (uint64, error) {
 	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
 	seen := map[[2]uint64]bool{}
-	return walk(ctx, f, seen, 0)
+	return walk(ctx, f, seen, 0, "")
 }
-func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int) (uint64, error) {
+func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int, exclude string) (uint64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -51,6 +51,9 @@ func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int)
 			return 0, err
 		}
 		for _, entry := range entries {
+			if entry.Name() == exclude {
+				continue
+			}
 			if err := ctx.Err(); err != nil {
 				return 0, err
 			}
@@ -71,7 +74,7 @@ func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int)
 					return 0, err
 				}
 				f := os.NewFile(uintptr(fd), entry.Name())
-				n, err := walk(ctx, f, seen, depth+1)
+				n, err := walk(ctx, f, seen, depth+1, "")
 				f.Close()
 				if err != nil {
 					return 0, err
@@ -112,6 +115,36 @@ func filesystem(path string) (Filesystem, error) {
 	return r, nil
 }
 func DiskUsage(ctx context.Context) (Report, error) { return usageAt(ctx, "/var/lib/casklet") }
+
+// Partition a pinned image tree without double counting or entering a mounted
+// .blobs directory. Shared seen-inode state retains hardlink accounting.
+func imageAllocation(ctx context.Context, path string) (uint64, uint64, error) {
+	fd, err := unix.Openat2(unix.AT_FDCWD, path, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS})
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	dir := os.NewFile(uintptr(fd), path)
+	defer dir.Close()
+	seen := map[[2]uint64]bool{}
+	images, err := walk(ctx, dir, seen, 0, ".blobs")
+	if err != nil {
+		return 0, 0, err
+	}
+	cacheFD, err := unix.Openat2(fd, ".blobs", &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV})
+	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.EXDEV) {
+		return images, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	cache := os.NewFile(uintptr(cacheFD), ".blobs")
+	defer cache.Close()
+	blobs, err := walk(ctx, cache, seen, 0, "")
+	return images, blobs, err
+}
 func usageAt(ctx context.Context, root string) (Report, error) {
 	if _, err := os.Stat(root); err != nil {
 		return Report{}, err
@@ -121,7 +154,12 @@ func usageAt(ctx context.Context, root string) (Report, error) {
 		return Report{}, err
 	}
 	r := Report{Filesystem: fs, Categories: []Category{}}
-	for _, kind := range []string{"images", "containers", "volumes", "runs", "templates"} {
+	images, cache, err := imageAllocation(ctx, filepath.Join(root, "images"))
+	if err != nil {
+		return Report{}, fmt.Errorf("measure image storage: %w", err)
+	}
+	r.Categories = append(r.Categories, Category{"images", images}, Category{"image-cache", cache})
+	for _, kind := range []string{"containers", "volumes", "runs", "templates"} {
 		n, err := AllocatedBytes(ctx, filepath.Join(root, kind))
 		if err != nil {
 			return Report{}, fmt.Errorf("measure %s: %w", kind, err)

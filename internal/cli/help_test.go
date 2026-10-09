@@ -38,6 +38,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 		"network", "network create", "network ls", "network inspect", "network rm",
 		"volume", "volume create", "volume ls", "volume inspect", "volume rm", "volume export", "volume restore",
 		"system", "system df", "image prune",
+		"image cache", "image cache ls", "image cache prune", "image cache limit",
 		"image", "image pull", "image import", "image ls", "image rm", "help",
 		"machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "rootfs",
 	} {
