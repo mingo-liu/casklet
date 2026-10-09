@@ -60,6 +60,9 @@ Detached containers inherit image `Healthcheck` metadata; `--health-cmd` overrid
 the probe, and `--no-healthcheck` disables it. `ps` and `inspect` show health separately
 from process status. Probe failures do not trigger automatic restart. See
 [health checks](guides/usage.md#container-health-checks) for timing and readiness.
+Use `casklet wait --healthy --timeout 30s redis` before running dependent commands.
+Health waits default to 30s (`0s` disables the deadline), return 124 on timeout,
+and leave the workload running. They fail if the observed execution stops or changes.
 
 Application settings can also come from `run --config redis.json` and repeatable
 `--env-file application.env` on `run` or `exec`. JSON uses long option names; CLI

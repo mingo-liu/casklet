@@ -43,3 +43,5 @@ func Wait(context.Context, string) (int, error) { return 125, errUnsupportedStor
 
 func RestartManager() int                              { return 125 }
 func EnsureRestartManager(context.Context, bool) error { return errUnsupportedStore }
+
+func WaitHealthy(context.Context, string, time.Duration) error { return errUnsupportedStore }

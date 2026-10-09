@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Wait for service readiness
+
+Added `wait --healthy --timeout DURATION` using existing saved health state.
+The default deadline is 30 seconds; zero disables it. Resolution pins the full ID
+and generation, and the cancelable deadline covers storage recovery, initial
+metadata lookup, and sampling. Starting or unhealthy checks may recover; stop,
+exit, removal, or an execution change fails. Missing or disabled checks fail
+immediately. Success prints zero; a readiness timeout returns 124 without changing
+the workload. Plain exit waits retain their existing receipt behavior, and timeout
+is accepted only with the health flag. Focused help, usage, architecture, and both
+READMEs describe these semantics.
+
+Regressions cover early success, pending startup without published health,
+unhealthy recovery, stale healthy state after stop/exit, immutable identity and
+generation, bounded metadata reads, caller cancellation/deadline distinction,
+argument validation, help parity, and timeout status mapping. Bounded Linux and
+real Mac tests cover delayed readiness, timeout without stopping the workload,
+missing checks, stopped containers, and cancellation through their transports.
+Darwin arm64 build, full unit tests, vet, formatting, and container/CLI race tests
+passed. Linux arm64 full unit tests, vet, formatting, and container/CLI race tests
+passed in the dedicated development VM. Privileged readiness, health-probe, and
+existing exit-wait regressions passed, as did real Mac readiness, cancellation,
+health/restart, and exit-wait/listing checks. The complete privileged and macOS
+suites and Intel execution were not run for this step.
+
 ## 2026-10-09: Unique short IDs for container and image operations
 
 Container lookup now accepts unique hexadecimal ID prefixes of any length,

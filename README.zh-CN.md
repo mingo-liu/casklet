@@ -51,6 +51,9 @@ OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会
 后台容器继承镜像的 `Healthcheck` 配置，可用 `--health-cmd` 覆盖探针，
 或用 `--no-healthcheck` 禁用。`ps` 和 `inspect` 单独显示健康状态；探针失败
 不会触发自动重启。时序与就绪语义见[健康检查指南](guides/usage.md#container-health-checks)（英文）。
+执行依赖命令前，可用 `casklet wait --healthy --timeout 30s redis` 等待健康检查通过。
+健康等待默认超时为 30s（`0s` 取消期限），超时返回 124，容器继续运行；
+所观察的执行停止或发生变更时，等待失败。
 
 应用配置也可以通过 `run --config redis.json` 和 `run`/`exec` 的可重复
 `--env-file application.env` 读取。JSON 使用长选项名称，命令行标量覆盖配置文件，

@@ -22,6 +22,8 @@ type Request struct {
 	Tail        int
 	Follow      bool
 	StopTimeout *time.Duration
+	Healthy     bool
+	WaitTimeout time.Duration
 	Interval    time.Duration
 	Entrypoint  *string
 	DryRun      bool

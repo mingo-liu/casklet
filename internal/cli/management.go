@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
@@ -44,6 +46,9 @@ func manageOperation(r Request, stderr io.Writer, operation func(context.Context
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
+		if r.Action == "wait" && r.Healthy && errors.Is(err, container.ErrWaitTimeout) {
+			return 124
+		}
 		return 125
 	}
 	return returnCode

@@ -15,7 +15,7 @@ Commands:
   stats     Sample a container's memory and CPU usage
   logs      Read or follow retained container output
   stop      Stop a container gracefully
-  wait      Wait for a container's exit status
+  wait      Wait for container exit or health
   start     Start a stopped container with its retained files
   restart   Stop and start a container with its retained files
   rm        Remove a stopped container
@@ -310,17 +310,23 @@ Examples:
   casklet stop worker
   casklet stop --timeout 10s worker
 `,
-	"wait": `Usage: casklet wait ID|NAME
+	"wait": `Usage: casklet wait [--healthy [--timeout DURATION]] ID|NAME
 
 Options:
+  --healthy  Wait for healthcheck success instead of process exit
+  --timeout  Readiness deadline (default: 30s); 0s waits indefinitely; requires --healthy
   -h, --help  Show this help
 
 Notes:
-  Waits for the observed execution to finish, prints its exit code, and returns it.
+  Without --healthy, waits for the observed execution to finish and prints/returns its exit code.
+  --healthy requires a configured healthcheck and prints 0 when that execution is healthy.
+  Starting/unhealthy checks keep waiting; stop, exit, removal, or a new execution fails.
   Automatic restarts do not redirect an existing wait to a later execution.
+  A readiness timeout returns 124 and does not stop or restart the container.
 
 Examples:
   casklet wait worker
+  casklet wait --healthy --timeout 30s redis
   casklet inspect worker
 `,
 	"start": `Usage: casklet start ID|NAME

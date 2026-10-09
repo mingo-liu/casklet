@@ -46,7 +46,11 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 			err = writeStats(stdout, stats, r.JSON)
 		}
 	case "wait":
-		returnCode, err = container.Wait(ctx, r.Reference)
+		if r.Healthy {
+			err = container.WaitHealthy(ctx, r.Reference, r.WaitTimeout)
+		} else {
+			returnCode, err = container.Wait(ctx, r.Reference)
+		}
 		if err == nil {
 			_, err = fmt.Fprintln(stdout, returnCode)
 		}

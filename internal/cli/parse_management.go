@@ -16,6 +16,9 @@ func parseManagement(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	switch r.Action {
+	case "wait":
+		fs.BoolVar(&r.Healthy, "healthy", false, "wait for the observed execution to become healthy")
+		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "health wait timeout; zero disables the deadline")
 	case "stop", "restart":
 		fs.Func("timeout", "graceful shutdown override", func(value string) error {
 			duration, err := time.ParseDuration(value)
@@ -46,6 +49,18 @@ func parseManagement(r Request, args []string) (Request, error) {
 			return parseFlagHelp(r.Action, fs, args)
 		}
 		return r, err
+	}
+	if r.Action == "wait" {
+		if r.WaitTimeout < 0 {
+			return r, errors.New("--timeout must be nonnegative")
+		}
+		if !r.Healthy {
+			explicitTimeout := false
+			fs.Visit(func(f *flag.Flag) { explicitTimeout = explicitTimeout || f.Name == "timeout" })
+			if explicitTimeout {
+				return r, errors.New("wait --timeout requires --healthy")
+			}
+		}
 	}
 	if r.Action == "ps" {
 		if fs.NArg() != 0 {

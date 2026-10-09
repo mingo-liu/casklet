@@ -259,3 +259,9 @@ resources close. Generation-fenced state updates retain five bounded results,
 without probe output. Container inspection separates health from lifecycle state;
 restart resets health while retaining configuration. Foreground execution has no
 durable health monitor. Health transitions do not change restart policy.
+Readiness waits resolve an immutable ID and generation once, then sample the saved
+health state on a cancelable timer while recovering stale supervisor state through
+the existing lifecycle path. They hold no lifecycle lock between samples, schedule
+no probes, and fail on stop, removal, or generation changes. The CLI owns the
+30-second default deadline and maps readiness timeout to status 124 without
+changing the workload. Ordinary exit waits continue reading generation receipts.

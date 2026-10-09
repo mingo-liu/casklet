@@ -632,7 +632,28 @@ output is discarded and never added to workload logs or inspection. Use a manual
 `exec` of the probe for output diagnostics. A stopped container reports `stopped`;
 containers without checks have no health state. Restart keeps the saved probe config
 but resets health/results for the new generation. Health failures do not terminate
-containers or trigger restart policies; `run -d` waits for process startup, not readiness.
+containers or trigger restart policies; `run -d` waits for process startup.
+
+To wait for service readiness, use the saved healthcheck:
+
+```sh
+casklet wait --healthy --timeout 30s redis &&
+  casklet exec redis -- redis-cli SET example ready
+```
+
+`wait --healthy` prints `0` and exits successfully once the observed execution is
+`healthy`. The default timeout is 30 seconds; `--timeout 0s` waits indefinitely
+until success, lifecycle failure, or cancellation. A timeout prints a diagnostic
+and returns 124 without stopping the container. `starting` and `unhealthy` keep
+waiting because later checks may recover. Missing or disabled checks fail immediately.
+Stopping, exiting, removal, or a generation change fails with status 125; resolving
+a name or unique ID prefix pins the full ID, so a replacement is never followed.
+Cancellation ends only the wait. A successful sample indicates readiness at that
+moment; ongoing health can change afterward.
+
+Plain `wait ID|NAME` still waits for process exit and prints/returns its exit code.
+`--timeout` is accepted only with `--healthy`; it is independent of probe timeouts.
+
 Temporary files under `/tmp` are reset on each execution, so readiness probes must
 account for that lifecycle. See the [Docker HEALTHCHECK reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
 for the source image configuration semantics.
