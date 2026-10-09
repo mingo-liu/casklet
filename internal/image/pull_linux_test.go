@@ -162,7 +162,7 @@ func TestPullRollbackAndConfigIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".import-") || strings.HasPrefix(entry.Name(), ".ref-stage-") {
+		if strings.HasPrefix(entry.Name(), ".import-") || strings.HasPrefix(entry.Name(), ".prepare-") || strings.HasPrefix(entry.Name(), ".transaction-") || strings.HasPrefix(entry.Name(), ".ref-stage-") {
 			t.Fatalf("staging leaked: %s", entry.Name())
 		}
 	}

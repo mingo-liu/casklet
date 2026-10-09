@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
 
@@ -18,10 +19,13 @@ const (
 var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 
 type message struct {
-	Kind        string         `json:"kind"`
-	Config      *config.Config `json:"config,omitempty"`
-	Error       string         `json:"error,omitempty"`
-	ExitCode    int            `json:"exit_code,omitempty"`
-	StopTimeout time.Duration  `json:"stop_timeout,omitempty"`
-	ExecEnabled bool           `json:"exec_enabled,omitempty"`
+	Kind        string          `json:"kind"`
+	Config      *config.Config  `json:"config,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	ExitCode    int             `json:"exit_code,omitempty"`
+	StopTimeout time.Duration   `json:"stop_timeout,omitempty"`
+	ExecEnabled bool            `json:"exec_enabled,omitempty"`
+	Overlay     *rootfs.Overlay `json:"overlay,omitempty"`
+	DNS         []string        `json:"dns,omitempty"`
+	ImageLease  bool            `json:"image_lease,omitempty"`
 }

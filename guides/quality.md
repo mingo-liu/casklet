@@ -6,6 +6,65 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Copy-on-write image roots and concurrent image preparation
+
+New privileged image containers use OverlayFS with an immutable shared lower and
+private upper/work directories. Detached storage is atomically published in a
+versioned `rootfs.overlay` envelope beside the legacy full `rootfs`. Ordinary
+workload files cannot select the backend. Init mounts the merged root only in its
+private namespace and prepares image working directories and DNS there. Writes,
+whiteouts, renames, read-only execution, exec, and health probes retain their
+existing lifecycle semantics. Init inherits the image lease through process exit
+to protect the lower after supervisor loss. Directory sources, builtin BusyBox,
+user namespaces, rootless execution, and existing complete copied roots keep the
+copy path; existing roots are not migrated. Unsupported OverlayFS mounts fail
+explicitly. Acquisition still verifies all image content.
+
+Image downloads, extraction, directory copying, hashing, and syncing now run in
+private leased transactions outside the global metadata lock. Stable reference
+locks serialize refreshes of one name before registry resolution. Lookup and
+publication acquire image leases under the global lock, then verify content
+outside it. Stable external transaction locks protect recursive staging cleanup
+even after internal lease files disappear. The new `.prepare-` prefix prevents
+older engines' recovery from reclaiming live new transactions. Abandoned staging
+recovery and image removal still use the metadata lock; this change does not add
+a shared download-layer cache.
+
+Regressions cover sparse storage and ownership, unsafe or mismatched backend
+metadata, isolation, whiteouts/rename across restart, retained lower references,
+supervisor-loss leases, and legacy copied roots with unavailable image sources.
+Image tests pause a download while cached operations, imports/removal, and other
+pulls complete, and cover ordered/cancelable refreshes, concurrent identical
+publication, cancellation rollback, live/abandoned transaction recovery, legacy
+recovery compatibility, and corrupt deduplication targets. The real Mac CoW test
+also checks health probes, restart, and a 4 MiB unchanged lower fixture.
+
+The full Linux run exposed a recovery timing gap after supervisor death: systemd
+could report a stopped service while its run lock or populated cgroup remained
+briefly visible. Targeted recovery now retries only these busy conditions for at
+most two seconds, honors caller cancellation, and treats concurrent removal of
+the run directory as completion. Each attempt still validates the path, acquires
+the lock, and checks the cgroup; a timeout preserves the resources. Deterministic
+tests cover competing recovery, held locks, and cgroup drain/preservation.
+
+Validation:
+
+- `make fmt-check test vet test-race` passed on macOS arm64 and in the dedicated
+  Linux arm64 development VM. Root-only image ownership and rootfs tests passed.
+- Native and amd64 Darwin client/embedded Linux engine builds passed; the local
+  binary was restored to native arm64 afterward.
+- The complete privileged Linux integration suite passed, including all four
+  new overlay tests and the pinned pre-named-network supervisor regression using
+  baseline commit `e470555`. The supervisor-recovery test that initially exposed
+  the timing gap passed ten consecutive runs after the bounded retry fix, then
+  passed in the full suite. No cleanup or lease assertion was weakened.
+- `make test-macos` passed through the real client/VM path after the final runtime
+  changes. The CoW fixture retained only 28 KiB of writable storage while sharing
+  an unchanged 4 MiB lower file. Engine/template repair, health, networks, volumes,
+  restart policies, and terminals passed. VM reboot skipped to preserve other
+  running Redis and Tomcat containers.
+- Intel Mac execution and Linux amd64 privileged execution were not performed.
+
 ## 2026-10-09: Wait for service readiness
 
 Added `wait --healthy --timeout DURATION` using existing saved health state.

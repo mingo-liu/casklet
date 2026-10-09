@@ -130,18 +130,20 @@ the existing executor contract.
 
 | Resource | Owner and lifetime |
 | --- | --- |
-| Template/image lease | `template.Template`; builtin copy leases release after copying, image leases close after use. Failure closes before returning. Other directory templates must stay stable while copying. |
+| Template/image lease | `template.Template`; builtin copy leases release after copying. Image-backed overlays retain the lower image lease in both supervisor and init through namespace use; workload exec closes inherited lease descriptors. Other directory templates must stay stable while copying. |
 | Transient root and run directory | Runtime; removed after workload cleanup, or preserved when safe cleanup cannot be established. |
-| Retained root | Container store; reused on start/restart and removed by `rm`. Runtime stages, syncs, and atomically publishes the first copy. |
+| Retained root | Container store; reused on start/restart and removed by `rm`. Runtime stages, syncs, and atomically publishes a copied tree or a versioned overlay storage envelope. |
 | Cgroup and network allocation | Runtime coordinates adapter cleanup and preserves recovery receipts when needed. |
 | Exec descriptors and sessions | Runtime/executor; closed before disk cleanup. Workloads join their resource group before execution. |
 | Records, log files, operation locks | Container store/supervisor; lifecycle mutations remain serialized. |
 
-Restart validates an existing retained root without reopening its original
-template or image. This preserves container writes and permits restart after
-the source directory disappears. Temporary mounts and execution resources are
-fresh for each generation. Image acquisition must protect the source until a
-copy or durable reference exists; do not reverse image/container lock ordering.
+Restart validates an existing complete copied root without reopening its original
+source. Overlay roots instead validate a private envelope and matching immutable
+image ID, then reacquire the lower image. Both preserve container writes, and
+directory copies still permit restart after their source disappears. Temporary
+mounts and execution resources are fresh for each generation. Image acquisition
+must protect the lower throughout overlay use or until a copy/durable reference
+exists; do not reverse image/container lock ordering.
 
 The boot-enabled `casklet-restarts.service` owns automatic policy reconciliation.
 It uses the same per-container operation lock and start path as manual lifecycle
@@ -204,8 +206,13 @@ to the image, never the host. Unsupported special files fail the transaction.
 Image records contain execution defaults and the source manifest digest; the local
 content identity also covers numeric ownership and defaults. Atomic reference files
 map normalized registry names to immutable local IDs. Pull refreshes references;
-run reuses a cached reference. The global image lock serializes staging recovery,
-pulls, imports, and removal. Network preparation precedes workload startup deadlines.
+run reuses a cached reference. Private leased transactions prepare pulls/imports
+outside the global image lock. Stable per-reference locks serialize refreshes
+before remote resolution; global locking protects staging creation/recovery,
+short publication/reference updates, and removal. A shared per-image lease pins
+content while full verification runs outside the global lock. Stable external
+transaction locks fence recursive staging cleanup after internal lease unlinking.
+Network preparation precedes workload startup deadlines.
 Operation-scoped image observers emit layer phases and throttled byte counts from
 compressed streams and archive reads. The CLI owns rendering on stderr, preserving
 stdout results. The Mac resolves automatic progress mode before SSH dispatch; no
@@ -213,8 +220,18 @@ PTY or output-stream merging is needed for detached runs or explicit image pulls
 
 Template resolution holds an image lease while merging defaults and publishing a
 durable reference or acquiring the runtime source. Container records store the local
-ID and fully merged configuration. Runtime preserves image ownership in its private
-copy, creates a missing working directory, mounts private shared memory, and applies
+ID and fully merged configuration. New privileged image roots use a private
+versioned `rootfs.overlay` envelope beside the legacy `rootfs` path, containing
+the lower ID and upper/work directories. Metadata therefore cannot collide with
+files inside existing copied container roots. Init makes
+mount propagation private, mounts the merged OverlayFS view at the transient run
+root using pinned directory descriptors, validates it, then prepares workdir/DNS
+before pivoting. The merged mount never appears in the guest host namespace.
+Overlay metadata copy and directory redirects are disabled. Legacy copied roots,
+directory sources, and user-namespace modes retain their copy path. Init inherits
+the lower image usage lease so supervisor loss cannot authorize deletion while its
+namespace survives. Runtime preserves image ownership, creates a missing working
+directory, mounts private shared memory, and applies
 the bounded OCI root capability policy needed by application entrypoints. Builtin
 BusyBox health checks remain strict; generic filesystem validation requires neither
 BusyBox nor static linking. Restart uses the retained root and saved configuration.

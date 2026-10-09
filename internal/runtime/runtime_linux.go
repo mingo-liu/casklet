@@ -126,11 +126,23 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("record container preparation: %w", err)
 		}
 	}
-	cfg.RootFS, err = prepareRunRootFS(prepareCtx, source.Path, run.path, retainedRoot, retainedReady, cfg.Image != "" && !cfg.UserNS)
+	useOverlay := cfg.Image != "" && !cfg.UserNS && !cfg.Rootless && (!retainedReady || source.ImageLeaseFile() != nil)
+	var overlay *rootfs.Overlay
+	if useOverlay {
+		if source.ImageLeaseFile() == nil {
+			return code, errors.New("copy-on-write image root requires an inheritable image lease")
+		}
+		overlay, err = prepareImageOverlay(prepareCtx, source.Path, cfg.Image, run.path, retainedRoot, retainedReady)
+		if err == nil {
+			cfg.RootFS = overlay.Target
+		}
+	} else {
+		cfg.RootFS, err = prepareRunRootFS(prepareCtx, source.Path, run.path, retainedRoot, retainedReady, cfg.Image != "" && !cfg.UserNS)
+	}
 	if err != nil {
 		return preparationError(err, signals)
 	}
-	if cfg.OCI {
+	if cfg.OCI && overlay == nil {
 		if err := rootfs.PrepareImageWorkdir(cfg.RootFS, cfg); err != nil {
 			return code, err
 		}
@@ -149,6 +161,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := mapRootOwnership(prepareCtx.Err, cfg.RootFS, cfg); err != nil {
 		return code, fmt.Errorf("map rootfs ownership: %w", err)
 	}
+	var overlayDNS []string
 	if cfg.NetworkMode() != "none" {
 		servers, err := network.Resolvers(cfg.DNS)
 		if err != nil {
@@ -166,8 +179,12 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			}
 			servers = []string{r.Gateway}
 		}
-		if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
-			return code, fmt.Errorf("configure DNS: %w", err)
+		if overlay != nil {
+			overlayDNS = servers
+		} else {
+			if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
+				return code, fmt.Errorf("configure DNS: %w", err)
+			}
 		}
 	}
 	select {
@@ -259,6 +276,9 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 	// Init retains leases even if the supervisor dies; workloads never inherit them.
 	cmd.ExtraFiles = append(cmd.ExtraFiles, volumes.Files...)
+	if overlay != nil {
+		cmd.ExtraFiles = append(cmd.ExtraFiles, source.ImageLeaseFile())
+	}
 	cmd.SysProcAttr = namespaceAttributes(cfg)
 	if err := cmd.Start(); err != nil {
 		return code, fmt.Errorf("start container init: %w", err)
@@ -312,7 +332,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := control.SetWriteDeadline(time.Now().Add(startupLimit)); err != nil {
 		return code, err
 	}
-	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg, ExecEnabled: executor != nil}); err != nil {
+	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg, ExecEnabled: executor != nil, Overlay: overlay, DNS: overlayDNS, ImageLease: overlay != nil}); err != nil {
 		return code, fmt.Errorf("configure init: %w", err)
 	}
 	events := make(chan message, 4)

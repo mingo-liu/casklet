@@ -108,6 +108,15 @@ bounded local registry helper inside the product VM and checks pipe output and
 host-only stderr PTY output through the actual SSH transport, without public images.
 It leaves other running containers and their images alone.
 
+Image transaction unit tests pause a layer stream while cached reads, acquisition,
+imports, and unrelated pulls complete. They also cover cancelable same-reference
+refreshes, identical concurrent publication, live staging leases, and abandoned
+transaction recovery. CoW regressions verify the actual OverlayFS root, separate
+writes and whiteouts across restart, sparse storage, read-only execution, and
+lower-image leases. `TestImageCopyOnWriteThroughMacClient` exercises those storage
+semantics through the real macOS transport. The guest needs OverlayFS and a local
+upper filesystem supporting its extended attributes; the product VM uses ext4.
+
 For a real public-registry smoke on macOS, use the Redis/Nginx/PostgreSQL examples
 in the usage guide. Check application readiness, host-published responses, and
 restart data separately from the engine's successful process-start handshake.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/mingo-liu/casklet/internal/config"
@@ -23,6 +24,14 @@ type Template struct {
 	Path      string
 	lease     io.Closer
 	copyLease io.Closer
+}
+
+// ImageLeaseFile returns the usage lease for inheritance by namespace init.
+// Copy-on-write roots depend on their lower image throughout execution, even
+// after abrupt supervisor loss. Callers must not close this borrowed file.
+func (t *Template) ImageLeaseFile() *os.File {
+	file, _ := t.lease.(*os.File)
+	return file
 }
 
 // ReleaseCopyLease permits builtin template repair after a private copy is ready.

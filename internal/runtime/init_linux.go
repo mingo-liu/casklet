@@ -61,6 +61,15 @@ func Init() int {
 		unix.CloseOnExec(fd)
 		defer unix.Close(fd)
 	}
+	if prepare.ImageLease {
+		fd := volumeFD + len(config.VolumeNames(cfg.Mounts))
+		unix.CloseOnExec(fd)
+		// Keep the lower lease until process exit destroys the namespace. Init
+		// returning alone has not yet removed its mounts or remaining children.
+	}
+	if (prepare.Overlay != nil) != prepare.ImageLease || prepare.Overlay != nil && (cfg.UserNS || cfg.Rootless || cfg.Image == "" || prepare.Overlay.Target != cfg.RootFS) {
+		return fail(errors.New("invalid init overlay configuration"))
+	}
 	if err := cfg.ValidateExecution(); err != nil {
 		return fail(err)
 	}
@@ -74,6 +83,24 @@ func Init() int {
 			fd = 6
 		}
 		unix.Close(fd)
+	}
+	if prepare.Overlay != nil {
+		if err := rootfs.MountOverlay(*prepare.Overlay); err != nil {
+			return fail(err)
+		}
+		if _, err := rootfs.Validate(cfg.RootFS); err != nil {
+			return fail(err)
+		}
+		if cfg.OCI {
+			if err := rootfs.PrepareImageWorkdir(cfg.RootFS, *cfg); err != nil {
+				return fail(err)
+			}
+		}
+		if len(prepare.DNS) != 0 {
+			if err := rootfs.ConfigureDNS(cfg.RootFS, prepare.DNS); err != nil {
+				return fail(fmt.Errorf("configure DNS: %w", err))
+			}
+		}
 	}
 	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly, cfg.Mounts...); err != nil {
 		return fail(err)

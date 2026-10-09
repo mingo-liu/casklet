@@ -169,25 +169,21 @@ func startStoppedWithPolicy(ctx context.Context, store *Store, record Record, pr
 	if err != nil {
 		return record, err
 	}
-	candidate := retained
-	if info, err := os.Lstat(retained); errors.Is(err, os.ErrNotExist) {
-		candidate = cfg.RootFS
-		if cfg.Image != "" {
-			images, err := image.OpenStore()
-			if err != nil {
-				return record, err
-			}
-			_, tree, lease, err := images.Acquire(ctx, cfg.Image)
-			if err != nil {
-				return record, err
-			}
-			defer lease.Close()
-			candidate = tree
-		}
-	} else if err != nil {
+	candidate, needsImage, err := retainedRootCandidate(cfg, retained)
+	if err != nil {
 		return record, err
-	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return record, errors.New("retained rootfs must be a real directory")
+	}
+	if needsImage {
+		images, err := image.OpenStore()
+		if err != nil {
+			return record, err
+		}
+		_, tree, lease, err := images.Acquire(ctx, cfg.Image)
+		if err != nil {
+			return record, err
+		}
+		defer lease.Close()
+		candidate = tree
 	}
 	if _, err := rootfs.Validate(candidate); err != nil {
 		return record, err

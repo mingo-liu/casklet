@@ -95,6 +95,10 @@ func (store *Store) lock(ctx context.Context, shared bool) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	return waitFileLock(ctx, file, shared)
+}
+
+func waitFileLock(ctx context.Context, file *os.File, shared bool) (*os.File, error) {
 	operation := unix.LOCK_EX
 	if shared {
 		operation = unix.LOCK_SH
@@ -206,19 +210,12 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 		return Record{}, err
 	}
 	defer sourceRoot.Close()
-	lock, err := store.lock(ctx, false)
+	stage, lease, transaction, err := store.beginImport(ctx)
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
-	if err := store.recoverLocked(); err != nil {
-		return Record{}, err
-	}
-	stage, err := os.MkdirTemp(store.root, ".import-")
-	if err != nil {
-		return Record{}, err
-	}
-	defer os.RemoveAll(stage)
+	defer lease.Close()
+	defer store.cleanupImport(stage, transaction)
 	tree := filepath.Join(stage, "rootfs")
 	if err := os.Mkdir(tree, 0700); err != nil {
 		return Record{}, err
@@ -233,75 +230,238 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	if record, err := store.read(id); err == nil {
-		if err := store.verify(ctx, record); err != nil {
-			return Record{}, err
-		}
-		return record, nil
-	} else if !errors.Is(err, ErrNotFound) {
-		return Record{}, err
-	}
 	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size}
+	return store.publish(ctx, stage, record, "")
+}
+
+// beginImport pins private staging before releasing the metadata lock. Its
+// shared lease moves with publication and also prevents removal until return.
+func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File, error) {
+	lock, err := store.lock(ctx, false)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer lock.Close()
+	if err := store.recoverLocked(); err != nil {
+		return "", nil, nil, err
+	}
+	stage, err := os.MkdirTemp(store.root, ".prepare-")
+	if err != nil {
+		return "", nil, nil, err
+	}
+	transaction, err := store.openFile(store.transactionPath(stage), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
+	if err == nil {
+		err = unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	}
+	if err != nil {
+		if transaction != nil {
+			transaction.Close()
+		}
+		os.RemoveAll(stage)
+		return "", nil, nil, err
+	}
+	lease, err := store.openFile(filepath.Join(stage, ".lease"), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
+	if err == nil {
+		err = unix.Flock(int(lease.Fd()), unix.LOCK_SH|unix.LOCK_NB)
+	}
+	if err != nil {
+		if lease != nil {
+			lease.Close()
+		}
+		os.RemoveAll(stage)
+		transaction.Close()
+		os.Remove(store.transactionPath(stage))
+		return "", nil, nil, err
+	}
+	return stage, lease, transaction, nil
+}
+
+func (store *Store) transactionPath(stage string) string {
+	return filepath.Join(store.root, ".transaction-"+filepath.Base(stage))
+}
+
+// Keep the external transaction lock throughout recursive cleanup: internal
+// lease files can disappear before the rest of the tree. Only lock-file removal
+// needs the store lock, after no staging tree remains.
+func (store *Store) cleanupImport(stage string, transaction *os.File) {
+	defer transaction.Close()
+	if err := os.RemoveAll(stage); err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	lock, err := store.lock(ctx, false)
+	if err != nil {
+		return
+	}
+	defer lock.Close()
+	os.Remove(store.transactionPath(stage))
+}
+
+// publish flushes staging without the store lock. Only identity and reference
+// publication serialize. A concurrent identical publication is checked under a
+// shared image lease, so full verification does not block unrelated metadata.
+func (store *Store) publish(ctx context.Context, stage string, record Record, ref string) (Record, error) {
 	data, err := json.Marshal(record)
 	if err != nil {
 		return Record{}, err
 	}
+	if len(data) > 1<<20 {
+		return Record{}, errors.New("image configuration exceeds 1 MiB")
+	}
 	if err := os.WriteFile(filepath.Join(stage, "image.json"), data, 0600); err != nil {
 		return Record{}, err
 	}
-	file, err := store.openFile(filepath.Join(stage, ".lease"), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
-	if err != nil {
-		return Record{}, err
-	}
-	file.Close()
-	// Flush the full tree and metadata before atomically publishing the identity.
 	if err := rootfs.SyncTree(ctx, stage); err != nil {
 		return Record{}, err
 	}
-	if err := ctx.Err(); err != nil {
+	lock, err := store.lock(ctx, false)
+	if err != nil {
 		return Record{}, err
 	}
-	if err := os.Rename(stage, store.path(id)); err != nil {
+	defer func() {
+		if lock != nil {
+			lock.Close()
+		}
+	}()
+	existing, err := store.read(record.ID)
+	if err == nil {
+		lease, err := store.acquireLeaseLocked(existing.ID)
+		if err != nil {
+			return Record{}, err
+		}
+		defer lease.Close()
+		lock.Close()
+		lock = nil
+		if err := store.verify(ctx, existing); err != nil {
+			return Record{}, err
+		}
+		record = existing
+		if ref == "" {
+			return record, nil
+		}
+		lock, err = store.lock(ctx, false)
+		if err != nil {
+			return Record{}, err
+		}
+	} else if errors.Is(err, ErrNotFound) {
+		if err := ctx.Err(); err != nil {
+			return Record{}, err
+		}
+		if err := os.Rename(stage, store.path(record.ID)); err != nil {
+			return Record{}, err
+		}
+		if err := syncDirectory(store.root); err != nil {
+			return Record{}, err
+		}
+	} else {
 		return Record{}, err
 	}
-	if err := syncDirectory(store.root); err != nil {
-		return Record{}, err
+	if ref != "" {
+		if err := store.publishReferenceLocked(ctx, ref, record.ID); err != nil {
+			return Record{}, err
+		}
 	}
 	return record, nil
 }
 
-// Staging entries are private and never referenced. The exclusive lock ensures
-// no live import or remove owns them after an interrupted operation.
+// Legacy import/remove staging and leased prepare transactions are never
+// referenced. Recursive recovery can hold the metadata lock, but skips active
+// transactions before inspecting any partially removed internal files.
 func (store *Store) recoverLocked() error {
 	entries, err := os.ReadDir(store.root)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".ref-stage-") {
-			file, err := store.openFile(filepath.Join(store.root, entry.Name()), unix.O_RDONLY)
+		name := entry.Name()
+		path := filepath.Join(store.root, name)
+		if strings.HasPrefix(name, ".transaction-.prepare-") || strings.HasPrefix(name, ".transaction-.import-") {
+			stage := filepath.Join(store.root, strings.TrimPrefix(name, ".transaction-"))
+			if _, err := os.Lstat(stage); err == nil {
+				continue
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			file, err := store.openFile(path, unix.O_RDONLY)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+			if errors.Is(err, unix.EWOULDBLOCK) {
+				file.Close()
+				continue
+			}
+			if err == nil {
+				err = os.Remove(path)
+			}
+			file.Close()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(name, ".ref-stage-") {
+			file, err := store.openFile(path, unix.O_RDONLY)
 			if err != nil {
 				return err
 			}
 			file.Close()
-			if err := os.Remove(filepath.Join(store.root, entry.Name())); err != nil {
+			if err := os.Remove(path); err != nil {
 				return err
 			}
 			continue
 		}
-		if !strings.HasPrefix(entry.Name(), ".import-") && !strings.HasPrefix(entry.Name(), ".remove-") {
-			continue
+		if strings.HasPrefix(name, ".prepare-") || strings.HasPrefix(name, ".import-") || strings.HasPrefix(name, ".remove-") {
+			if err := store.recoverTransactionLocked(path); err != nil {
+				return err
+			}
 		}
-		path := filepath.Join(store.root, entry.Name())
-		if err := store.checkDirectory(path, true); err != nil {
+	}
+	return nil
+}
+
+func (store *Store) recoverTransactionLocked(path string) error {
+	transaction, err := store.openFile(store.transactionPath(path), unix.O_RDONLY)
+	if err == nil {
+		defer transaction.Close()
+		err = unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		if err := rootfs.CheckUnmounted(path); err != nil {
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := store.checkDirectory(path, true); err != nil {
+		return err
+	}
+	lease, err := store.openFile(filepath.Join(path, ".lease"), unix.O_RDONLY)
+	if err == nil {
+		defer lease.Close()
+		err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
-		if err := os.RemoveAll(path); err != nil {
-			return err
-		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := rootfs.CheckUnmounted(path); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	if transaction != nil {
+		return os.Remove(store.transactionPath(path))
 	}
 	return nil
 }
@@ -379,33 +539,44 @@ func (store *Store) resolveIDLocked(ctx context.Context, reference string) (Reco
 // Acquire prevents deletion until its shared lease is closed. The global lock
 // covers lookup and lease acquisition so removal cannot race between them.
 func (store *Store) Acquire(ctx context.Context, id string) (Record, string, *os.File, error) {
-	lock, err := store.lock(ctx, true)
+	record, lease, err := func() (Record, *os.File, error) {
+		lock, err := store.lock(ctx, true)
+		if err != nil {
+			return Record{}, nil, err
+		}
+		defer lock.Close()
+		record, err := store.resolveIDLocked(ctx, id)
+		if err != nil {
+			return Record{}, nil, err
+		}
+		if record.Architecture != runtime.GOARCH {
+			return Record{}, nil, errors.New("image architecture does not match the runtime")
+		}
+		lease, err := store.acquireLeaseLocked(record.ID)
+		return record, lease, err
+	}()
 	if err != nil {
 		return Record{}, "", nil, err
 	}
-	defer lock.Close()
-	record, err := store.resolveIDLocked(ctx, id)
-	if err != nil {
-		return Record{}, "", nil, err
-	}
-	if record.Architecture != runtime.GOARCH {
-		return Record{}, "", nil, errors.New("image architecture does not match the runtime")
-	}
-	id = record.ID
-	lease, err := store.openFile(filepath.Join(store.path(id), ".lease"), unix.O_RDONLY)
-	if err != nil {
-		return Record{}, "", nil, err
-	}
-	if err := unix.Flock(int(lease.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
-		lease.Close()
-		return Record{}, "", nil, err
-	}
-	tree := filepath.Join(store.path(id), "rootfs")
+	// The image lease pins metadata and content while verification walks the
+	// tree without the global store lock.
 	if err := store.verify(ctx, record); err != nil {
 		lease.Close()
 		return Record{}, "", nil, err
 	}
-	return record, tree, lease, nil
+	return record, filepath.Join(store.path(record.ID), "rootfs"), lease, nil
+}
+
+func (store *Store) acquireLeaseLocked(id string) (*os.File, error) {
+	lease, err := store.openFile(filepath.Join(store.path(id), ".lease"), unix.O_RDONLY)
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(lease.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
+		lease.Close()
+		return nil, err
+	}
+	return lease, nil
 }
 
 func (store *Store) verify(ctx context.Context, record Record) error {

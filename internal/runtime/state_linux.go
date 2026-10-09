@@ -21,9 +21,12 @@ import (
 )
 
 const (
-	runsRoot      = "/var/lib/casklet/runs"
-	maxStateBytes = 4096
+	runsRoot         = "/var/lib/casklet/runs"
+	maxStateBytes    = 4096
+	runRecoveryLimit = 2 * time.Second
 )
+
+var errRunPopulated = errors.New("recorded cgroup still contains processes")
 
 type runDirectory struct {
 	path  string
@@ -230,12 +233,69 @@ func RecoverRun(ctx context.Context, path string) error {
 	if err := ensureRunsRoot(); err != nil {
 		return err
 	}
-	lock, err := lockRecoveryCandidate(ctx, path, paths)
-	if err != nil {
-		return fmt.Errorf("lock abandoned container resources: %w", err)
+	return recoverRunAt(ctx, path, paths)
+}
+
+// Recovery can overlap another scanner or the final kernel teardown of a
+// stopped unit. Wait briefly for those owners; every attempt still acquires the
+// usage lock and verifies the cgroup before removing any storage.
+func recoverRunAt(ctx context.Context, path string, paths statePaths) error {
+	bounded, cancel := context.WithTimeout(ctx, runRecoveryLimit)
+	defer cancel()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	var busy error
+	deadlineError := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if busy != nil {
+			return busy
+		}
+		return bounded.Err()
 	}
-	defer lock.Close()
-	return reclaimRunAt(path, paths)
+	for {
+		if bounded.Err() != nil {
+			return deadlineError()
+		}
+		if err := validateRunPath(paths.runsRoot, path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		lock, err := lockRecoveryCandidate(bounded, path, paths)
+		if err != nil {
+			err = fmt.Errorf("lock abandoned container resources: %w", err)
+		} else {
+			err = reclaimRunAt(path, paths)
+			lock.Close()
+		}
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, errRunPopulated) {
+			busy = err
+		}
+		if bounded.Err() != nil {
+			return deadlineError()
+		}
+		// Another recovery may have removed the candidate after validation but
+		// before lock acquisition. Do not swallow missing unrelated artifacts.
+		if errors.Is(err, os.ErrNotExist) {
+			if _, gone := os.Lstat(path); errors.Is(gone, os.ErrNotExist) {
+				return nil
+			}
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, errRunPopulated) {
+			return err
+		}
+		select {
+		case <-bounded.Done():
+			return deadlineError()
+		case <-ticker.C:
+		}
+	}
 }
 
 type statePaths struct {
@@ -359,7 +419,7 @@ func reclaimRunAt(path string, paths statePaths) error {
 				return err
 			}
 			if !empty {
-				return errors.New("recorded cgroup still contains processes")
+				return errRunPopulated
 			}
 			if err := cgroup.RemoveEmpty(group); err != nil {
 				return fmt.Errorf("remove recorded cgroup: %w", err)

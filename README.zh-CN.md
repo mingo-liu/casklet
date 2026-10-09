@@ -80,6 +80,11 @@ casklet rm --filter label=project=demo --filter status=exited
 `tty` 可以强制选择对应模式。镜像 ID、容器 ID 和应用输出保留在 stdout。
 缓存命中时显示 `Using cached image`；显式拉取未变化的镜像时显示 `Image is up to date`。
 
+新建的特权镜像容器通过 OverlayFS 共享不可变镜像，只保存各自的写入变化。
+后台容器的变化会在 start/restart 后保留；目录来源、rootless 运行和已有的完整复制
+容器继续使用原有复制行为。虚拟机内核必须支持 OverlayFS。不同镜像的拉取和导入可以
+并行准备，下载期间仍可操作其他缓存镜像；同一镜像引用的刷新按顺序执行。
+
 ```sh
 casklet image pull redis:8
 casklet image pull --progress=plain redis:8

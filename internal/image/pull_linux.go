@@ -103,8 +103,8 @@ func (store *Store) resolveLocked(ref string) (Record, error) {
 
 // Pull refreshes a reference, selecting the native Linux platform. Download and
 // extraction happen in a private transaction; publication is atomic. The store
-// lock serializes pulls with imports/removal and permits interrupted staging
-// recovery without deleting a live transaction.
+// lock covers only publication; leased staging protects active transactions.
+// Refreshes of the same reference serialize independently of other images.
 func (store *Store) Pull(ctx context.Context, reference string) (Record, error) {
 	ref, err := NormalizeReference(reference)
 	if err != nil {
@@ -114,17 +114,47 @@ func (store *Store) Pull(ctx context.Context, reference string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
-	reportProgress(ctx, Progress{Stage: ProgressResolving, Reference: ref})
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
+	refLock, err := store.lockReference(ctx, ref)
+	if err != nil {
+		return Record{}, err
+	}
+	defer refLock.Close()
+	reportProgress(ctx, Progress{Stage: ProgressResolving, Reference: ref})
 	img, err := remote.Image(parsed, remote.WithContext(ctx), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH}))
 	if err != nil {
 		return Record{}, fmt.Errorf("pull %s: %w", ref, err)
 	}
-	return store.pullImage(ctx, ref, img)
+	return store.pullImageLocked(ctx, ref, img)
 }
 
 func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Record, error) {
+	refLock, err := store.lockReference(ctx, ref)
+	if err != nil {
+		return Record{}, err
+	}
+	defer refLock.Close()
+	return store.pullImageLocked(ctx, ref, img)
+}
+
+// Reference locks are stable files, never unlinked. Acquiring one before remote
+// resolution makes each refresh observe the registry after its predecessor.
+func (store *Store) lockReference(ctx context.Context, ref string) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := store.checkDirectory(store.root, true); err != nil {
+		return nil, err
+	}
+	file, err := store.openFile(filepath.Join(store.root, ".pull-"+referenceKey(ref)), unix.O_RDWR|unix.O_CREAT)
+	if err != nil {
+		return nil, err
+	}
+	return waitFileLock(ctx, file, false)
+}
+
+func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Image) (Record, error) {
 	cf, err := img.ConfigFile()
 	if err != nil {
 		return Record{}, err
@@ -163,29 +193,34 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 		return Record{}, err
 	}
 	reportProgress(ctx, Progress{Stage: ProgressWaiting, Reference: ref})
-	lock, err := store.lock(ctx, false)
+	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
-	if err := store.recoverLocked(); err != nil {
-		return Record{}, err
+	cached, cacheErr := store.resolveLocked(ref)
+	var cachedLease *os.File
+	if cacheErr == nil && cached.ManifestDigest == digest.String() && sameLaunchConfig(cached.Config, launch) {
+		cachedLease, cacheErr = store.acquireLeaseLocked(cached.ID)
 	}
-	if cached, err := store.resolveLocked(ref); err == nil && cached.ManifestDigest == digest.String() && sameLaunchConfig(cached.Config, launch) {
+	lock.Close()
+	if cacheErr != nil && !errors.Is(cacheErr, ErrNotFound) {
+		return Record{}, cacheErr
+	}
+	if cachedLease != nil {
+		defer cachedLease.Close()
 		reportProgress(ctx, Progress{Stage: ProgressVerifyingImage, Reference: ref})
 		if err := store.verify(ctx, cached); err != nil {
 			return Record{}, err
 		}
 		reportProgress(ctx, Progress{Stage: ProgressUpToDate, Reference: ref})
 		return cached, nil
-	} else if err != nil && !errors.Is(err, ErrNotFound) {
-		return Record{}, err
 	}
-	stage, err := os.MkdirTemp(store.root, ".import-")
+	stage, lease, transaction, err := store.beginImport(ctx)
 	if err != nil {
 		return Record{}, err
 	}
-	defer os.RemoveAll(stage)
+	defer lease.Close()
+	defer store.cleanupImport(stage, transaction)
 	tree := filepath.Join(stage, "rootfs")
 	if err := os.Mkdir(tree, 0755); err != nil {
 		return Record{}, err
@@ -235,62 +270,37 @@ func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Re
 		return Record{}, err
 	}
 	reportProgress(ctx, Progress{Stage: ProgressPublishing, Reference: ref})
-	record, err := store.read(id)
-	if err == nil {
-		if err := store.verify(ctx, record); err != nil {
-			return Record{}, err
-		}
-	} else if errors.Is(err, ErrNotFound) {
-		record = Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size, Config: launch, ManifestDigest: digest.String()}
-		data, err := json.Marshal(record)
-		if err != nil {
-			return Record{}, err
-		}
-		if len(data) > 1<<20 {
-			return Record{}, errors.New("image configuration exceeds 1 MiB")
-		}
-		if err := os.WriteFile(filepath.Join(stage, "image.json"), data, 0600); err != nil {
-			return Record{}, err
-		}
-		lease, err := store.openFile(filepath.Join(stage, ".lease"), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
-		if err != nil {
-			return Record{}, err
-		}
-		lease.Close()
-		if err := rootfs.SyncTree(ctx, stage); err != nil {
-			return Record{}, err
-		}
-		if err := ctx.Err(); err != nil {
-			return Record{}, err
-		}
-		if err := os.Rename(stage, store.path(id)); err != nil {
-			return Record{}, err
-		}
-		if err := syncDirectory(store.root); err != nil {
-			return Record{}, err
-		}
-	} else {
-		return Record{}, err
-	}
-	// Write the reference only after its immutable target has been synced.
-	refStage, err := os.CreateTemp(store.root, ".ref-stage-")
+	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size, Config: launch, ManifestDigest: digest.String()}
+	record, err = store.publish(ctx, stage, record, ref)
 	if err != nil {
-		return Record{}, err
-	}
-	defer os.Remove(refStage.Name())
-	writeErr := json.NewEncoder(refStage).Encode(cachedReference{Reference: ref, ID: record.ID})
-	err = errors.Join(writeErr, refStage.Sync(), refStage.Close())
-	if err != nil {
-		return Record{}, err
-	}
-	if err := os.Rename(refStage.Name(), filepath.Join(store.root, referenceKey(ref))); err != nil {
-		return Record{}, err
-	}
-	if err := syncDirectory(store.root); err != nil {
 		return Record{}, err
 	}
 	reportProgress(ctx, Progress{Stage: ProgressReady, Reference: ref})
 	return record, nil
+}
+
+// Write the reference only after its immutable target has been synced, with
+// that target pinned by a shared lease through the reference rename and fsync.
+func (store *Store) publishReferenceLocked(ctx context.Context, ref, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	refStage, err := os.CreateTemp(store.root, ".ref-stage-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(refStage.Name())
+	writeErr := json.NewEncoder(refStage).Encode(cachedReference{Reference: ref, ID: id})
+	if err := errors.Join(writeErr, refStage.Sync(), refStage.Close()); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Rename(refStage.Name(), filepath.Join(store.root, referenceKey(ref))); err != nil {
+		return err
+	}
+	return syncDirectory(store.root)
 }
 
 // trackedLayer preserves go-containerregistry's decompression and blob digest

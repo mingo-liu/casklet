@@ -92,6 +92,13 @@ in a terminal and plain text when redirected; `plain` and `tty` force either mod
 Image/container IDs and application output stay on stdout. Cached runs show
 `Using cached image`; an unchanged explicit pull shows `Image is up to date`.
 
+New privileged image containers share the immutable image through OverlayFS
+and save only their writable changes. Detached changes survive start/restart;
+directory sources, rootless runs, and existing copied container roots keep their
+copy behavior. The guest must support OverlayFS. Different image pulls and
+imports can prepare concurrently; cached-image operations remain available while
+another image downloads. Refreshes of the same reference are serialized.
+
 ```sh
 casklet image pull redis:8
 casklet image pull --progress=plain redis:8

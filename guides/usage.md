@@ -140,7 +140,7 @@ Loopback HTTP registries are supported for local development and tests.
 
 The image store verifies downloaded blobs and uncompressed layer DiffIDs, applies
 layers in order (including whiteouts and opaque directories), preserves numeric
-ownership, and atomically publishes an independent rootfs. Programs may use dynamic
+ownership, and atomically publishes an immutable rootfs. Programs may use dynamic
 libraries and merged `/usr` layouts; static BusyBox is only a requirement for the
 managed builtin template. Extraction strips setuid/setgid bits and does not apply
 file capabilities or extended attributes. Device nodes, sockets, and FIFOs in layers
@@ -225,12 +225,36 @@ casklet image rm "$image_id"
 ```
 
 Directory imports have no default command. Imports copy a stable Linux filesystem;
-later source changes do not alter it. Running copies are independent. Omitting
+later source changes do not alter it. Container writes are independent. Omitting
 `--image` and `--rootfs` selects builtin BusyBox. Deletion accepts a full local ID
 or unique prefix and is blocked while the image is leased or referenced by a
 retained container.
 Remove referencing containers first; deleting a cached target makes its name a
 cache miss on the next run.
+
+### Copy-on-write image containers
+
+New privileged containers using `--image`, including directory-imported images,
+share the immutable cached filesystem through OverlayFS. Each execution has a
+private merged mount; writes, deletions, and directory changes affect only its
+writable layer. Detached containers retain that layer across start/restart,
+including deletions of files from the image. Their lower image must remain intact;
+existing image leases and retained-container references prevent its removal.
+`--read-only`, bind mounts, named volumes, exec, and health probes use the merged
+filesystem with their existing semantics.
+
+The guest kernel and storage must support OverlayFS; unsupported mounts fail
+explicitly rather than silently copying the image. Directory `--rootfs` sources,
+builtin BusyBox, user namespaces, rootless execution, and existing complete copied
+container roots keep their prior copy behavior. Existing roots are not migrated.
+Image integrity is still checked on acquisition; this change does not skip content
+verification or add a shared download-layer cache.
+
+Different image references and directory imports prepare concurrently. Download,
+extraction, copying, syncing, and full content verification run outside the global
+image metadata lock. Per-reference locks serialize refreshes of the same name;
+private transaction leases protect active staging from recovery. Atomic publication
+and deletion retain their existing lock and image-reference checks.
 
 ## Persistent data
 
