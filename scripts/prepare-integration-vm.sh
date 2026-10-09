@@ -13,11 +13,13 @@ sudo env DEBIAN_FRONTEND=noninteractive apt-get update
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y busybox-static binutils make iproute2 iptables nftables util-linux conntrack apparmor-utils
 # Hosted runners may have Docker's FORWARD policy set to DROP. An accept in
 # casklet's nftables table cannot override a drop in another base chain.
-# Permit only the test bridge in the existing IPv4 forwarding chain, preserving
+# Permit only casklet bridge interfaces in the existing IPv4 forwarding chain, preserving
 # the host policy and unrelated rules. Repeated provisioning is idempotent.
 for direction in -i -o; do
-    sudo iptables -w -C FORWARD "$direction" casklet0 -j ACCEPT 2>/dev/null ||
-        sudo iptables -w -I FORWARD 1 "$direction" casklet0 -j ACCEPT
+    for interface in casklet0 csn+; do
+        sudo iptables -w -C FORWARD "$direction" "$interface" -j ACCEPT 2>/dev/null ||
+            sudo iptables -w -I FORWARD 1 "$direction" "$interface" -j ACCEPT
+    done
 done
 sudo iptables -S FORWARD
 sudo install -m 0644 "$project/dev/apparmor/casklet" /etc/apparmor.d/casklet

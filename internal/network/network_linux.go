@@ -34,6 +34,8 @@ const (
 )
 
 type allocation struct {
+	Network string               `json:"network,omitempty"`
+	Aliases []string             `json:"aliases,omitempty"`
 	BootID  string               `json:"boot_id"`
 	Address string               `json:"address"`
 	Publish []config.PortMapping `json:"publish"`
@@ -45,9 +47,21 @@ type sharedState struct {
 }
 
 // Lease keeps host ports reserved until NAT and interfaces have been removed.
-type Lease struct{ sockets []io.Closer }
+type Lease struct {
+	sockets []io.Closer
+	dns     *dnsServer
+}
 
+func (l *Lease) StopDNS() {
+	if l.dns != nil {
+		l.dns.Quiesce()
+	}
+}
 func (l *Lease) Close() {
+	if l.dns != nil {
+		l.dns.Close()
+		l.dns = nil
+	}
 	for _, socket := range l.sockets {
 		socket.Close()
 	}
@@ -247,7 +261,7 @@ func Resolvers(explicit []string) ([]string, error) {
 			return servers, nil
 		}
 	}
-	return nil, errors.New("no usable host IPv4 DNS servers; specify --dns with --network bridge")
+	return nil, errors.New("no usable host IPv4 DNS servers; specify --dns with bridge or named networking")
 }
 
 func allocations() (map[string]allocation, error) {
@@ -271,6 +285,9 @@ func allocations() (map[string]allocation, error) {
 		var record allocation
 		err := readJSON(filepath.Join(path, "network.json"), &record)
 		if errors.Is(err, os.ErrNotExist) {
+			err = readJSON(filepath.Join(path, "network-named.json"), &record)
+		}
+		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
@@ -279,8 +296,21 @@ func allocations() (map[string]allocation, error) {
 		if !validBoot(record.BootID) {
 			return nil, errors.New("invalid recorded network boot identity")
 		}
+		pool := subnet
+		if record.Network != "" {
+			r, err := namedRecord(record.Network)
+			if err != nil {
+				return nil, err
+			}
+			pool = r.Subnet
+			for _, name := range record.Aliases {
+				if err := config.ValidateDNSName(name); err != nil {
+					return nil, err
+				}
+			}
+		}
 		ip, err := netip.ParseAddr(record.Address)
-		if err != nil || !netip.MustParsePrefix(subnet).Contains(ip) || ip.As4()[3] < 2 || ip.As4()[3] == 255 {
+		if err != nil || !netip.MustParsePrefix(pool).Contains(ip) || ip.As4()[3] < 2 || ip.As4()[3] == 255 {
 			return nil, errors.New("invalid recorded network address")
 		}
 		if err := config.ValidateNetwork("bridge", nil, record.Publish, nil); err != nil {
@@ -417,7 +447,23 @@ func reserve(p config.PortMapping) (io.Closer, error) {
 // Setup journals allocation before attaching a veth to the init's live namespace.
 // On every error, the caller must invoke Cleanup before closing any returned
 // lease; failed cleanup preserves its journal.
-func Setup(ctx context.Context, path string, namespace *os.File, ports []config.PortMapping) (resultLease *Lease, resultErr error) {
+func Setup(ctx context.Context, path string, namespace *os.File, ports []config.PortMapping) (*Lease, error) {
+	return SetupConfigured(ctx, path, namespace, config.Config{Network: "bridge", Publish: ports})
+}
+
+func SetupConfigured(ctx context.Context, path string, namespace *os.File, cfg config.Config) (resultLease *Lease, resultErr error) {
+	ports := cfg.Publish
+	bridge, gateway, pool := bridge, gateway, subnet
+	named := config.IsNamedNetwork(cfg.Network)
+	var nr Record
+	if named {
+		var err error
+		nr, err = namedRecord(cfg.Network)
+		if err != nil {
+			return nil, err
+		}
+		bridge, gateway, pool = nr.Bridge, nr.Gateway, nr.Subnet
+	}
 	if namespace == nil {
 		return nil, errors.New("network setup requires a pinned namespace")
 	}
@@ -446,7 +492,18 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 	}
 	used := map[string]bool{}
 	for _, record := range records {
-		used[record.Address] = true
+		if record.Network == cfg.Network || (!named && record.Network == "") {
+			used[record.Address] = true
+		}
+		if named && record.Network == cfg.Network {
+			for _, a := range cfg.NetworkAliases {
+				for _, b := range record.Aliases {
+					if a == b {
+						return nil, fmt.Errorf("network alias %q is already allocated", a)
+					}
+				}
+			}
+		}
 		for _, requested := range ports {
 			for _, existing := range record.Publish {
 				if config.PortsConflict(requested, existing) {
@@ -457,7 +514,8 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 	}
 	address := ""
 	for n := 2; n < 255; n++ {
-		candidate := "10.231.0." + strconv.Itoa(n)
+		base := netip.MustParsePrefix(pool).Addr().As4()
+		candidate := fmt.Sprintf("%d.%d.%d.%d", base[0], base[1], base[2], n)
 		if !used[candidate] {
 			address = candidate
 			break
@@ -505,14 +563,31 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 	if err := ensureBridge(ctx); err != nil {
 		return nil, err
 	}
+	if named {
+		if err := protectNamedForwarding(); err != nil {
+			return nil, err
+		}
+	}
 	boot, err := currentBoot()
 	if err != nil {
 		return nil, err
 	}
-	if err := writeJSON(filepath.Join(path, "network.json"), allocation{BootID: boot, Address: address, Publish: ports}); err != nil {
+	record := allocation{BootID: boot, Address: address, Publish: ports}
+	journal := "network.json"
+	if named {
+		journal = "network-named.json"
+		record.Network = cfg.Network
+		record.Aliases = append([]string(nil), cfg.NetworkAliases...)
+	}
+	if err := writeJSON(filepath.Join(path, journal), record); err != nil {
 		return nil, err
 	}
 	journaled = true
+	if named {
+		if err := ensureNamedBridge(ctx, nr); err != nil {
+			return nil, err
+		}
+	}
 	if err := addLink(host, table, "veth", host+"p"); err != nil {
 		return nil, err
 	}
@@ -542,7 +617,20 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 			return nil, err
 		}
 	}
-	if _, err := command(ctx, "nft", rules(path, address, ports), "-f", "-"); err != nil {
+	dnsPort := 0
+	if named {
+		servers, err := Resolvers(cfg.DNS)
+		if err != nil {
+			return nil, err
+		}
+		dns, err := startDNS(gateway, address, cfg.Network, servers)
+		if err != nil {
+			return nil, err
+		}
+		lease.dns = dns
+		dnsPort = dns.port
+	}
+	if _, err := command(ctx, "nft", rulesFor(path, address, ports, bridge, gateway, named, dnsPort), "-f", "-"); err != nil {
 		return nil, err
 	}
 	success = true
@@ -550,10 +638,18 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 }
 
 func rules(path, address string, ports []config.PortMapping) string {
+	return rulesFor(path, address, ports, bridge, gateway, false, 0)
+}
+func rulesFor(path, address string, ports []config.PortMapping, bridge, gateway string, named bool, dnsPort int) string {
 	_, table := identity(path)
 	var result strings.Builder
 	fmt.Fprintf(&result, "create table ip %s { comment \"%s\"; }\nadd table ip %s {\n", table, table, table)
 	result.WriteString("chain prerouting { type nat hook prerouting priority dstnat; policy accept;\n")
+	if named {
+		for _, proto := range []string{"udp", "tcp"} {
+			fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s ip daddr %s %s dport 53 dnat to %s:%d\n", bridge, address, gateway, proto, gateway, dnsPort)
+		}
+	}
 	for _, p := range ports {
 		// Loopback mappings are host-local and must never DNAT ingress packets.
 		if netip.MustParseAddr(p.HostIP).IsLoopback() {
@@ -570,6 +666,13 @@ func rules(path, address string, ports []config.PortMapping) string {
 	fmt.Fprintf(&result, "ip saddr %s oifname != \"%s\" counter masquerade\n", address, bridge)
 	fmt.Fprintf(&result, "ip daddr %s ct status dnat oifname \"%s\" counter snat to %s\n", address, bridge, gateway)
 	result.WriteString("}\nchain forward { type filter hook forward priority filter; policy accept;\n")
+	if named {
+		for _, peer := range []string{"csn*", "casklet0"} {
+			fmt.Fprintf(&result, "iifname \"%s\" oifname \"%s\" oifname != \"%s\" drop\n", bridge, peer, bridge)
+			fmt.Fprintf(&result, "oifname \"%s\" iifname \"%s\" iifname != \"%s\" drop\n", bridge, peer, bridge)
+		}
+	}
+
 	fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s accept\n", bridge, address)
 	fmt.Fprintf(&result, "oifname \"%s\" ip daddr %s ct state established,related accept\n", bridge, address)
 	for _, p := range ports {
@@ -640,8 +743,10 @@ func Cleanup(path string) error {
 	}
 	// Loopback-only runs have no dependency on networking tools or state.
 	_, allocationErr := os.Lstat(filepath.Join(path, "network.json"))
+	_, namedErr := os.Lstat(filepath.Join(path, "network-named.json"))
 	_, sharedErr := os.Lstat(filepath.Join(runsRoot, ".network-shared.json"))
-	if errors.Is(allocationErr, os.ErrNotExist) && errors.Is(sharedErr, os.ErrNotExist) {
+	_, namedSharedErr := os.Lstat(filepath.Join(runsRoot, ".named-forwarding.json"))
+	if errors.Is(allocationErr, os.ErrNotExist) && errors.Is(namedErr, os.ErrNotExist) && errors.Is(sharedErr, os.ErrNotExist) && errors.Is(namedSharedErr, os.ErrNotExist) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -660,6 +765,14 @@ func Cleanup(path string) error {
 		return err
 	}
 	if record, exists := records[path]; exists && record.BootID == boot {
+		bridge := bridge
+		if record.Network != "" {
+			nr, err := namedRecord(record.Network)
+			if err != nil {
+				return err
+			}
+			bridge = nr.Bridge
+		}
 		table, present, err := ownedTable(ctx, path)
 		if err != nil {
 			return err
@@ -714,16 +827,42 @@ func Cleanup(path string) error {
 			}
 		}
 	}
-	if _, exists := records[path]; exists {
-		if err := os.Remove(filepath.Join(path, "network.json")); err != nil {
+	removed, exists := records[path]
+	if removed.Network != "" {
+		used := false
+		for other, a := range records {
+			if other != path && a.Network == removed.Network {
+				used = true
+			}
+		}
+		if !used && removed.BootID == boot {
+			nr, err := namedRecord(removed.Network)
+			if err != nil {
+				return err
+			}
+			if err := removeNamedBridge(ctx, nr); err != nil {
+				return err
+			}
+		}
+	}
+	if exists {
+		journal := "network.json"
+		if removed.Network != "" {
+			journal = "network-named.json"
+		}
+		if err := os.Remove(filepath.Join(path, journal)); err != nil {
 			return err
 		}
 		delete(records, path)
 	}
+
 	if len(records) != 0 {
 		return nil
 	}
-	return cleanupBridge(ctx)
+	if err := cleanupBridge(ctx); err != nil {
+		return err
+	}
+	return restoreNamedForwarding()
 }
 
 func cleanupBridge(ctx context.Context) error {

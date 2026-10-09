@@ -155,6 +155,26 @@ casklet machine stop
 casklet machine start
 ```
 
+Named networks isolate projects and resolve detached containers by name or alias:
+
+```sh
+casklet network create demo
+casklet run -d --name demo-redis --network demo --network-alias redis --image redis:8
+casklet run --network demo --image redis:8 -- redis-cli -h redis ping
+casklet network ls
+casklet stop demo-redis
+casklet rm demo-redis
+casklet network rm demo
+```
+
+Create networks before use. Network names, container names on named networks,
+and aliases require lowercase DNS labels. Aliases are scoped per network and
+reserved by stopped retained containers too. Discovery supports IPv4 over UDP
+and TCP; unknown external names use upstream DNS. Direct traffic between named
+networks and the legacy bridge is blocked. Published ports still reach the Mac.
+Network metadata survives VM restarts; runtime interfaces and addresses are fresh
+on each execution. See [named networks](guides/usage.md#named-networks-and-service-discovery).
+
 Stopping the VM stops its workloads and preserves their data. After starting the
 VM, `always` and eligible `unless-stopped` containers resume automatically;
 use `casklet start NAME` for other retained containers.

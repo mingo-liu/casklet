@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -49,11 +50,13 @@ func PortsConflict(a, b PortMapping) bool {
 }
 
 func ValidateNetwork(mode string, dns []string, ports []PortMapping, mounts []BindMount) error {
-	if mode != "" && mode != "none" && mode != "bridge" {
-		return errors.New("network must be none or bridge")
+	if IsNamedNetwork(mode) {
+		if err := ValidateNetworkName(mode); err != nil {
+			return err
+		}
 	}
-	if mode != "bridge" && (len(dns) != 0 || len(ports) != 0) {
-		return errors.New("DNS and published ports require --network bridge")
+	if (mode == "" || mode == "none") && (len(dns) != 0 || len(ports) != 0) {
+		return errors.New("DNS and published ports require bridge or named networking")
 	}
 	if len(dns) > 3 {
 		return errors.New("at most three DNS servers are supported")
@@ -78,10 +81,10 @@ func ValidateNetwork(mode string, dns []string, ports []PortMapping, mounts []Bi
 			}
 		}
 	}
-	if mode == "bridge" {
+	if mode != "" && mode != "none" {
 		for _, mount := range mounts {
 			if pathsOverlap(mount.Target, "/etc/resolv.conf") {
-				return errors.New("bridge networking reserves /etc/resolv.conf; bind mounts must not cover it")
+				return errors.New("networking reserves /etc/resolv.conf; bind mounts must not cover it")
 			}
 		}
 	}
@@ -93,4 +96,39 @@ func (c Config) NetworkMode() string {
 		return "none"
 	}
 	return c.Network
+}
+
+var networkNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+func IsNamedNetwork(mode string) bool { return mode != "" && mode != "none" && mode != "bridge" }
+func ValidateDNSName(name string) error {
+	if !networkNamePattern.MatchString(name) {
+		return errors.New("network names and aliases require a lowercase DNS label (1-63 letters, digits, or hyphens)")
+	}
+	return nil
+}
+func ValidateNetworkName(name string) error {
+	if !IsNamedNetwork(name) {
+		return errors.New("network name cannot be none or bridge")
+	}
+	return ValidateDNSName(name)
+}
+func (c Config) ValidateNetworkAliases() error {
+	if len(c.NetworkAliases) > 32 {
+		return errors.New("at most 32 network aliases are supported")
+	}
+	if len(c.NetworkAliases) > 0 && !IsNamedNetwork(c.Network) {
+		return errors.New("network aliases require a named network")
+	}
+	seen := map[string]bool{}
+	for _, name := range c.NetworkAliases {
+		if err := ValidateDNSName(name); err != nil {
+			return err
+		}
+		if seen[name] {
+			return errors.New("duplicate network alias")
+		}
+		seen[name] = true
+	}
+	return nil
 }

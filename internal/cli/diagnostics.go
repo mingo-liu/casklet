@@ -21,6 +21,11 @@ func argumentError(args []string, err error) error {
 			if len(args) > 1 && args[1] == "df" {
 				topic += " df"
 			}
+		case "network":
+			topic = "network"
+			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm") {
+				topic += " " + args[1]
+			}
 		case "volume":
 			topic = "volume"
 			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm") {

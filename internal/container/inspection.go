@@ -44,6 +44,7 @@ type InspectionConfig struct {
 	LogMaxSize       int64                   `json:"log_max_size"`
 	LogMaxFiles      int                     `json:"log_max_files"`
 	Seccomp          string                  `json:"seccomp"`
+	NetworkAliases   []string                `json:"network_aliases,omitempty"`
 	Network          string                  `json:"network"`
 	DNS              []string                `json:"dns"`
 	Publish          []config.PortMapping    `json:"publish"`
@@ -97,7 +98,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		CleanupFailures: append([]string{}, record.CleanupFailures...),
 		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

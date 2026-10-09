@@ -74,7 +74,8 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
 		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
 		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })
-		fs.StringVar(&r.Config.Network, "network", "none", "network mode")
+		fs.StringVar(&r.Config.Network, "network", "none", "none, bridge, or named network")
+		fs.Func("network-alias", "named network DNS alias", func(value string) error { r.Config.NetworkAliases = append(r.Config.NetworkAliases, value); return nil })
 		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
 		publish := func(value string) error {
 			mapping, err := config.ParsePortMapping(value)
@@ -230,6 +231,19 @@ func parseRun(r Request, args []string) (Request, error) {
 	if !r.Detach && len(r.Config.Labels) > 0 {
 		return r, errors.New("--label requires --detach")
 	}
+
+	if config.IsNamedNetwork(r.Config.Network) && r.Name != "" {
+		if err := config.ValidateDNSName(r.Name); err != nil {
+			return r, errors.New("named networking requires a lowercase DNS container name")
+		}
+	}
+	if len(r.Config.NetworkAliases) > 0 && !r.Detach {
+		return r, errors.New("network aliases require detached containers")
+	}
+	if len(r.Config.NetworkAliases) > 31 {
+		return r, errors.New("at most 31 explicit network aliases are supported")
+	}
+
 	if !r.Detach && r.Config.RestartPolicy != "" {
 		return r, errors.New("--restart requires --detach")
 	}

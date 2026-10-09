@@ -145,3 +145,22 @@ suite does not. Pull staging and caches live on the VM disk.
   upgrades replace this manager independently of active workload supervisors.
 - Report integration checks that could not run. Unit tests and cross-compilation
   alone do not establish terminal, networking, or resource-limit behavior.
+
+### Named network regression checks
+
+The dedicated VM provisioner permits `casklet0` and the owned named bridge prefix
+`csn+` in its existing IPv4 FORWARD chain, because a host DROP policy can override
+accepts in separate nftables base chains. Production networking never changes
+unrelated forwarding rules. Run `TestNamedNetwork*` in the privileged Linux suite
+for DNS over UDP/TCP, scoped aliases, direct-routing separation, upstream NAT,
+publishing, restart addresses, foreground leases, retained references, failed
+bridge cleanup receipts, and forwarding restoration in both cleanup orders.
+Run `TestNamedNetworkServiceDiscoveryAndHostPublish` in the real macOS suite.
+`TestProjectNetworkReadinessAndBatchLifecycle` combines scoped discovery,
+changed restart addresses, health waiting, host publication, and label-selected
+batch cleanup through the client/VM path.
+Set `CASKLET_LEGACY_ENGINE` to a baseline engine built before named networking
+to include the pinned old-supervisor upgrade regression. Without it that one
+case skips explicitly. The Linux runner preserves this setting across sudo.
+Root-only network package tests additionally validate metadata ownership, stable
+leases, cancellation, and canonical subnet records; other DNS tests run normally.

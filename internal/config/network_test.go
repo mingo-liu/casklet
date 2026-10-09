@@ -19,7 +19,7 @@ func TestNetworkValidation(t *testing.T) {
 		}
 	}
 	p, _ := ParsePortMapping("8080:80")
-	for _, mode := range []string{"", "none", "host", "custom"} {
+	for _, mode := range []string{"", "none", "bad/network", "UPPER"} {
 		if err := ValidateNetwork(mode, nil, []PortMapping{p}, nil); err == nil {
 			t.Errorf("accepted publish with mode %q", mode)
 		}

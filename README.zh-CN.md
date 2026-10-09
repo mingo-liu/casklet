@@ -138,6 +138,24 @@ casklet machine stop
 casklet machine start
 ```
 
+命名网络可以隔离项目，并通过名称或别名解析后台容器：
+
+```sh
+casklet network create demo
+casklet run -d --name demo-redis --network demo --network-alias redis --image redis:8
+casklet run --network demo --image redis:8 -- redis-cli -h redis ping
+casklet network ls
+casklet stop demo-redis
+casklet rm demo-redis
+casklet network rm demo
+```
+
+使用前先创建网络。网络名称、命名网络上的容器名称及别名必须是小写 DNS 标签。
+别名在各网络内独立，停止后保留的容器仍会占用别名。服务发现支持通过 UDP 和 TCP
+解析 IPv4，外部域名交给上游 DNS。命名网络之间、命名网络与原有 bridge 之间的
+直接通信会被阻止，发布的端口仍可从 Mac 访问。网络元数据在 VM 重启后保留；
+每次执行都会重新创建接口和分配地址。详见[命名网络指南](guides/usage.md#named-networks-and-service-discovery)（英文）。
+
 停止虚拟机会停止其中的工作负载，但保留其数据。启动虚拟机后，采用 `always`
 或满足条件的 `unless-stopped` 策略的容器会自动恢复；其他保留的容器可以用
 `casklet start NAME` 再次启动。

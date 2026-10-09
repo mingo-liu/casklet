@@ -13,6 +13,8 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 	var err error
 	returnCode := 0
 	switch r.Action {
+	case "network-create", "network-ls", "network-inspect", "network-rm":
+		return executeNetwork(ctx, r, stdout)
 	case "system-df":
 		return executeSystem(ctx, r, stdout)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":

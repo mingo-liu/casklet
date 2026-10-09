@@ -65,6 +65,9 @@ func Parse(args []string) (request Request, err error) {
 	if r.Action == "system" {
 		return parseSystem(r, args[1:])
 	}
+	if r.Action == "network" {
+		return parseNetwork(r, args[1:])
+	}
 	if r.Action == "volume" {
 		return parseVolume(r, args[1:])
 	}

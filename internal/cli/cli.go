@@ -55,6 +55,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
+	case "network-create", "network-ls", "network-inspect", "network-rm":
+		return executeManagement(r, stdout, stderr)
 	case "system-df":
 		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":

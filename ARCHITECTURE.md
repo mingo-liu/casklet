@@ -265,3 +265,38 @@ the existing lifecycle path. They hold no lifecycle lock between samples, schedu
 no probes, and fail on stop, removal, or generation changes. The CLI owns the
 30-second default deadline and maps readiness timeout to status 124 without
 changing the workload. Ordinary exit waits continue reading generation receipts.
+
+
+## Named networks and scoped DNS
+
+`network` owns guest-local named metadata, stable store/deletion lease files,
+per-execution allocation journals, bridges, and scoped DNS transport. `container`
+checks retained references and reserves exact names/aliases atomically under its
+metadata lock. Creation acquires the network lease before publishing the retained
+config; runtime holds a lease through execution cleanup. Removal acquires the
+network store lock and exclusive lease before scanning containers, then takes
+the existing network allocation lock. Runtime cleanup reads immutable metadata
+under its execution lease without reversing that lock order.
+
+Named allocations use `network-named.json`; legacy `network.json` remains byte
+schema compatible so pinned old supervisors can continue scanning it. A separate
+forwarding receipt saves the original setting before marking the legacy shared
+receipt to preserve forwarding while old supervisors cannot see named journals.
+The new engine restores forwarding only after both allocation kinds are gone.
+Current-boot ownership groups protect link mutation; failed cleanup retains the
+named journal until the final bridge has been removed. Metadata publication is
+atomic and fsynced; interrupted save files are reclaimed under the stable lock.
+
+Each supervisor owns a small UDP/TCP DNS server bound to its network gateway and
+an ephemeral port. Per-execution NAT redirects only that container's gateway DNS
+requests. Queries inspect current-boot journals and existing runtime lock leases,
+so abandoned/stopped executions are excluded and replacement addresses have no
+server cache. Exact names and aliases (optionally `.casklet`) receive IPv4 A records;
+external names use execution-specific upstream servers. There are at most 32
+concurrent requests, 4 KiB packets, one TCP question per connection, and bounded
+upstream/connect/read deadlines. Shutdown cancels accepted and upstream sockets,
+quiesces workers, and keeps listening socket reservations through NAT cleanup.
+No persistent DNS daemon or new engine re-exec mode is required. Named bridge
+firewall drops restrict forwarding to other casklet networks without modifying
+unrelated host tables or policies. Published host ports retain the existing Lima
+address translation and forwarding path.

@@ -67,3 +67,12 @@ func (store *Store) configReferenced(ctx context.Context, matches func(config.Co
 	}
 	return false, nil
 }
+
+// NetworkReferenced includes stopped containers. Lock order is network then container.
+func NetworkReferenced(ctx context.Context, name string) (bool, error) {
+	s, err := OpenStore()
+	if err != nil {
+		return false, err
+	}
+	return s.configReferenced(ctx, func(c config.Config) bool { return c.Network == name })
+}

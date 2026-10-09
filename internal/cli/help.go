@@ -21,6 +21,7 @@ Commands:
   rm        Remove a stopped container
   system    Inspect VM disk usage
   volume    Create, list, inspect, or remove named data volumes
+  network   Manage isolated named networks and service discovery
   image     Pull, import, list, or remove images
   doctor    Check runtime prerequisites and a rootfs template
   help      Show command help
@@ -52,9 +53,11 @@ const runOptions = `Options:
                  or type=volume,source=NAME,target=/PATH[,readonly]
                  Repeat for up to 32 mounts; targets cannot overlap
                  Create named volumes first; volumes do not support user namespaces
-  --network      none (loopback only, default) or bridge (IPv4 connectivity)
-  --dns          Unicast, non-loopback IPv4 DNS; repeat up to 3 times (bridge only)
-  -p, --publish  [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp] (bridge only)
+  --network      none (default), bridge, or a previously created named network
+  --network-alias  Repeatable DNS alias on a named network; requires -d, up to 31
+                 Names and aliases on named networks require lowercase DNS labels
+  --dns          Unicast, non-loopback IPv4 DNS; repeat up to 3 times (bridge or named network)
+  -p, --publish  [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp] (bridge or named network)
                  Repeat up to 32 times; ports 1-65535; host bindings cannot overlap
   --seccomp      default (deny dangerous syscalls) or unconfined
   --userns       Use a user namespace (foreground only; requires UID/GID maps)
@@ -137,6 +140,56 @@ Examples:
   casklet image prune --dry-run
   casklet image prune
 `,
+	"network": `Usage: casklet network COMMAND
+
+Commands:
+  create NAME   Create a named network (idempotent)
+  ls [--json]   List named networks
+  inspect NAME  Print network metadata as JSON
+  rm NAME       Remove an unused network
+
+Named networks use separate bridges and /24 subnets from 10.232.0.0/16.
+Container names and aliases resolve only inside their network (IPv4 A records).
+Names require lowercase DNS labels; none and bridge are reserved.
+Explicit --dns selects upstream resolvers. Inter-network forwarding is blocked.
+Stopped retained containers still reserve their aliases and network references.
+
+Examples:
+  casklet network create demo
+  casklet run -d --name demo-redis --network demo --network-alias redis --image redis:8
+`,
+	"network create": `Usage: casklet network create NAME
+
+Creates network metadata and chooses a /24 subnet; idempotent for an existing name.
+The bridge is created on first use. Overlapping host routes cause startup failure.
+
+Examples:
+  casklet network create demo
+Names require a lowercase DNS label (1-63 characters); none and bridge are reserved.
+`,
+	"network ls": `Usage: casklet network ls [--json]
+
+Lists saved network metadata. --json prints JSON.
+
+Examples:
+  casklet network ls --json
+`,
+	"network inspect": `Usage: casklet network inspect NAME
+
+Prints the saved name, creation time, subnet, gateway, and bridge as JSON.
+
+Examples:
+  casklet network inspect demo
+`,
+	"network rm": `Usage: casklet network rm NAME
+
+Refuses active executions, unrecovered allocations, and retained container references.
+Remove stopped containers first. Only verified casklet-owned interfaces are removed.
+
+Examples:
+  casklet network rm demo
+`,
+
 	"volume": `Usage: casklet volume COMMAND
 
 Commands:

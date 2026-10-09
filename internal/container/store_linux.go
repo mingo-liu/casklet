@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/network"
 	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
@@ -160,6 +161,13 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 			return Record{}, err
 		}
 	}
+	networkLease, err := network.AcquireNetwork(ctx, cfg.Network)
+	if err != nil {
+		return Record{}, err
+	}
+	if networkLease != nil {
+		defer networkLease.Close()
+	}
 	if err := store.recoverTransactions(ctx); err != nil {
 		return Record{}, err
 	}
@@ -180,10 +188,46 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	if name == "" {
 		name = "casklet-" + id[:12]
 	}
+	if config.IsNamedNetwork(cfg.Network) {
+		if err := config.ValidateDNSName(name); err != nil {
+			return Record{}, fmt.Errorf("named networking requires a lowercase DNS container name: %w", err)
+		}
+		found := false
+		for _, alias := range cfg.NetworkAliases {
+			if alias == name {
+				found = true
+			}
+		}
+		if !found {
+			cfg.NetworkAliases = append(cfg.NetworkAliases, name)
+		}
+		if err := cfg.ValidateNetworkAliases(); err != nil {
+			return Record{}, err
+		}
+	}
 	records, err := store.listLocked()
 	if err != nil {
 		return Record{}, err
 	}
+	if config.IsNamedNetwork(cfg.Network) {
+		for _, record := range records {
+			var saved config.Config
+			if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), maxConfigBytes, &saved); err != nil {
+				return Record{}, err
+			}
+			if saved.Network != cfg.Network {
+				continue
+			}
+			for _, a := range cfg.NetworkAliases {
+				for _, b := range saved.NetworkAliases {
+					if a == b {
+						return Record{}, fmt.Errorf("network alias %q is referenced by container %s", a, record.Name)
+					}
+				}
+			}
+		}
+	}
+
 	for _, record := range records {
 		if record.Name == name {
 			return Record{}, fmt.Errorf("%w: %s", ErrNameInUse, name)

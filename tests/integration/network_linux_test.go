@@ -46,7 +46,7 @@ func networkSnapshot(t *testing.T) string {
 	}
 	var owned []string
 	for _, link := range links {
-		if strings.HasPrefix(link.Alias, "casklet") || strings.HasPrefix(link.Alias, "casklet_") {
+		if strings.HasPrefix(link.Name, "csn") || strings.HasPrefix(link.Alias, "casklet") || strings.HasPrefix(link.Alias, "casklet_") {
 			owned = append(owned, link.Name)
 		}
 	}
@@ -61,8 +61,10 @@ func networkSnapshot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if _, err := os.Lstat(filepath.Join("/var/lib/casklet/runs", entry.Name(), "network.json")); err == nil {
-			owned = append(owned, entry.Name())
+		for _, journal := range []string{"network.json", "network-named.json"} {
+			if _, err := os.Lstat(filepath.Join("/var/lib/casklet/runs", entry.Name(), journal)); err == nil {
+				owned = append(owned, entry.Name()+"/"+journal)
+			}
 		}
 	}
 	if _, err := os.Lstat("/var/lib/casklet/runs/.network-shared.json"); err == nil {

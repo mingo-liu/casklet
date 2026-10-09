@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 2 {
+	if len(os.Args) != 2 && !(len(os.Args) == 4 && os.Args[1] == "network-resolve") {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -24,6 +24,8 @@ func main() {
 		networkServer(true)
 	case "network-service":
 		networkServer(false)
+	case "network-resolve":
+		networkResolve()
 	case "network-client":
 		networkClient()
 	case "cpu":

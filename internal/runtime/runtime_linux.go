@@ -82,6 +82,13 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if cfg.UserNS && (executor != nil || retainedRoot != "") {
 		return code, errors.New("user namespaces currently support foreground runs only")
 	}
+	namedLease, err := network.AcquireNetwork(prepareCtx, cfg.Network)
+	if err != nil {
+		return preparationError(err, signals)
+	}
+	if namedLease != nil {
+		defer namedLease.Close()
+	}
 	volumes, err := volume.AcquireMounts(prepareCtx, cfg.Mounts)
 	if err != nil {
 		return preparationError(err, signals)
@@ -106,6 +113,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	var networkLease *network.Lease
 	defer func() {
 		if networkLease != nil {
+			networkLease.StopDNS()
 			defer networkLease.Close()
 		}
 		if err := run.remove(); err != nil {
@@ -141,10 +149,22 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := mapRootOwnership(prepareCtx.Err, cfg.RootFS, cfg); err != nil {
 		return code, fmt.Errorf("map rootfs ownership: %w", err)
 	}
-	if cfg.NetworkMode() == "bridge" {
+	if cfg.NetworkMode() != "none" {
 		servers, err := network.Resolvers(cfg.DNS)
 		if err != nil {
 			return code, err
+		}
+		if config.IsNamedNetwork(cfg.Network) {
+			var r network.Record
+			store, e := network.OpenStore()
+			if e != nil {
+				return code, e
+			}
+			r, e = store.Inspect(prepareCtx, cfg.Network)
+			if e != nil {
+				return code, e
+			}
+			servers = []string{r.Gateway}
 		}
 		if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
 			return code, fmt.Errorf("configure DNS: %w", err)
@@ -245,7 +265,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 	// Pin the namespace before Wait can reap init and permit host PID reuse.
 	var networkNamespace *os.File
-	if cfg.NetworkMode() == "bridge" {
+	if cfg.NetworkMode() != "none" {
 		networkNamespace, err = os.Open(fmt.Sprintf("/proc/%d/ns/net", cmd.Process.Pid))
 		if err != nil {
 			_ = cmd.Process.Kill()
@@ -282,8 +302,8 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		cmd.Process.Kill()
 		return code, fmt.Errorf("attach init to cgroup: %w", err)
 	}
-	if cfg.NetworkMode() == "bridge" {
-		networkLease, err = network.Setup(prepareCtx, run.path, networkNamespace, cfg.Publish)
+	if cfg.NetworkMode() != "none" {
+		networkLease, err = network.SetupConfigured(prepareCtx, run.path, networkNamespace, cfg)
 		if err != nil {
 			return preparationError(fmt.Errorf("configure network: %w", err), signals)
 		}

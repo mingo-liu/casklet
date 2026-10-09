@@ -523,3 +523,43 @@ Regressions: `TestStoreOperationsRecoverInterruptedTransactions`,
   inspection, and interactive run/exec tests passed again.
 - Intel Mac execution, Linux amd64 privileged tests, VM stop/start, and the
   macOS engine/template corruption tests were not run in this change.
+
+## 2026-10-09: Isolated named networks and service discovery
+
+Added `network create/ls/inspect/rm`, `run --network NAME`, and detached
+`--network-alias`. Named metadata uses atomic publication and stable deletion
+leases; all retained members and unrecovered allocations block removal. Names
+and aliases reserve one container per network even when stopped. Each named
+network uses a separate bridge subnet, with forwarding to other casklet networks
+blocked. Supervisor-owned UDP/TCP resolvers provide fresh scoped IPv4 answers,
+exclude abandoned/previous-boot executions, and preserve upstream DNS. Queries,
+connections, and shutdown are bounded; listening ports remain reserved through
+NAT cleanup. Separate journals preserve strict old-supervisor bridge parsing,
+and forwarding receipts protect mixed engine generations. Failure deleting the
+last bridge preserves its allocation for retry.
+
+DNS regressions cover UDP/TCP, changed addresses, missing/local names, unsupported
+record types, malformed input, source restriction, bounded workers, and immediate
+shutdown of slow clients. The combined macOS project regression checks discovery
+after an address change, health probes through scoped DNS, readiness waiting,
+host publication, and filtered batch cleanup together.
+
+Validation:
+
+- `make fmt-check test vet test-race` passed on macOS arm64 and the dedicated
+  Linux arm64 VM. Native and amd64 Darwin/embedded Linux builds passed.
+- Root-only network metadata, lease, cancellation, canonical subnet, unsafe
+  artifact, and abandoned-execution DNS tests passed.
+- The complete privileged Linux integration suite passed, including named
+  discovery/isolation, UDP/TCP upstream DNS, cleanup failure receipts, forwarding
+  restoration, and a pinned pre-named-network supervisor. The pinned-supervisor
+  regression additionally passed three consecutive runs.
+- `make test-macos` passed through the real client/VM path, including the combined
+  project regression. The VM stop/start test skipped to preserve other running
+  containers. Engine/template repair tests passed.
+- The first Linux suite run observed one empty systemd service cgroup retained
+  after supervisor-death recovery; its workload descendants were gone. Three
+  consecutive targeted retries and the complete suite rerun passed. That initial
+  empty parent directory remained; no cleanup assertion was weakened. The same
+  recovery test also passed 30 runs with the pre-named-network engine.
+- Intel Mac execution and Linux amd64 privileged execution were not performed.

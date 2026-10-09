@@ -554,7 +554,7 @@ func TestNetworkOptions(t *testing.T) {
 		t.Fatalf("config=%+v", request.Config)
 	}
 	for _, options := range [][]string{
-		{"--network", "host"}, {"-p", "80:80"}, {"--dns", "8.8.8.8"},
+		{"--network", "bad/network"}, {"-p", "80:80"}, {"--dns", "8.8.8.8"},
 		{"--network", "bridge", "-p", "80:80", "-p", "127.0.0.1:80:90"},
 		{"--network", "bridge", "--dns", "127.0.0.53"},
 	} {

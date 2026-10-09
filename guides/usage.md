@@ -521,6 +521,64 @@ error can leave a partial prune; printed IDs identify completed removals.
 Containers, logs, named volumes, and host bind data are preserved. Removing files
 frees guest filesystem space but does not promise immediate Mac disk compaction.
 
+## Named networks and service discovery
+
+```sh
+casklet network create demo
+casklet network inspect demo
+casklet network ls --json
+casklet run -d --name demo-redis --network demo --network-alias redis --image redis:8
+casklet run --network demo --image redis:8 -- redis-cli -h redis ping
+casklet stop demo-redis
+casklet rm demo-redis
+casklet network rm demo
+```
+
+`network create` is idempotent and saves guest-local metadata before any bridge
+is created. Each network receives a /24 subnet from `10.232.0.0/16`; creation
+skips existing network allocations and overlapping guest routes. A conflicting
+route introduced later causes startup to fail safely. The legacy `bridge` remains
+`10.231.0.0/24`, and `none` remains loopback only. There is no implicit creation,
+IPv6, host-network mode, or multi-network attachment.
+
+Names require 1-63 lowercase letters, digits, or hyphens, starting and ending
+with a letter or digit. `none` and `bridge` are reserved network names. Container
+names on named networks obey this DNS label rule too; legacy networks retain
+existing container naming rules. Generated detached container names work as usual.
+`--network-alias NAME` requires `-d`, is repeatable up to 31 times, and reserves
+an additional name alongside the container's exact name. A name or alias can
+belong to one retained container per network, including stopped containers.
+Different networks can use the same alias, for example `redis`; container names
+remain globally unique. Removing a container frees its aliases.
+
+Every execution installs the network gateway as its resolver. UDP and TCP DNS
+return zero-TTL IPv4 A records for live containers' exact names and aliases;
+`redis.casklet` is equivalent to `redis`. Other record types for known local
+names return no records. Unknown single labels and `.casklet` names return
+NXDOMAIN without leaving the network. External dotted names are forwarded to
+explicit `--dns` servers or usable guest resolvers. Stopped, abandoned, and
+previous-boot executions have no DNS records. Restart obtains fresh networking
+and the next lookup sees its current address; applications may still cache answers.
+Health state does not remove a running execution from DNS.
+
+Separate bridges and narrowly scoped firewall drops block direct forwarding
+between named networks and between a named network and the legacy bridge.
+Containers within one network communicate freely. This is project separation,
+not isolation from services reachable through published host ports or the guest
+host. Internet traffic uses NAT. `--publish` and Mac forwarding retain their
+existing behavior; private DNS listeners are excluded from Lima forwarding.
+Read-only roots and explicit DNS servers remain supported. User namespaces and
+rootless execution still require `--network none`. Configuration files accept
+`"network": "demo"` and `"network-alias": ["redis"]`.
+
+Networks survive container removal and VM reboot; bridges exist only while in
+use. `network rm` refuses active leases, unrecovered allocation journals, and
+all retained container references. Stop and remove members before deleting their
+network. Supervisor-owned resolvers stop serving before network cleanup and hold
+their sockets until NAT removal completes. Failed cleanup preserves its journal
+and refuses unsafe interface or firewall ownership. Old bridge executions remain
+compatible when the client installs an updated engine.
+
 ## Security and rootless execution
 
 Workloads use reduced capabilities and `no_new_privs`. Default seccomp filters
