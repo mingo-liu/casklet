@@ -6,6 +6,23 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Readable image listings
+
+The image table now starts with IMAGE and shows one row per cached reference,
+omitting Docker Hub's default registry and official library prefix. References
+from other registries retain their registry and namespace; unreferenced images
+show <none>. IDs display 12 hexadecimal characters, and unpacked file sizes use
+decimal B/kB/MB/GB/TB/PB/EB units rounded to three significant digits. JSON retains
+full IDs, canonical references, and exact byte counts. Help and bilingual usage
+documentation direct removal and ID-based execution to the full IDs from JSON.
+
+Regressions cover multiple references, registry ports, namespaces, digest
+references, unreferenced images, empty tables/JSON, output failures, unit boundaries,
+rounding, large sizes, JSON preservation, and focused help. Darwin arm64 build,
+full unit tests, vet, formatting, and real Mac image table/JSON checks passed
+against cached Redis and Tomcat images. Runtime behavior was unchanged; privileged
+Linux integration tests and the full macOS end-to-end suite were not run.
+
 ## 2026-10-09: Detached container health and image HEALTHCHECK support
 
 Added independent starting/healthy/unhealthy/stopped health state to ps/inspect,

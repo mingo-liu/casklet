@@ -81,6 +81,16 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 		if err != nil || strings.Count(ps, "\n") > 25 || !strings.Contains(ps, "--all") || !strings.Contains(ps, "--json") {
 			t.Fatalf("verbose or incomplete ps help: %q %v", ps, err)
 		}
+		images, err := scopedUsage("image ls", macOS)
+		for _, detail := range []string{"IMAGE", "one row per reference", "<none>", "12 hexadecimal", "decimal B/kB/MB/GB", "full sha256: IDs", "exact byte sizes"} {
+			if err != nil || !strings.Contains(images, detail) {
+				t.Errorf("image ls help missing %q: %q %v", detail, images, err)
+			}
+		}
+		removeImage, err := scopedUsage("image rm", macOS)
+		if err != nil || !strings.Contains(removeImage, "full sha256: ID from image ls --json") || !strings.Contains(removeImage, "display-only") {
+			t.Fatalf("image rm help lacks full-ID guidance: %q %v", removeImage, err)
+		}
 		run, err := scopedUsage("run", macOS)
 		for _, detail := range []string{"-- COMMAND", "--uid-map", "--gid-map", "--rootless", "--stop-signal", "--restart", "--config", "--env-file", "--health-cmd", "--no-healthcheck", "--health-start-interval", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {
 			if err != nil || !strings.Contains(run, detail) {

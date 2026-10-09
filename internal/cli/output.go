@@ -82,13 +82,55 @@ func writeImages(out io.Writer, records []image.Record, asJSON bool) error {
 		return json.NewEncoder(out).Encode(records)
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tARCHITECTURE\tSIZE (BYTES)\tCREATED\tREFERENCES"); err != nil {
+	if _, err := fmt.Fprintln(w, "IMAGE\tID\tARCHITECTURE\tSIZE\tCREATED"); err != nil {
 		return err
 	}
 	for _, record := range records {
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", record.ID, record.Architecture, record.SizeBytes, record.CreatedAt.UTC().Format(time.RFC3339), strings.Join(record.References, ", ")); err != nil {
-			return err
+		references := record.References
+		if len(references) == 0 {
+			references = []string{"<none>"}
+		}
+		id := strings.TrimPrefix(record.ID, "sha256:")
+		if len(id) > 12 {
+			id = id[:12]
+		}
+		for _, reference := range references {
+			name := strings.TrimPrefix(reference, "index.docker.io/")
+			if name != reference {
+				name = strings.TrimPrefix(name, "library/")
+			}
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, id, record.Architecture, displayImageSize(record.SizeBytes), record.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
+				return err
+			}
 		}
 	}
 	return w.Flush()
+}
+
+func displayImageSize(bytes int64) string {
+	if bytes < 1000 {
+		return strconv.FormatInt(bytes, 10) + "B"
+	}
+	units := [...]string{"B", "kB", "MB", "GB", "TB", "PB", "EB"}
+	value, unit := float64(bytes), 0
+	for value >= 1000 && unit < len(units)-1 {
+		value /= 1000
+		unit++
+	}
+	// Promote values that would otherwise round to 1000 of the smaller unit.
+	if value >= 999.5 && unit < len(units)-1 {
+		value /= 1000
+		unit++
+	}
+	precision := 2
+	if value >= 100 {
+		precision = 0
+	} else if value >= 10 {
+		precision = 1
+	}
+	size := strconv.FormatFloat(value, 'f', precision, 64)
+	if precision > 0 {
+		size = strings.TrimRight(strings.TrimRight(size, "0"), ".")
+	}
+	return size + units[unit]
 }

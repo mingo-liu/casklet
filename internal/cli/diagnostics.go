@@ -57,7 +57,7 @@ func operationError(r Request, err error) error {
 	case errors.Is(err, container.ErrBusy):
 		hint = "another lifecycle operation is still active; inspect the container with casklet inspect " + ref + " and retry after it finishes."
 	case errors.Is(err, image.ErrNotFound):
-		hint = "list cached images with casklet image ls; use a full sha256: ID or pull a registry reference with casklet image pull NAME."
+		hint = "list cached images with casklet image ls --json; use a full sha256: ID or pull a registry reference with casklet image pull NAME."
 	case errors.Is(err, volume.ErrInUse):
 		hint = "remove referencing containers before retrying volume deletion; active foreground runs must also finish."
 	case errors.Is(err, image.ErrInUse):

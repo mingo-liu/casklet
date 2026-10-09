@@ -188,6 +188,22 @@ configuration and differ from registry manifest digests (`manifest_digest` in im
 JSON). A retained container records its immutable local ID and merged configuration;
 start/restart preserves its writes and does not re-resolve its original tag.
 
+`image ls` displays `IMAGE`, `ID`, `ARCHITECTURE`, `SIZE`, and `CREATED`. Each cached
+reference gets a row; Docker Hub's default registry and official `library/` prefix
+are omitted (for example, `redis:latest`), while other registries and namespaces
+remain visible. Images without references, including directory imports, show
+`<none>`. IDs use the first 12 hexadecimal characters, and unpacked file sizes use
+decimal units (1000 bytes per kB), rounded to three significant digits:
+
+```text
+IMAGE         ID            ARCHITECTURE  SIZE    CREATED
+redis:latest  406e742c72ac  arm64         202MB   2026-10-09T09:11:12Z
+```
+
+`image ls --json` preserves full `sha256:` IDs, exact `size_bytes`, and canonical
+references. Short IDs are display-only; use the full ID from JSON for `image rm`
+or ID-based `run --image` commands.
+
 ### Directory imports
 
 ```sh

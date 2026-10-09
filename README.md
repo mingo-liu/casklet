@@ -81,9 +81,13 @@ casklet image ls
 casklet image ls --json
 ```
 
+The table shows image names and tags in `IMAGE`, 12-character IDs, and decimal
+sizes such as `202MB` or `1.85GB`. Each reference has its own row; images without
+references show `<none>`. `--json` retains full IDs, canonical references, and exact byte sizes.
+
 Tags keep their cached version until `image pull` refreshes them. Use a registry
 digest to pin the source. To delete an image, replace `IMAGE_ID` below with the full
-local `sha256:` ID from `image ls`. Stop and remove all referencing containers first;
+local `sha256:` ID from `image ls --json`. Stop and remove all referencing containers first;
 image removal accepts local IDs rather than registry names such as `redis:8`.
 
 ```sh

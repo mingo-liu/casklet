@@ -414,10 +414,12 @@ Examples:
 	"image ls": `Usage: casklet image ls [--json]
 
 Options:
-  --json  Print JSON image records
+  --json  Print image records with full sha256: IDs and exact byte sizes
 
 Notes:
-  Lists cached images and registry references. Use names or full IDs with run --image.
+  IMAGE shows one row per reference; Docker Hub defaults are omitted, untagged images show <none>.
+  ID shows the first 12 hexadecimal characters; SIZE uses decimal B/kB/MB/GB units.
+  Use names or full IDs with run --image; image rm requires a full ID from --json.
 
 Examples:
   casklet image ls
@@ -429,11 +431,12 @@ Options:
   -h, --help  Show this help
 
 Notes:
-  Requires a full sha256: ID. Images in use or referenced by retained containers
+  Requires a full sha256: ID from image ls --json; table IDs are display-only.
+  Images in use or referenced by retained containers
   cannot be removed; remove referencing containers first.
 
 Examples:
-  casklet image ls
+  casklet image ls --json
   casklet image rm sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 `,
 	"help": `Usage: casklet help [COMMAND [SUBCOMMAND]]
