@@ -34,7 +34,7 @@ func writeRecords(out io.Writer, records []container.Record, asJSON bool) error 
 		if record.Health != nil {
 			health = record.Health.Status
 		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", record.ID, record.Name, record.State, health, exit, record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", displayID(record.ID), record.Name, record.State, health, exit, record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
 			return err
 		}
 	}
@@ -68,7 +68,7 @@ func writeStats(out io.Writer, stats container.Statistics, asJSON bool) error {
 	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tMEMORY (BYTES)\tLIMIT (BYTES)\tCPU"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", stats.ID, stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
+	if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", displayID(stats.ID), stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
 		return err
 	}
 	return w.Flush()
@@ -90,21 +90,25 @@ func writeImages(out io.Writer, records []image.Record, asJSON bool) error {
 		if len(references) == 0 {
 			references = []string{"<none>"}
 		}
-		id := strings.TrimPrefix(record.ID, "sha256:")
-		if len(id) > 12 {
-			id = id[:12]
-		}
 		for _, reference := range references {
 			name := strings.TrimPrefix(reference, "index.docker.io/")
 			if name != reference {
 				name = strings.TrimPrefix(name, "library/")
 			}
-			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, id, record.Architecture, displayImageSize(record.SizeBytes), record.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, displayID(record.ID), record.Architecture, displayImageSize(record.SizeBytes), record.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
 				return err
 			}
 		}
 	}
 	return w.Flush()
+}
+
+func displayID(id string) string {
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 func displayImageSize(bytes int64) string {

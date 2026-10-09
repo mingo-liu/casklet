@@ -20,6 +20,7 @@ const (
 
 var (
 	ErrNotFound    = errors.New("container not found")
+	ErrAmbiguousID = errors.New("container ID prefix is ambiguous")
 	ErrNameInUse   = errors.New("container name is already in use")
 	ErrBusy        = errors.New("container supervisor is still active")
 	ErrNotTerminal = errors.New("container must be stopped before removal")

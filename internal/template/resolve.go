@@ -29,7 +29,7 @@ type imageSource interface {
 
 func resolveExecution(ctx context.Context, cfg config.Config, entrypoint *string, store imageSource) (config.Config, io.Closer, error) {
 	record, err := store.Resolve(ctx, cfg.Image)
-	if errors.Is(err, image.ErrNotFound) && image.ValidateID(cfg.Image) != nil {
+	if errors.Is(err, image.ErrNotFound) && !image.IsIDReference(cfg.Image) {
 		record, err = store.Pull(ctx, cfg.Image)
 	}
 	if err != nil {

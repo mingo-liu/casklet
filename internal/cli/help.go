@@ -33,7 +33,7 @@ const runOptions = `Options:
   --name         Unique detached name: 1-63 letters, digits, underscores,
                  periods, or hyphens; start alphanumeric; not a full ID
   --rootfs       Linux filesystem template (exclusive with --image)
-  --image        Registry NAME[:TAG], NAME@sha256:DIGEST, or local sha256: ID
+  --image        Registry NAME[:TAG], NAME@sha256:DIGEST, or local ID/unique ID prefix
   --progress     Image progress: auto, plain, or tty (default: auto)
   --entrypoint   Replace the image entrypoint; empty clears it and its default Cmd
   --hostname     Container hostname: 1-63 alphanumeric/hyphen characters,
@@ -241,10 +241,11 @@ Examples:
 
 Options:
   -a, --all  Include completed containers (default: active containers only)
-  --json     Print JSON records
+  --json     Print JSON records with full container IDs
 
 Notes:
-  Container operations accept a full ID or exact name from this list.
+  Table IDs show the first 12 hexadecimal characters; JSON retains full IDs.
+  Container operations accept an exact name, full ID, or unique ID prefix.
 
 Examples:
   casklet ps
@@ -256,7 +257,7 @@ Options:
   -h, --help  Show this help
 
 Notes:
-  Prints JSON configuration and lifecycle state for a full ID or exact name.
+  Prints JSON configuration and lifecycle state for a container reference.
   Includes restart_policy, restart_count, restart_at, and stopped_by_user.
   Health includes status, consecutive failures, and five recent probe results.
   Probe output is discarded; unhealthy does not change the restart policy.
@@ -269,11 +270,12 @@ Examples:
 	"stats": `Usage: casklet stats [--json] [--interval DURATION] ID|NAME
 
 Options:
-  --json      Print JSON statistics
+  --json      Print JSON statistics with the full container ID
   --interval  CPU sampling interval, 10ms-1m (default: 1s)
 
 Notes:
   Flags must precede ID|NAME. Prints one sample; CPU 100% means one fully used core.
+  Table IDs show the first 12 hexadecimal characters; --json retains the full ID.
   Missing live metrics appear as N/A (JSON null).
 
 Examples:
@@ -419,7 +421,8 @@ Options:
 Notes:
   IMAGE shows one row per reference; Docker Hub defaults are omitted, untagged images show <none>.
   ID shows the first 12 hexadecimal characters; SIZE uses decimal B/kB/MB/GB units.
-  Use names or full IDs with run --image; image rm requires a full ID from --json.
+  Use names, full IDs, or unique ID prefixes with run --image.
+  image rm accepts full local IDs or unique prefixes, including these table IDs.
 
 Examples:
   casklet image ls
@@ -431,13 +434,14 @@ Options:
   -h, --help  Show this help
 
 Notes:
-  Requires a full sha256: ID from image ls --json; table IDs are display-only.
+  Accepts a full local image ID or unique hexadecimal prefix, with optional sha256:.
+  Ambiguous prefixes fail; use a longer ID. Registry names/tags are not accepted.
   Images in use or referenced by retained containers
   cannot be removed; remove referencing containers first.
 
 Examples:
-  casklet image ls --json
-  casklet image rm sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  casklet image ls
+  casklet image rm 406e742c72ac
 `,
 	"help": `Usage: casklet help [COMMAND [SUBCOMMAND]]
 
@@ -516,6 +520,10 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 		return "Usage: " + syntax + "\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n\nNotes:\n" + notes + "\nExamples:\n" + examples, nil
 	}
 	if text, exists := commandHelp[topic]; exists {
+		switch topic {
+		case "exec", "inspect", "stats", "stop", "wait", "start", "restart", "rm", "logs":
+			text = strings.Replace(text, "\nNotes:\n", "\nNotes:\n  ID accepts a unique hexadecimal prefix; exact names take precedence.\n  Ambiguous prefixes fail; use a longer ID or the exact container name.\n", 1)
+		}
 		if macOS {
 			switch topic {
 			case "inspect":

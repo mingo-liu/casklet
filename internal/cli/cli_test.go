@@ -328,19 +328,23 @@ func TestManagementRejectsInvalidArguments(t *testing.T) {
 func TestContainerListingOutput(t *testing.T) {
 	code := 7
 	created := time.Date(2026, 10, 6, 10, 11, 12, 0, time.FixedZone("local", 3600))
-	records := []container.Record{{ID: "abc123", Name: "task", State: "exited", CreatedAt: created, ExitCode: &code, Command: []string{"sh", "-c", "echo hello\nexit 7"}}}
+	id := "406e742c72ac" + strings.Repeat("a", 20)
+	records := []container.Record{{ID: id, Name: "task", State: "exited", CreatedAt: created, ExitCode: &code, Command: []string{"sh", "-c", "echo hello\nexit 7"}}}
 	var out bytes.Buffer
 	if err := writeRecords(&out, records, false); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, want := range []string{"ID", "NAME", "STATUS", "EXIT", "CREATED", "COMMAND", "abc123", "task", "exited", "7", "2026-10-06T09:11:12Z", `sh -c "echo hello\nexit 7"`} {
+	for _, want := range []string{"ID", "NAME", "STATUS", "EXIT", "CREATED", "COMMAND", "406e742c72ac", "task", "exited", "7", "2026-10-06T09:11:12Z", `sh -c "echo hello\nexit 7"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("listing missing %q: %s", want, text)
 		}
 	}
 	if strings.Count(text, "\n") != 2 {
 		t.Fatalf("command escaped table boundaries: %q", text)
+	}
+	if strings.Fields(strings.Split(text, "\n")[1])[0] != id[:12] || strings.Contains(text, id) {
+		t.Fatalf("container table did not shorten ID: %q", text)
 	}
 	out.Reset()
 	if err := writeRecords(&out, records, true); err != nil {
@@ -350,7 +354,7 @@ func TestContainerListingOutput(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if len(decoded) != 1 || decoded[0].ID != "abc123" || decoded[0].ExitCode == nil || *decoded[0].ExitCode != 7 || !reflect.DeepEqual(decoded[0].Command, records[0].Command) {
+	if len(decoded) != 1 || decoded[0].ID != id || decoded[0].ExitCode == nil || *decoded[0].ExitCode != 7 || !reflect.DeepEqual(decoded[0].Command, records[0].Command) {
 		t.Fatalf("JSON listing did not preserve records: %+v", decoded)
 	}
 	out.Reset()
@@ -467,16 +471,20 @@ func TestInspectionAndStatsParsing(t *testing.T) {
 
 func TestWriteStatsUnavailableAndZero(t *testing.T) {
 	var out bytes.Buffer
-	stats := container.Statistics{ID: "id", Name: "worker", State: "exited", MemoryLimitBytes: 1024}
+	id := "406e742c72ac" + strings.Repeat("a", 20)
+	stats := container.Statistics{ID: id, Name: "worker", State: "exited", MemoryLimitBytes: 1024}
 	if err := writeStats(&out, stats, true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"memory_bytes":null`) || !strings.Contains(out.String(), `"cpu_percent":null`) {
+	if !strings.Contains(out.String(), `"memory_bytes":null`) || !strings.Contains(out.String(), `"cpu_percent":null`) || !strings.Contains(out.String(), `"id":"`+id+`"`) {
 		t.Fatalf("JSON: %s", out.String())
 	}
 	out.Reset()
 	if err := writeStats(&out, stats, false); err != nil || strings.Count(out.String(), "N/A") != 2 {
 		t.Fatalf("unavailable: %s, %v", out.String(), err)
+	}
+	if strings.Fields(strings.Split(out.String(), "\n")[1])[0] != id[:12] || strings.Contains(out.String(), id) {
+		t.Fatalf("stats table did not shorten ID: %q", out.String())
 	}
 	memory, cpu := uint64(0), float64(0)
 	stats.MemoryBytes, stats.CPUPercent = &memory, &cpu
@@ -508,12 +516,12 @@ func TestRunMountOptions(t *testing.T) {
 
 func TestImageCommands(t *testing.T) {
 	id := "sha256:" + strings.Repeat("a", 64)
-	for _, args := range [][]string{{"image", "import", "/template"}, {"image", "ls"}, {"image", "ls", "--json"}, {"image", "rm", id}, {"run", "--image", id, "--", "sh"}} {
+	for _, args := range [][]string{{"image", "import", "/template"}, {"image", "ls"}, {"image", "ls", "--json"}, {"image", "rm", id}, {"run", "--image", id, "--", "sh"}, {"run", "--image", "sha256:abc", "--", "sh"}} {
 		if _, err := Parse(args); err != nil {
 			t.Fatalf("parse %v: %v", args, err)
 		}
 	}
-	for _, args := range [][]string{{"image"}, {"image", "other"}, {"image", "import"}, {"image", "ls", "extra"}, {"image", "rm", "../outside"}, {"image", "rm", id, "extra"}, {"run", "--rootfs", "/template", "--image", id, "--", "sh"}, {"run", "--image", "", "--", "sh"}, {"run", "--rootfs", "", "--image", id, "--", "sh"}, {"run", "--image", "sha256:abc", "--", "sh"}, {"doctor", "--image", id}} {
+	for _, args := range [][]string{{"image"}, {"image", "other"}, {"image", "import"}, {"image", "ls", "extra"}, {"image", "rm", "../outside"}, {"image", "rm", id, "extra"}, {"run", "--rootfs", "/template", "--image", id, "--", "sh"}, {"run", "--image", "", "--", "sh"}, {"run", "--rootfs", "", "--image", id, "--", "sh"}, {"run", "--image", "sha256:xyz", "--", "sh"}, {"doctor", "--image", id}} {
 		if _, err := Parse(args); err == nil {
 			t.Fatalf("accepted %v", args)
 		}

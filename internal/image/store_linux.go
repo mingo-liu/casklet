@@ -344,6 +344,38 @@ func (store *Store) List(ctx context.Context) ([]Record, error) {
 	return records, nil
 }
 
+// resolveIDLocked pins a unique local ID while the caller holds the store lock.
+func (store *Store) resolveIDLocked(ctx context.Context, reference string) (Record, error) {
+	if err := ValidateIDReference(reference); err != nil {
+		return Record{}, err
+	}
+	prefix := strings.TrimPrefix(reference, "sha256:")
+	if len(prefix) == 64 {
+		return store.read("sha256:" + prefix)
+	}
+	entries, err := os.ReadDir(store.root)
+	if err != nil {
+		return Record{}, err
+	}
+	id := ""
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return Record{}, err
+		}
+		candidate := "sha256:" + entry.Name()
+		if ValidateID(candidate) == nil && strings.HasPrefix(entry.Name(), prefix) {
+			if id != "" {
+				return Record{}, fmt.Errorf("%w: %s; use a longer ID", ErrAmbiguousID, reference)
+			}
+			id = candidate
+		}
+	}
+	if id == "" {
+		return Record{}, fmt.Errorf("%w: %s", ErrNotFound, reference)
+	}
+	return store.read(id)
+}
+
 // Acquire prevents deletion until its shared lease is closed. The global lock
 // covers lookup and lease acquisition so removal cannot race between them.
 func (store *Store) Acquire(ctx context.Context, id string) (Record, string, *os.File, error) {
@@ -352,13 +384,14 @@ func (store *Store) Acquire(ctx context.Context, id string) (Record, string, *os
 		return Record{}, "", nil, err
 	}
 	defer lock.Close()
-	record, err := store.read(id)
+	record, err := store.resolveIDLocked(ctx, id)
 	if err != nil {
 		return Record{}, "", nil, err
 	}
 	if record.Architecture != runtime.GOARCH {
 		return Record{}, "", nil, errors.New("image architecture does not match the runtime")
 	}
+	id = record.ID
 	lease, err := store.openFile(filepath.Join(store.path(id), ".lease"), unix.O_RDONLY)
 	if err != nil {
 		return Record{}, "", nil, err
@@ -408,9 +441,11 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 		return err
 	}
 	defer lock.Close()
-	if _, err := store.read(id); err != nil {
+	record, err := store.resolveIDLocked(ctx, id)
+	if err != nil {
 		return err
 	}
+	id = record.ID
 	lease, err := store.openFile(filepath.Join(store.path(id), ".lease"), unix.O_RDONLY)
 	if err != nil {
 		return err

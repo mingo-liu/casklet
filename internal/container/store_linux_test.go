@@ -58,7 +58,7 @@ func TestStorePersistsConfigurationAndReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []string{record.ID, record.Name} {
+	for _, ref := range []string{record.ID, record.Name, record.ID[:12], record.ID[:1]} {
 		got, err := reopened.Get(context.Background(), ref)
 		if err != nil || got.ID != record.ID || got.Name != "web" {
 			t.Fatalf("get %s: %+v, %v", ref, got, err)
@@ -78,9 +78,6 @@ func TestStorePersistsConfigurationAndReferences(t *testing.T) {
 		if _, err := store.Get(context.Background(), ref); err == nil {
 			t.Fatalf("unsafe reference accepted: %q", ref)
 		}
-	}
-	if _, err := store.Get(context.Background(), record.ID[:12]); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("short ID must not resolve: %v", err)
 	}
 	auto := createTestRecord(t, store, "")
 	if auto.Name != "casklet-"+auto.ID[:12] {

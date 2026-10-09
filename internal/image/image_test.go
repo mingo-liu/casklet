@@ -101,3 +101,16 @@ func TestValidateImageID(t *testing.T) {
 		}
 	}
 }
+
+func TestImageIDReferenceValidation(t *testing.T) {
+	for _, ref := range []string{"a", "406e742c72ac", strings.Repeat("a", 64), "sha256:a", "sha256:" + strings.Repeat("a", 64)} {
+		if !IsIDReference(ref) || ValidateIDReference(ref) != nil {
+			t.Errorf("valid local ID reference rejected: %q", ref)
+		}
+	}
+	for _, ref := range []string{"", "sha256:", "SHA256:abc", "ABC", "redis:8", "../abc", "abc/def", "abc\x00", "abc\n", strings.Repeat("a", 65)} {
+		if IsIDReference(ref) || ValidateIDReference(ref) == nil {
+			t.Errorf("invalid local ID reference accepted: %q", ref)
+		}
+	}
+}

@@ -130,7 +130,8 @@ casklet run -d --name database --memory 512m --env POSTGRES_PASSWORD=example-pas
   --image postgres:17
 ```
 
-`--image` accepts a registry name, `NAME@sha256:DIGEST`, or a full local image ID.
+`--image` accepts a registry name, `NAME@sha256:DIGEST`, or a local image ID or
+unique hexadecimal ID prefix, optionally starting with `sha256:`.
 Docker Hub, its `library/` namespace, and the `latest` tag are defaults. An uncached
 name is pulled automatically inside the VM, selecting `linux/arm64` on Apple
 silicon or `linux/amd64` on Intel. Anonymous-access registries are supported;
@@ -201,8 +202,19 @@ redis:latest  406e742c72ac  arm64         202MB   2026-10-09T09:11:12Z
 ```
 
 `image ls --json` preserves full `sha256:` IDs, exact `size_bytes`, and canonical
-references. Short IDs are display-only; use the full ID from JSON for `image rm`
-or ID-based `run --image` commands.
+references. `image rm` and `run --image` accept unique hexadecimal prefixes of
+1–64 characters, including the table's 12-character IDs, with an optional `sha256:`
+prefix. Ambiguous prefixes fail without selecting an image; provide a longer ID.
+Bare hexadecimal references in `run --image` prefer an exact cached repository
+name, then a local ID prefix. Missing local IDs never trigger a registry pull;
+use an explicit tag (for example, `abc:latest`) to pull a hexadecimal repository name.
+`image rm` accepts local IDs/prefixes only, not registry names or tags.
+
+```sh
+casklet image ls
+casklet run --image 406e742c72ac -- /bin/echo hello
+casklet image rm 406e742c72ac
+```
 
 ### Directory imports
 
@@ -214,8 +226,9 @@ casklet image rm "$image_id"
 
 Directory imports have no default command. Imports copy a stable Linux filesystem;
 later source changes do not alter it. Running copies are independent. Omitting
-`--image` and `--rootfs` selects builtin BusyBox. Deletion requires a full local ID
-and is blocked while the image is leased or referenced by a retained container.
+`--image` and `--rootfs` selects builtin BusyBox. Deletion accepts a full local ID
+or unique prefix and is blocked while the image is leased or referenced by a
+retained container.
 Remove referencing containers first; deleting a cached target makes its name a
 cache miss on the next run.
 
@@ -296,6 +309,21 @@ casklet restart worker
 casklet stop worker
 casklet wait worker
 casklet rm worker
+```
+
+The `ps` and `stats` tables display the first 12 hexadecimal characters of container
+IDs, using the same presentation as `image ls`. JSON output and `inspect` retain
+full IDs; detached `run`, `start`, `restart`, and `stop` also keep their full-ID
+stdout output. All container management commands, including exec, logs, inspect,
+stats, wait, start, stop, restart, and rm, accept an exact name, full ID, or unique
+hexadecimal ID prefix of any length. Full IDs and exact names take precedence
+over prefix matching. Ambiguous prefixes fail; provide a longer ID or exact name.
+Removal still requires a stopped container and uses its resolved full identity.
+
+```sh
+casklet inspect 406e742c72ac
+casklet stop 406e742c72ac
+casklet rm 406e742c72ac
 ```
 
 `ps` lists active containers; `-a` includes completed ones. `stop` sends the configured stop signal

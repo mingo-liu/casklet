@@ -86,9 +86,11 @@ sizes such as `202MB` or `1.85GB`. Each reference has its own row; images withou
 references show `<none>`. `--json` retains full IDs, canonical references, and exact byte sizes.
 
 Tags keep their cached version until `image pull` refreshes them. Use a registry
-digest to pin the source. To delete an image, replace `IMAGE_ID` below with the full
-local `sha256:` ID from `image ls --json`. Stop and remove all referencing containers first;
-image removal accepts local IDs rather than registry names such as `redis:8`.
+digest to pin the source. To delete an image, replace `IMAGE_ID` below with a full
+local ID or unique hexadecimal prefix from `image ls` (such as its 12-character ID).
+Ambiguous prefixes fail; use a longer ID from `image ls --json`.
+Stop and remove all referencing containers first. Image removal accepts local
+IDs/prefixes rather than registry names such as `redis:8`.
 
 ```sh
 casklet image rm IMAGE_ID
@@ -111,6 +113,11 @@ casklet restart worker
 casklet stop worker
 casklet rm worker
 ```
+
+`ps` and `stats` tables show the first 12 characters of container IDs. JSON output
+and `inspect` retain full IDs. Management commands accept exact names, full IDs,
+or unique hexadecimal ID prefixes of any length. Exact names take precedence;
+ambiguous prefixes fail and require a longer ID or the exact name.
 
 Use `exit` to leave the exec shell; the main container continues running.
 Stop/start and restart preserve the container's private files; `rm` deletes them.

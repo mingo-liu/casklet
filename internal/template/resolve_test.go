@@ -12,14 +12,18 @@ import (
 )
 
 type fakeImageSource struct {
-	record  image.Record
-	tree    string
-	lease   *os.File
-	missing bool
-	pulls   int
+	record     image.Record
+	tree       string
+	lease      *os.File
+	missing    bool
+	resolveErr error
+	pulls      int
 }
 
 func (s *fakeImageSource) Resolve(context.Context, string) (image.Record, error) {
+	if s.resolveErr != nil {
+		return image.Record{}, s.resolveErr
+	}
 	if s.missing {
 		return image.Record{}, image.ErrNotFound
 	}
@@ -75,7 +79,13 @@ func TestResolveExecutionFailureClosesLeaseAndLocalMissDoesNotPull(t *testing.T)
 		t.Fatal("failure leaked lease")
 	}
 	s.missing = true
-	if _, _, err := resolveExecution(context.Background(), config.Config{Image: s.record.ID}, nil, s); !errors.Is(err, image.ErrNotFound) || s.pulls != 0 {
-		t.Fatalf("local miss pulled: %d %v", s.pulls, err)
+	for _, ref := range []string{s.record.ID, "a", "aaaaaaaaaaaa", "sha256:aaaaaaaaaaaa", strings.Repeat("a", 64)} {
+		if _, _, err := resolveExecution(context.Background(), config.Config{Image: ref}, nil, s); !errors.Is(err, image.ErrNotFound) || s.pulls != 0 {
+			t.Fatalf("local miss %s pulled: %d %v", ref, s.pulls, err)
+		}
+	}
+	s.resolveErr = image.ErrAmbiguousID
+	if _, _, err := resolveExecution(context.Background(), config.Config{Image: "aaaaaaaaaaaa"}, nil, s); !errors.Is(err, image.ErrAmbiguousID) || s.pulls != 0 {
+		t.Fatalf("ambiguous prefix pulled: %d %v", s.pulls, err)
 	}
 }

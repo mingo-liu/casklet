@@ -6,6 +6,46 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Unique short IDs for container and image operations
+
+Container lookup now accepts unique hexadecimal ID prefixes of any length,
+after full-ID and exact-name lookup. All management commands reuse that resolver.
+Ambiguous prefixes return a distinct error instead of selecting a container;
+removal pins the resolved full ID before locking and deleting storage.
+
+Local image resolution, acquisition, and removal accept 1–64 hexadecimal digits
+with an optional sha256: prefix. Acquisition and removal resolve under the store
+lock and use full IDs for leases and retained-container reference checks. Cached
+repository names take precedence over bare prefixes for run --image; missing
+local IDs and ambiguous prefixes never trigger automatic pulls. Persisted IDs,
+JSON, and lifecycle stdout remain complete. This supersedes the display-only
+short-ID restriction recorded below. Help, examples, and bilingual documentation
+describe unique matching, ambiguity, and the remaining ID-only image removal API.
+
+Regressions cover prefix lengths, name precedence, deterministic collisions,
+missing IDs, invalid paths, immutable resolution, live leases, retained references,
+and short-ID execution/removal. Darwin arm64 build, full Darwin/Linux unit suites,
+vet, formatting, and relevant Linux race tests passed. Real Mac help/argument and
+short-ID lifecycle tests passed. The complete privileged Linux suite passed all
+cases except an old image-table assertion expecting full displayed IDs; after
+updating it for the established 12-character table, that test passed on rerun.
+The new privileged short-ID lifecycle test passed in that suite. The complete
+macOS suite and Intel execution were not run.
+
+## 2026-10-09: Consistent container ID presentation
+
+Container IDs in ps and stats tables now use the same 12-character presentation
+as image listings through a shared display helper. JSON, inspect, and lifecycle
+stdout retain full IDs. Short IDs remain display-only; help, lookup diagnostics,
+and bilingual usage documentation point to exact names or full IDs from ps JSON.
+
+Existing container table and statistics regressions now verify truncation of real
+32-character IDs and full-ID JSON preservation; image formatting and focused help
+checks also pass. Darwin arm64 build, full unit tests, vet, formatting, and real
+Mac ps/stats table and JSON checks passed with the existing Redis/Tomcat containers.
+Runtime behavior was unchanged; privileged Linux integration tests and the full
+macOS end-to-end suite were not run.
+
 ## 2026-10-09: Readable image listings
 
 The image table now starts with IMAGE and shows one row per cached reference,

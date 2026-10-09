@@ -49,7 +49,7 @@ func operationError(r Request, err error) error {
 	ref := quoteCLIArgument(r.Reference)
 	switch {
 	case errors.Is(err, container.ErrNotFound):
-		hint = "list available containers with casklet ps -a; use their full ID or exact name."
+		hint = "list available containers with casklet ps -a; use their exact name, full ID, or a unique ID prefix."
 	case errors.Is(err, container.ErrNotTerminal):
 		hint = "stop the container with casklet stop " + ref + ", then retry casklet rm " + ref + "."
 	case errors.Is(err, container.ErrNameInUse):
@@ -57,7 +57,7 @@ func operationError(r Request, err error) error {
 	case errors.Is(err, container.ErrBusy):
 		hint = "another lifecycle operation is still active; inspect the container with casklet inspect " + ref + " and retry after it finishes."
 	case errors.Is(err, image.ErrNotFound):
-		hint = "list cached images with casklet image ls --json; use a full sha256: ID or pull a registry reference with casklet image pull NAME."
+		hint = "list cached images with casklet image ls; use a full ID or unique ID prefix, or pull a registry reference with casklet image pull NAME."
 	case errors.Is(err, volume.ErrInUse):
 		hint = "remove referencing containers before retrying volume deletion; active foreground runs must also finish."
 	case errors.Is(err, image.ErrInUse):

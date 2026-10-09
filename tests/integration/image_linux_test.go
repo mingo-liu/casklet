@@ -101,7 +101,15 @@ func TestImageImportIdentityAndForeground(t *testing.T) {
 			}
 		}
 	}
-	if !found || !strings.Contains(backgroundSuccess(t, "image", "ls"), id) {
+	table := backgroundSuccess(t, "image", "ls")
+	listed := false
+	for _, line := range strings.Split(table, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 5 && fields[0] == "<none>" && fields[1] == strings.TrimPrefix(id, "sha256:")[:12] {
+			listed = true
+		}
+	}
+	if !found || !listed || strings.Contains(table, id) {
 		t.Fatal("imported image absent from list")
 	}
 	if out := imageSuccess(t, id, nil, "/bin/cat", "/image-marker"); out != string(original) {

@@ -190,7 +190,7 @@ func parseRun(r Request, args []string) (Request, error) {
 	if (r.Config.Image == "" && separator < 0) || (separator >= 0 && (len(r.Config.Command) == 0 || r.Config.Command[0] == "")) {
 		return r, errors.New("a command is required after --; append a command such as -- /bin/echo hello")
 	}
-	if r.Config.Image != "" && image.ValidateID(r.Config.Image) != nil {
+	if r.Config.Image != "" && !image.IsIDReference(r.Config.Image) {
 		if _, err := image.NormalizeReference(r.Config.Image); err != nil {
 			return r, err
 		}

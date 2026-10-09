@@ -19,6 +19,7 @@ import (
 )
 
 var ErrNotFound = errors.New("image not found")
+var ErrAmbiguousID = errors.New("image ID prefix is ambiguous")
 var ErrInUse = errors.New("image is referenced; remove its containers before deleting it")
 
 // Record is the public metadata for an imported or pulled image.
@@ -36,6 +37,29 @@ type Record struct {
 type ReferenceCheck func(context.Context, string) (bool, error)
 
 func ValidateID(id string) error { return config.ValidateImageID(id) }
+
+// IsIDReference recognizes local hexadecimal IDs and prefixes, with an optional
+// sha256: prefix. Persisted identities still require ValidateID.
+func IsIDReference(value string) bool {
+	value = strings.TrimPrefix(value, "sha256:")
+	if len(value) == 0 || len(value) > 64 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateIDReference validates user input without weakening persisted IDs.
+func ValidateIDReference(value string) error {
+	if !IsIDReference(value) {
+		return errors.New("image ID must contain 1 to 64 lowercase hexadecimal digits, optionally prefixed with sha256:")
+	}
+	return nil
+}
 
 // Identity hashes sorted paths, copied modes, link targets and regular contents.
 // Directory imports retain their original identity format without ownership.

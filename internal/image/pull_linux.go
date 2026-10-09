@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -59,13 +60,23 @@ func (store *Store) Resolve(ctx context.Context, reference string) (record Recor
 			reportProgress(ctx, Progress{Stage: ProgressCached, Reference: reference})
 		}
 	}()
-	if ValidateID(reference) == nil {
+	if IsIDReference(reference) {
 		lock, err := store.lock(ctx, true)
 		if err != nil {
 			return Record{}, err
 		}
 		defer lock.Close()
-		return store.read(reference)
+		// Prefer an exact cached name to a bare ID prefix, as with containers.
+		if !strings.HasPrefix(reference, "sha256:") {
+			ref, err := NormalizeReference(reference)
+			if err != nil {
+				return Record{}, err
+			}
+			if record, err := store.resolveLocked(ref); !errors.Is(err, ErrNotFound) {
+				return record, err
+			}
+		}
+		return store.resolveIDLocked(ctx, reference)
 	}
 	ref, err := NormalizeReference(reference)
 	if err != nil {

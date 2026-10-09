@@ -355,6 +355,18 @@ func (store *Store) resolveLocked(ref string) (Record, error) {
 			return record, nil
 		}
 	}
+	var match *Record
+	for i := range records {
+		if strings.HasPrefix(records[i].ID, ref) {
+			if match != nil {
+				return Record{}, fmt.Errorf("%w: %s; use a longer ID or the exact container name", ErrAmbiguousID, ref)
+			}
+			match = &records[i]
+		}
+	}
+	if match != nil {
+		return *match, nil
+	}
 	return Record{}, fmt.Errorf("%w: %s", ErrNotFound, ref)
 }
 
@@ -464,6 +476,7 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	id = record.ID
 	if !record.Terminal() {
 		return ErrNotTerminal
 	}

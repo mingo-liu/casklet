@@ -58,7 +58,7 @@ func parseImage(r Request, args []string) (Request, error) {
 		}
 	}
 	if args[0] == "rm" {
-		if err := image.ValidateID(r.Reference); err != nil {
+		if err := image.ValidateIDReference(r.Reference); err != nil {
 			return r, err
 		}
 	}

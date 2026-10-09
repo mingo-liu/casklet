@@ -81,6 +81,15 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 		if err != nil || strings.Count(ps, "\n") > 25 || !strings.Contains(ps, "--all") || !strings.Contains(ps, "--json") {
 			t.Fatalf("verbose or incomplete ps help: %q %v", ps, err)
 		}
+		for _, detail := range []string{"12 hexadecimal", "exact name", "full ID", "unique ID prefix"} {
+			if !strings.Contains(ps, detail) {
+				t.Errorf("ps help missing %q: %q", detail, ps)
+			}
+		}
+		stats, err := scopedUsage("stats", macOS)
+		if err != nil || !strings.Contains(stats, "12 hexadecimal") || !strings.Contains(stats, "--json retains the full ID") {
+			t.Fatalf("stats help lacks ID display guidance: %q %v", stats, err)
+		}
 		images, err := scopedUsage("image ls", macOS)
 		for _, detail := range []string{"IMAGE", "one row per reference", "<none>", "12 hexadecimal", "decimal B/kB/MB/GB", "full sha256: IDs", "exact byte sizes"} {
 			if err != nil || !strings.Contains(images, detail) {
@@ -88,8 +97,14 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 			}
 		}
 		removeImage, err := scopedUsage("image rm", macOS)
-		if err != nil || !strings.Contains(removeImage, "full sha256: ID from image ls --json") || !strings.Contains(removeImage, "display-only") {
-			t.Fatalf("image rm help lacks full-ID guidance: %q %v", removeImage, err)
+		if err != nil || !strings.Contains(removeImage, "unique hexadecimal prefix") || !strings.Contains(removeImage, "Ambiguous prefixes fail") || !strings.Contains(removeImage, "406e742c72ac") {
+			t.Fatalf("image rm help lacks prefix guidance: %q %v", removeImage, err)
+		}
+		for _, topic := range []string{"exec", "inspect", "stats", "stop", "wait", "start", "restart", "rm", "logs"} {
+			text, err := scopedUsage(topic, macOS)
+			if err != nil || !strings.Contains(text, "unique hexadecimal prefix") || !strings.Contains(text, "exact names take precedence") || !strings.Contains(text, "Ambiguous prefixes fail") {
+				t.Errorf("%s help lacks prefix guidance: %q %v", topic, text, err)
+			}
 		}
 		run, err := scopedUsage("run", macOS)
 		for _, detail := range []string{"-- COMMAND", "--uid-map", "--gid-map", "--rootless", "--stop-signal", "--restart", "--config", "--env-file", "--health-cmd", "--no-healthcheck", "--health-start-interval", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {

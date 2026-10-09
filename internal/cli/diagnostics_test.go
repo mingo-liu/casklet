@@ -39,7 +39,7 @@ func TestOperationHintsPreserveErrorIdentity(t *testing.T) {
 		request Request
 		hint    string
 	}{
-		{container.ErrNotFound, Request{Action: "inspect", Reference: "worker"}, "casklet ps -a"},
+		{container.ErrNotFound, Request{Action: "inspect", Reference: "worker"}, "unique ID prefix"},
 		{container.ErrNotTerminal, Request{Action: "rm", Reference: "worker"}, "casklet stop 'worker', then retry casklet rm 'worker'"},
 		{container.ErrNameInUse, Request{Action: "run", Name: "worker"}, "casklet inspect 'worker'"},
 		{image.ErrNotFound, Request{Action: "image-rm"}, "casklet image ls"},

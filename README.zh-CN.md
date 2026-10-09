@@ -76,8 +76,9 @@ casklet image ls --json
 `--json` 保留完整 ID、规范化镜像引用和精确字节数。
 
 标签会继续使用缓存版本，直到执行 `image pull` 刷新。使用仓库摘要可以固定镜像来源。
-删除镜像时，将下面的 `IMAGE_ID` 替换为 `image ls --json` 中的完整本地 `sha256:` ID。
-需要先停止并删除所有引用该镜像的容器；删除命令接受本地 ID，不接受 `redis:8` 等仓库名称。
+删除镜像时，将下面的 `IMAGE_ID` 替换为完整本地 ID 或 `image ls` 中的唯一十六进制前缀，
+例如列表中的 12 位 ID。前缀匹配多个镜像时会报错，请使用 `image ls --json` 中的更长 ID。
+需要先停止并删除所有引用该镜像的容器；删除命令接受本地 ID 或其前缀，不接受 `redis:8` 等仓库名称。
 
 ```sh
 casklet image rm IMAGE_ID
@@ -100,6 +101,10 @@ casklet restart worker
 casklet stop worker
 casklet rm worker
 ```
+
+`ps` 和 `stats` 表格中的容器 ID 显示前 12 位，JSON 输出和 `inspect` 保留完整 ID。
+管理命令支持精确名称、完整 ID 或任意长度的唯一十六进制 ID 前缀。精确名称优先；
+前缀匹配多个容器时会报错，需要使用更长的 ID 或精确名称。
 
 输入 `exit` 可以退出 exec 终端，容器主进程继续运行。停止后启动及重启都会保留容器
 内部文件；`rm` 会删除这些文件。绑定挂载的宿主机数据在删除容器后仍然保留。
