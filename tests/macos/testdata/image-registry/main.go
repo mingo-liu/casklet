@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -30,16 +32,17 @@ func fixture() (v1.Image, error) {
 		return nil, err
 	}
 	img := empty.Image
+	nonce := fmt.Sprintf("progress-%d", time.Now().UnixNano())
 	for _, file := range []struct {
 		name string
 		data []byte
 	}{
 		{"bin/busybox", toolbox},
-		{"fixture", []byte(fmt.Sprintf("progress-%d", time.Now().UnixNano()))},
+		{"fixture", []byte(nonce)},
 	} {
 		var archive bytes.Buffer
 		writer := tar.NewWriter(&archive)
-		if err := writer.WriteHeader(&tar.Header{Name: file.name, Mode: 0755, Size: int64(len(file.data))}); err != nil {
+		if err := writer.WriteHeader(&tar.Header{Name: file.name, Mode: 0755, Size: int64(len(file.data)), PAXRecords: map[string]string{"casklet.fixture": nonce}}); err != nil {
 			return nil, err
 		}
 		if _, err := writer.Write(file.data); err != nil {
@@ -74,7 +77,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := &http.Server{Handler: registry.New(registry.Logger(log.New(io.Discard, "", 0))), ReadHeaderTimeout: 5 * time.Second}
+	var mutex sync.Mutex
+	downloads := map[string]int{}
+	registryHandler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/casklet-test-downloads" {
+			mutex.Lock()
+			defer mutex.Unlock()
+			_ = json.NewEncoder(w).Encode(downloads)
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/blobs/") {
+			mutex.Lock()
+			downloads[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]]++
+			mutex.Unlock()
+		}
+		registryHandler.ServeHTTP(w, r)
+	}), ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	img, err := fixture()
 	if err != nil {
@@ -91,10 +110,20 @@ func main() {
 		}
 		refs[i] = ref.Name()
 	}
+	manifest, err := img.Manifest()
+	if err != nil {
+		log.Fatal(err)
+	}
+	layers := make([]string, len(manifest.Layers))
+	for i, layer := range manifest.Layers {
+		layers[i] = layer.Digest.String()
+	}
 	if err := json.NewEncoder(os.Stdout).Encode(struct {
 		References []string
 		PID        int
-	}{refs, os.Getpid()}); err != nil {
+		Layers     []string
+		MetricsURL string
+	}{refs, os.Getpid(), layers, "http://" + listener.Addr().String() + "/casklet-test-downloads"}); err != nil {
 		log.Fatal(err)
 	}
 	select {}

@@ -147,7 +147,8 @@ func layerProgressLine(event image.Progress, bar bool) string {
 	}
 	status := map[image.ProgressStage]string{
 		image.ProgressDownloading: "Downloading", image.ProgressDownloaded: "Download complete",
-		image.ProgressVerifying: "Verifying", image.ProgressExtracting: "Extracting",
+		image.ProgressLayerCached: "Already exists",
+		image.ProgressVerifying:   "Verifying", image.ProgressExtracting: "Extracting",
 		image.ProgressLayerComplete: "Pull complete", image.ProgressFailed: "Failed", image.ProgressCanceled: "Canceled",
 	}[event.Stage]
 	line := fmt.Sprintf("%s: %s", id, status)

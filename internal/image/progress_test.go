@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -31,5 +32,24 @@ func TestStreamProgressCountsAndThrottlesWithoutLosingCompletion(t *testing.T) {
 	reportProgress(context.Background(), Progress{Stage: ProgressReady})
 	if len(events) != 3 {
 		t.Fatal("observer escaped its context")
+	}
+}
+
+func TestProgressObserversSerializeParallelLayerWorkers(t *testing.T) {
+	var events []Progress
+	ctx := WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
+	var workers sync.WaitGroup
+	for index := range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for range 100 {
+				reportProgress(ctx, Progress{Stage: ProgressDownloading, Index: index + 1})
+			}
+		}()
+	}
+	workers.Wait()
+	if len(events) != 800 {
+		t.Fatalf("serialized observer lost events: %d", len(events))
 	}
 }

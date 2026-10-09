@@ -145,8 +145,9 @@ libraries and merged `/usr` layouts; static BusyBox is only a requirement for th
 managed builtin template. Extraction strips setuid/setgid bits and does not apply
 file capabilities or extended attributes. Device nodes, sockets, and FIFOs in layers
 are rejected. Pulls are bounded to 15 minutes, 256 layers, 1 million entries per
-layer, 4 GiB uncompressed per layer, and 16 GiB uncompressed in total, and require
-enough VM disk space for staging plus the unpacked tree.
+layer, 4 GiB per compressed or uncompressed layer, and 16 GiB each for compressed
+and uncompressed image data. The VM needs space for download blobs, temporary
+archives, and the unpacked tree.
 
 Image `Entrypoint + Cmd`, `Env`, `WorkingDir`, `User`, and `StopSignal` supply startup defaults.
 Arguments after `--` replace `Cmd` while retaining `Entrypoint`. `--entrypoint PATH`
@@ -247,14 +248,35 @@ The guest kernel and storage must support OverlayFS; unsupported mounts fail
 explicitly rather than silently copying the image. Directory `--rootfs` sources,
 builtin BusyBox, user namespaces, rootless execution, and existing complete copied
 container roots keep their prior copy behavior. Existing roots are not migrated.
-Image integrity is still checked on acquisition; this change does not skip content
-verification or add a shared download-layer cache.
+Image integrity is still checked on acquisition; copy-on-write does not skip
+content verification or deduplicate unpacked layers across different images.
 
 Different image references and directory imports prepare concurrently. Download,
 extraction, copying, syncing, and full content verification run outside the global
 image metadata lock. Per-reference locks serialize refreshes of the same name;
 private transaction leases protect active staging from recovery. Atomic publication
 and deletion retain their existing lock and image-reference checks.
+
+### Shared download cache
+
+Pulls download up to three distinct layers concurrently and retain compressed
+blobs by SHA-256 in the guest image store. Different images and tags reuse the
+same blob without another registry download. Each cache hit validates ownership,
+permissions, file type, link count, size, and digest; uncompressed DiffIDs are
+still verified before layers are applied in manifest order. Cache hits show
+`Already exists` rather than reporting network bytes. Repeated layers reuse one
+usage lease. Same-digest downloads serialize across processes, while other blobs
+can download independently.
+
+Compressed data is limited to 4 GiB per layer and 16 GiB per image; the existing
+uncompressed limits also apply. Failed or canceled pulls join all download workers
+and remove partial staging. Fully verified blobs may remain reusable after a
+later extraction failure. Corrupt cached blobs fail explicitly; use `image prune`
+to reclaim unused cache data before retrying. Images retain independent unpacked
+roots, so this cache saves registry downloads without sharing their filesystem
+layers. Download blobs can occupy additional VM disk space; `system df` includes
+them in image storage. `image prune` clears blobs not leased by an active pull;
+`--dry-run` preserves both images and blobs and prints only eligible image IDs.
 
 ## Persistent data
 
@@ -539,6 +561,8 @@ low-space notice appears below 1 GiB or 10% available; JSON exposes `low_space`.
 
 `image prune --dry-run` prints eligible IDs. Without `--dry-run`, the command
 removes unused cached images, including tagged images, and prints each removed ID.
+It also clears compressed blobs and abandoned blob staging not leased by a pull;
+stdout continues listing image IDs only. Preview preserves all blob data.
 Active leases and references from all retained containers prevent deletion.
 Each candidate is rechecked immediately before removal. Cancellation or another
 error can leave a partial prune; printed IDs identify completed removals.

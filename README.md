@@ -98,6 +98,10 @@ directory sources, rootless runs, and existing copied container roots keep their
 copy behavior. The guest must support OverlayFS. Different image pulls and
 imports can prepare concurrently; cached-image operations remain available while
 another image downloads. Refreshes of the same reference are serialized.
+Layer downloads use up to three workers per pull and share a verified compressed
+blob cache across images. Layers are applied in their original order; reused
+layers show `Already exists`. The cache does not deduplicate unpacked files across
+different images.
 
 ```sh
 casklet image pull redis:8
@@ -220,6 +224,9 @@ casklet image prune
 
 Pruning includes unused tagged images, preserves containers and volumes, and
 refuses images with active leases or references from retained containers.
+It also clears compressed download blobs not in use by a pull. `--dry-run` leaves
+both images and blobs intact and prints eligible image IDs only. `system df`
+includes the download cache in allocated image storage.
 
 Image `StopSignal` is retained for managed shutdown. Override it with
 `--stop-signal SIGQUIT`; stop/restart uses that Linux signal before the configured

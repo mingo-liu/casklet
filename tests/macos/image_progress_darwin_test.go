@@ -20,7 +20,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type registryFixture struct {
+	References []string
+	PID        int
+	Layers     []string
+	MetricsURL string
+}
+
 func progressRegistry(t *testing.T) []string {
+	t.Helper()
+	return progressRegistryDetails(t).References
+}
+
+func progressRegistryDetails(t *testing.T) registryFixture {
 	t.Helper()
 	success(t, "doctor")
 	binary := filepath.Join(hostDirectory(t), "image-registry")
@@ -45,10 +57,7 @@ func progressRegistry(t *testing.T) []string {
 	if !scanner.Scan() {
 		t.Fatalf("registry did not start: %v", scanner.Err())
 	}
-	var fixture struct {
-		References []string
-		PID        int
-	}
+	var fixture registryFixture
 	if err := json.Unmarshal(scanner.Bytes(), &fixture); err != nil || len(fixture.References) != 2 || fixture.PID <= 0 {
 		t.Fatalf("registry handshake: %s %v", scanner.Bytes(), err)
 	}
@@ -57,7 +66,20 @@ func progressRegistry(t *testing.T) []string {
 		defer cancel()
 		_ = exec.CommandContext(ctx, "limactl", "shell", "casklet-runtime", "sudo", "-n", "--", "kill", strconv.Itoa(fixture.PID)).Run()
 	})
-	return fixture.References
+	return fixture
+}
+
+func layerDownloadCounts(t *testing.T, fixture registryFixture) map[string]int {
+	t.Helper()
+	data, err := guestRootCommand(t, "/var/lib/casklet/templates/busybox/bin/busybox", "wget", "-qO-", fixture.MetricsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var counts map[string]int
+	if err := json.Unmarshal([]byte(data), &counts); err != nil {
+		t.Fatal(err)
+	}
+	return counts
 }
 
 func ttyImagePull(t *testing.T, ref string) (string, string) {
@@ -113,7 +135,8 @@ func ttyImagePull(t *testing.T, ref string) (string, string) {
 
 func TestImagePullProgressThroughVMAndHostTerminal(t *testing.T) {
 	client(t)
-	refs := progressRegistry(t)
+	fixture := progressRegistryDetails(t)
+	refs := fixture.References
 	out, stderr, code := command(t, "image", "pull", refs[0])
 	if code != 0 || image.ValidateID(strings.TrimSpace(out)) != nil || strings.Count(out, "\n") != 1 {
 		t.Fatalf("plain image result: %d %q %q", code, out, stderr)
@@ -128,9 +151,21 @@ func TestImagePullProgressThroughVMAndHostTerminal(t *testing.T) {
 	if strings.ContainsAny(stderr, "\x1b\r") {
 		t.Fatalf("non-terminal output contains controls: %q", stderr)
 	}
+	before := layerDownloadCounts(t, fixture)
+	for _, digest := range fixture.Layers {
+		if before[digest] != 1 {
+			t.Fatalf("cold pull downloaded layer %s %d times", digest, before[digest])
+		}
+	}
 	ttyOut, ttyStderr := ttyImagePull(t, refs[1])
-	if ttyOut != id+"\n" || !strings.Contains(ttyStderr, "\x1b[1A") || !strings.Contains(ttyStderr, "Downloading [") || !strings.Contains(ttyStderr, "Extracting [") {
+	if ttyOut != id+"\n" || !strings.Contains(ttyStderr, "\x1b[1A") || !strings.Contains(ttyStderr, "Already exists") || strings.Contains(ttyStderr, "Downloading") || !strings.Contains(ttyStderr, "Extracting [") {
 		t.Fatalf("host TTY progress or stream separation: %q %q", ttyOut, ttyStderr)
+	}
+	after := layerDownloadCounts(t, fixture)
+	for _, digest := range fixture.Layers {
+		if after[digest] != before[digest] {
+			t.Fatalf("warm pull downloaded shared layer %s again: %d -> %d", digest, before[digest], after[digest])
+		}
 	}
 	out, stderr, code = command(t, "image", "pull", "--progress=plain", refs[1])
 	if code != 0 || out != id+"\n" || !strings.Contains(stderr, "Image is up to date") || strings.ContainsAny(stderr, "\x1b\r") {

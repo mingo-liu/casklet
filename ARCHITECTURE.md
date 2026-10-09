@@ -212,6 +212,14 @@ before remote resolution; global locking protects staging creation/recovery,
 short publication/reference updates, and removal. A shared per-image lease pins
 content while full verification runs outside the global lock. Stable external
 transaction locks fence recursive staging cleanup after internal lease unlinking.
+The `.blobs` subdirectory caches compressed layers by digest. Stable per-digest
+locks serialize download/publication and hold shared usage leases through ordered
+extraction. Three workers per pull fetch distinct blobs; errors cancel and join
+workers before image staging closes. Manifest digest/size checks precede atomic
+blob publication, and cache hits hash the pinned file again. DiffIDs and whiteouts
+remain checked/applied in manifest order. Prune skips active blob leases and clears
+idle blobs independently of unpacked image references. The cache is not part of
+the local image identity, and unpacked roots remain independent across images.
 Network preparation precedes workload startup deadlines.
 Operation-scoped image observers emit layer phases and throttled byte counts from
 compressed streams and archive reads. The CLI owns rendering on stderr, preserving

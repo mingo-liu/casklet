@@ -6,6 +6,43 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Shared verified image blobs and bounded parallel downloads
+
+Pulls cache compressed SHA-256 blobs in a private `.blobs` directory and download
+up to three distinct layers concurrently. Stable per-digest locks serialize
+publication and protect active files with shared leases through extraction. Cache
+hits recheck safe metadata, declared size, and the entire digest. Repeated manifest
+layers reuse one pinned blob without sharing read offsets. Blob publication is
+atomic and synced; canceled and failed downloads remove private staging. Errors
+cancel and join workers, including pending registry response headers, before image
+transaction cleanup. Uncompressed DiffIDs, archive limits, whiteouts, and layer
+application order remain unchanged. Progress observers serialize worker events;
+warm layers show `Already exists` without fabricated download byte counts.
+
+`image prune` also removes idle compressed blobs and abandoned blob staging,
+skipping active download and extraction leases. Preview preserves images/blobs and
+continues listing image IDs only. The cache may reuse downloads across image IDs,
+but unpacked image roots remain independent. Cached compressed data contributes
+to `system df` image storage; it is not part of image identity or required for
+running retained containers. Corrupt blobs fail explicitly and can be pruned before
+retrying. Stable digest lock files remain after pruning.
+
+Validation:
+
+- `make fmt-check test vet test-race` passed on macOS arm64 and in the dedicated
+  Linux arm64 development VM. The complete image unit suite also passed as root.
+- Native and amd64 Darwin client/embedded Linux engine builds passed; the local
+  binary was restored to native arm64 afterward.
+- The complete privileged Linux integration suite passed, including shared-layer
+  download counts, cache pruning/redownload, active image leases, and OCI progress.
+  OCI progress fixtures now contain a unique archive marker so prior cache data
+  cannot turn a cold-download assertion into an unintended warm-cache test.
+- `make test-macos` passed through the real client/VM path. Registry GET counters
+  verified one cold download per layer and no extra layer downloads for a second
+  tag, including host TTY progress. VM reboot skipped to preserve the running
+  Redis and Tomcat containers.
+- Intel Mac execution and Linux amd64 privileged execution were not performed.
+
 ## 2026-10-09: Copy-on-write image roots and concurrent image preparation
 
 New privileged image containers use OverlayFS with an immutable shared lower and

@@ -84,6 +84,8 @@ casklet rm --filter label=project=demo --filter status=exited
 后台容器的变化会在 start/restart 后保留；目录来源、rootless 运行和已有的完整复制
 容器继续使用原有复制行为。虚拟机内核必须支持 OverlayFS。不同镜像的拉取和导入可以
 并行准备，下载期间仍可操作其他缓存镜像；同一镜像引用的刷新按顺序执行。
+每次拉取最多使用三个下载 worker，不同镜像共享已验证的压缩层缓存。
+各层仍按原顺序应用，复用时显示 `Already exists`；不同镜像的解包文件尚未去重。
 
 ```sh
 casklet image pull redis:8
@@ -196,6 +198,8 @@ casklet image prune
 ```
 
 清理包括未使用的带标签镜像，保留容器与数据卷，并跳过存在活动租约或被保留容器引用的镜像。
+同时清理未被拉取操作使用的压缩层缓存。`--dry-run` 保留镜像与压缩层，只输出可清理的镜像 ID。
+`system df` 将下载缓存计入镜像实际占用空间。
 
 镜像的 `StopSignal` 会保留用于后台容器关闭，可用 `--stop-signal SIGQUIT` 覆盖。
 停止和重启会先发送该 Linux 信号，超过配置的停止宽限时间后强制终止。

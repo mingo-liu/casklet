@@ -3,6 +3,7 @@ package image
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,7 @@ const (
 	ProgressWaiting        ProgressStage = "waiting"
 	ProgressDownloading    ProgressStage = "downloading"
 	ProgressDownloaded     ProgressStage = "downloaded"
+	ProgressLayerCached    ProgressStage = "layer-cached"
 	ProgressVerifying      ProgressStage = "verifying"
 	ProgressExtracting     ProgressStage = "extracting"
 	ProgressLayerComplete  ProgressStage = "layer-complete"
@@ -41,9 +43,18 @@ type Progress struct {
 type progressKey struct{}
 
 // WithProgress installs a synchronous observer for this operation only. The
-// observer should return promptly; presentation belongs to the caller.
+// observer should return promptly; presentation belongs to the caller. Calls
+// from concurrent layer workers serialize through the same observer mutex.
 func WithProgress(ctx context.Context, observe func(Progress)) context.Context {
-	return context.WithValue(ctx, progressKey{}, observe)
+	var mutex sync.Mutex
+	serialized := func(event Progress) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if observe != nil {
+			observe(event)
+		}
+	}
+	return context.WithValue(ctx, progressKey{}, serialized)
 }
 
 func reportProgress(ctx context.Context, event Progress) {

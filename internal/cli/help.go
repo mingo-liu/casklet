@@ -132,6 +132,8 @@ Options:
 
 Notes:
   Removes unused cached images, including tagged ones; prints each removed ID.
+  Also clears compressed download blobs not leased by an active pull.
+  --dry-run preserves images and blobs; stdout lists eligible image IDs only.
   Skips active leases and references from any retained container, even stopped ones.
   Containers, logs, data volumes, and host bind data are preserved.
   Each image is rechecked at deletion; a failure may leave a partially completed prune.
@@ -460,7 +462,7 @@ Commands:
   import DIRECTORY  Copy a Linux rootfs into the local image store
   ls [--json]       List cached images and registry references
   rm ID             Remove an unused image
-  prune [--dry-run]  Remove images without leases or container references
+  prune [--dry-run]  Remove unused images and idle compressed download blobs
 
 Notes:
   run --image uses cached names or IDs; an uncached name is pulled automatically.

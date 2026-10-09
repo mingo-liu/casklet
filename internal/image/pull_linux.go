@@ -126,7 +126,7 @@ func (store *Store) Pull(ctx context.Context, reference string) (Record, error) 
 	if err != nil {
 		return Record{}, fmt.Errorf("pull %s: %w", ref, err)
 	}
-	return store.pullImageLocked(ctx, ref, img)
+	return store.pullImageLocked(ctx, ref, img, cancel)
 }
 
 func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Record, error) {
@@ -154,7 +154,7 @@ func (store *Store) lockReference(ctx context.Context, ref string) (*os.File, er
 	return waitFileLock(ctx, file, false)
 }
 
-func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Image) (Record, error) {
+func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Image, cancelSource ...context.CancelFunc) (Record, error) {
 	cf, err := img.ConfigFile()
 	if err != nil {
 		return Record{}, err
@@ -230,17 +230,30 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 		return Record{}, err
 	}
 	defer root.Close()
-	var total int64
-	for i, layer := range layers {
-		if cf.RootFS.DiffIDs[i].Algorithm != "sha256" {
-			return Record{}, errors.New("only sha256 image layers are supported")
+	// Reject malformed DiffIDs before downloading any data. Compressed blobs
+	// are independent transactions; ordered application remains in this thread.
+	for _, diff := range cf.RootFS.DiffIDs {
+		if diff.Algorithm != "sha256" || ValidateID(diff.String()) != nil {
+			return Record{}, errors.New("only valid sha256 image DiffIDs are supported")
 		}
+	}
+	var cancelRemote context.CancelFunc
+	if len(cancelSource) > 0 {
+		cancelRemote = cancelSource[0]
+	}
+	blobs, err := store.downloadBlobs(ctx, layers, manifest.Layers, ref, cancelRemote)
+	if err != nil {
+		return Record{}, err
+	}
+	defer closeBlobs(blobs)
+	var total int64
+	for i, blob := range blobs {
 		archive, err := os.CreateTemp(stage, ".layer-")
 		if err != nil {
 			return Record{}, err
 		}
-		event := Progress{Reference: ref, Layer: manifest.Layers[i].Digest.String(), Index: i + 1, Layers: len(layers), Total: manifest.Layers[i].Size}
-		count, err := unpackLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total, event)
+		event := Progress{Reference: ref, Layer: manifest.Layers[i].Digest.String(), Index: i + 1, Layers: len(layers)}
+		count, err := unpackCachedLayer(ctx, root, archive, blob, cf.RootFS.DiffIDs[i], maxImageBytes-total, event)
 		closeErr := archive.Close()
 		removeErr := os.Remove(archive.Name())
 		if err := errors.Join(err, closeErr, removeErr); err != nil {
@@ -342,7 +355,29 @@ func unpackLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.
 	if err != nil {
 		return 0, err
 	}
-	r, err := tracked.Uncompressed()
+	return unpackPreparedLayer(ctx, root, archive, tracked, expected, remaining, progress, true)
+}
+
+func unpackCachedLayer(ctx context.Context, root *os.Root, archive *os.File, blob *cachedBlob, expected v1.Hash, remaining int64, event Progress) (count int64, resultErr error) {
+	progress := &streamProgress{ctx: ctx, event: event, now: time.Now}
+	defer func() {
+		if resultErr != nil {
+			stage := ProgressFailed
+			if ctx.Err() != nil {
+				stage = ProgressCanceled
+			}
+			progress.finish(stage)
+		}
+	}()
+	layer, err := partial.CompressedToLayer(blob)
+	if err != nil {
+		return 0, err
+	}
+	return unpackPreparedLayer(ctx, root, archive, layer, expected, remaining, progress, false)
+}
+
+func unpackPreparedLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64, progress *streamProgress, downloading bool) (count int64, resultErr error) {
+	r, err := layer.Uncompressed()
 	if err != nil {
 		return 0, err
 	}
@@ -356,7 +391,9 @@ func unpackLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.
 	if count > limit {
 		return count, errors.New("image exceeds unpacked size limit (4 GiB per layer, 16 GiB total)")
 	}
-	progress.finish(ProgressDownloaded)
+	if downloading {
+		progress.finish(ProgressDownloaded)
+	}
 	progress.finish(ProgressVerifying)
 	if expected.Algorithm != "sha256" || hex.EncodeToString(digest.Sum(nil)) != expected.Hex {
 		return count, errors.New("image layer DiffID mismatch")

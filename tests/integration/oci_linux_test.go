@@ -99,6 +99,8 @@ func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) 
 		{"data", nil, 123, 456, tar.TypeDir, 0755},
 	} {
 		h := &tar.Header{Name: file.name, Size: int64(len(file.body)), Typeflag: file.kind, Mode: file.mode, Uid: file.uid, Gid: file.gid}
+		// Each fixture starts cold even when earlier test runs left download blobs.
+		h.PAXRecords = map[string]string{"casklet.fixture": source}
 		if err := writer.WriteHeader(h); err != nil {
 			t.Fatal(err)
 		}

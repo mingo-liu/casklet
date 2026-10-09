@@ -27,5 +27,5 @@ func (store *Store) Prune(ctx context.Context, dryRun bool, referenced Reference
 		}
 		result = append(result, r)
 	}
-	return result, nil
+	return result, store.pruneBlobs(ctx, dryRun)
 }

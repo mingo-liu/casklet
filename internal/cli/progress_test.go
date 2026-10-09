@@ -116,3 +116,12 @@ func TestProgressStopsWritingAfterOutputFailure(t *testing.T) {
 		t.Fatalf("failed writer retried %d times", writer.calls)
 	}
 }
+
+func TestCachedLayerProgressReportsReuseWithoutNetworkBytes(t *testing.T) {
+	for _, bar := range []bool{false, true} {
+		line := layerProgressLine(image.Progress{Stage: image.ProgressLayerCached, Layer: "sha256:" + strings.Repeat("a", 64), Index: 1, Current: 0, Total: 1024}, bar)
+		if line != "aaaaaaaaaaaa: Already exists" {
+			t.Fatalf("cached layer progress: %q", line)
+		}
+	}
+}
