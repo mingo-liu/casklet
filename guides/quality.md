@@ -6,6 +6,44 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-09: Image deletion and abandoned recovery outside the metadata lock
+
+Removal checks image leases, retained container references, and mounted storage
+under the metadata lock, creates a stable external deletion lock, and atomically
+hides the image in a unique `.delete-` tombstone. Recursive cleanup releases the
+global lock, honors cancellation, and removes entries through pinned directories
+without following links or crossing mounts. The external lock protects partially
+removed trees even after their internal usage lease disappears. A replacement
+image with the same ID owns a separate directory and lease.
+
+Recovery claims at most 32 abandoned transactions per metadata-lock acquisition
+and removes their trees after releasing it, bounding retained file descriptors.
+Legacy `.import-`/`.remove-` and abandoned `.prepare-` transactions migrate to the
+new deletion protocol. Active external/internal owners remain protected; unsafe
+or mounted transactions fail without removal. Older engines ignore the new
+deletion prefix. Cancellation and storage failures preserve recovery state.
+
+Deterministic regressions pause live deletion and recovery while unrelated
+listing, acquisition, import, and pull succeed. They remove the internal lease
+before the pause, republish the deleted image ID, simulate legacy recovery, and
+verify cleanup failure/retry, unsafe paths and locks, active legacy leases,
+mounted storage, directory batches, and the recovery descriptor bound.
+
+Validation:
+
+- `make fmt-check test vet test-race` passed on macOS arm64 and in the dedicated
+  Linux arm64 development VM. The complete image unit suite passed as root,
+  including mounted recovery protection and ownership checks.
+- The complete privileged Linux integration suite passed with the pinned legacy
+  supervisor baseline. Image lease/reference refusal, concurrent creation/removal,
+  mounted storage, prune, OCI downloads, and retained image containers passed.
+- Native and amd64 Darwin client/embedded Linux engine builds passed; the local
+  binary was restored to native arm64 afterward.
+- `make test-macos` passed through the real client/VM path, including local
+  images, shared download progress, copy-on-write roots, and retained containers.
+  VM reboot skipped to preserve the running Redis and Tomcat containers.
+- Intel Mac execution and Linux amd64 privileged execution were not performed.
+
 ## 2026-10-09: Shared verified image blobs and bounded parallel downloads
 
 Pulls cache compressed SHA-256 blobs in a private `.blobs` directory and download

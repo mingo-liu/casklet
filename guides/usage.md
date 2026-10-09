@@ -255,7 +255,19 @@ Different image references and directory imports prepare concurrently. Download,
 extraction, copying, syncing, and full content verification run outside the global
 image metadata lock. Per-reference locks serialize refreshes of the same name;
 private transaction leases protect active staging from recovery. Atomic publication
-and deletion retain their existing lock and image-reference checks.
+and deletion retain their image leases and container-reference checks.
+
+Image removal hides the checked image under a unique private deletion name while
+holding the metadata lock, then releases that lock before recursively removing
+files. An external transaction lease protects the entire cleanup, even after its
+internal usage lease disappears. Unrelated image listing, acquisition, import,
+and pull remain available during deletion, and a newly published image with the
+same ID owns a separate directory. Canceled or failed deletion can leave hidden
+storage; later imports, pulls, or removals recover abandoned transactions outside
+the metadata lock in bounded batches. Recovery skips active owners and refuses
+unsafe or mounted storage. Recursive cleanup honors cancellation without following
+symlinks or crossing mounts. Older engines do not recognize the new deletion
+prefix, so their recovery cannot reclaim an active new cleanup.
 
 ### Shared download cache
 

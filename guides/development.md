@@ -121,6 +121,13 @@ downloads, preserve ordered whiteouts, cancel/join workers, and protect cache da
 with usage leases during prune. Mac progress tests count actual guest registry
 downloads for cold and warm pulls and check both pipe and host terminal output.
 
+Image cleanup regressions pause deletion after its internal lease disappears and
+verify that listing, acquisition, import, pull, and same-ID publication still
+complete. They cover abandoned legacy transactions, cancellation/deadline/storage
+failures, unsafe lock files, symlinks, mounted trees, multi-batch directory removal,
+and the 32-transaction recovery descriptor bound. Run the image unit suite as root
+in the development VM to include mount preservation and ownership regressions.
+
 For a real public-registry smoke on macOS, use the Redis/Nginx/PostgreSQL examples
 in the usage guide. Check application readiness, host-published responses, and
 restart data separately from the engine's successful process-start handshake.

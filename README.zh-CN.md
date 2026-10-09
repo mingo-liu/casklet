@@ -86,6 +86,8 @@ casklet rm --filter label=project=demo --filter status=exited
 并行准备，下载期间仍可操作其他缓存镜像；同一镜像引用的刷新按顺序执行。
 每次拉取最多使用三个下载 worker，不同镜像共享已验证的压缩层缓存。
 各层仍按原顺序应用，复用时显示 `Already exists`；不同镜像的解包文件尚未去重。
+镜像删除和废弃事务回收也在全局元数据锁之外清理大型目录，期间仍可操作其他镜像。
+活动租约、保留容器的引用和挂载目录继续阻止删除；中断的清理由后续导入、拉取或删除恢复。
 
 ```sh
 casklet image pull redis:8

@@ -208,10 +208,21 @@ content identity also covers numeric ownership and defaults. Atomic reference fi
 map normalized registry names to immutable local IDs. Pull refreshes references;
 run reuses a cached reference. Private leased transactions prepare pulls/imports
 outside the global image lock. Stable per-reference locks serialize refreshes
-before remote resolution; global locking protects staging creation/recovery,
-short publication/reference updates, and removal. A shared per-image lease pins
-content while full verification runs outside the global lock. Stable external
-transaction locks fence recursive staging cleanup after internal lease unlinking.
+before remote resolution; global locking protects staging creation, recovery
+claims, short publication/reference updates, and deletion claims. A shared
+per-image lease pins content while full verification runs outside the global
+lock. Stable external transaction locks fence recursive staging cleanup after
+internal lease unlinking.
+Deletion validates the image lease, container references, and mount state before
+atomically renaming the image to a random `.delete-` tombstone under the global
+lock. Its exclusive `.transaction-.delete-` lock is created before the rename and
+held through cleanup and directory syncing. Recursive removal runs outside the
+global lock, checks cancellation, and uses pinned directories with no-follow,
+no-cross-mount child opens. Recovery claims at most 32 abandoned transactions per
+batch under the global lock, then cleans them outside it. Legacy `.import-` and
+`.remove-` trees migrate to the new deletion protocol; older engines ignore the
+new tombstones. Failures retain recoverable storage, and active external owners
+remain protected even when their internal `.lease` file is already gone.
 The `.blobs` subdirectory caches compressed layers by digest. Stable per-digest
 locks serialize download/publication and hold shared usage leases through ordered
 extraction. Three workers per pull fetch distinct blobs; errors cancel and join

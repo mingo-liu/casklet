@@ -21,10 +21,14 @@ import (
 
 const storeRoot = "/var/lib/casklet/images"
 
+const recoveryBatchSize = 32
+
 // Store coordinates publication, readers and deletion across processes.
 type Store struct {
 	root  string
 	owner uint32
+	// Tests can pause one owner while another Store accesses the same storage.
+	removeTreeFn func(context.Context, string) error
 }
 
 func OpenStore() (*Store, error) {
@@ -237,14 +241,14 @@ func (store *Store) Import(ctx context.Context, source string) (Record, error) {
 // beginImport pins private staging before releasing the metadata lock. Its
 // shared lease moves with publication and also prevents removal until return.
 func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File, error) {
+	if err := store.recover(ctx); err != nil {
+		return "", nil, nil, err
+	}
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return "", nil, nil, err
 	}
 	defer lock.Close()
-	if err := store.recoverLocked(); err != nil {
-		return "", nil, nil, err
-	}
 	stage, err := os.MkdirTemp(store.root, ".prepare-")
 	if err != nil {
 		return "", nil, nil, err
@@ -257,7 +261,7 @@ func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File
 		if transaction != nil {
 			transaction.Close()
 		}
-		os.RemoveAll(stage)
+		os.Remove(stage)
 		return "", nil, nil, err
 	}
 	lease, err := store.openFile(filepath.Join(stage, ".lease"), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
@@ -268,7 +272,8 @@ func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File
 		if lease != nil {
 			lease.Close()
 		}
-		os.RemoveAll(stage)
+		os.Remove(filepath.Join(stage, ".lease"))
+		os.Remove(stage)
 		transaction.Close()
 		os.Remove(store.transactionPath(stage))
 		return "", nil, nil, err
@@ -285,17 +290,18 @@ func (store *Store) transactionPath(stage string) string {
 // needs the store lock, after no staging tree remains.
 func (store *Store) cleanupImport(stage string, transaction *os.File) {
 	defer transaction.Close()
-	if err := os.RemoveAll(stage); err != nil {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if err := store.removeTree(ctx, stage); err != nil {
+		return
+	}
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return
 	}
 	defer lock.Close()
 	os.Remove(store.transactionPath(stage))
+	syncDirectory(store.root)
 }
 
 // publish flushes staging without the store lock. Only identity and reference
@@ -365,30 +371,98 @@ func (store *Store) publish(ctx context.Context, stage string, record Record, re
 	return record, nil
 }
 
-// Legacy import/remove staging and leased prepare transactions are never
-// referenced. Recursive recovery can hold the metadata lock, but skips active
-// transactions before inspecting any partially removed internal files.
-func (store *Store) recoverLocked() error {
+type imageDeletion struct {
+	path        string
+	transaction *os.File
+}
+
+// A tombstone has no published identity. Its stable external lock remains held
+// even after recursive removal unlinks the tree's internal usage lease.
+func (store *Store) newDeletionLocked(ctx context.Context, path string) (*imageDeletion, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Create the lock before a tombstone directory can exist. A missing external
+	// lock on an existing tombstone is unsafe, not a reason to invent a new one.
+	transaction, err := os.CreateTemp(store.root, ".transaction-.delete-")
+	if err != nil {
+		return nil, err
+	}
+	tombstone := filepath.Join(store.root, strings.TrimPrefix(filepath.Base(transaction.Name()), ".transaction-"))
+	claimed := false
+	defer func() {
+		if !claimed {
+			transaction.Close()
+			os.Remove(transaction.Name())
+		}
+	}()
+	if err := unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		return nil, err
+	}
+	if err := transaction.Sync(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := unix.Renameat2(unix.AT_FDCWD, path, unix.AT_FDCWD, tombstone, unix.RENAME_NOREPLACE); err != nil {
+		return nil, err
+	}
+	claimed = true
+	deletion := &imageDeletion{path: tombstone, transaction: transaction}
+	return deletion, syncDirectory(store.root)
+}
+
+// recover claims abandoned transactions under the metadata lock and removes
+// their trees after releasing it. Other operations skip the claimed external
+// locks, so a slow cleanup cannot block unrelated image preparation or lookup.
+func (store *Store) recover(ctx context.Context) error {
+	for {
+		lock, err := store.lock(ctx, false)
+		if err != nil {
+			return err
+		}
+		deletions, more, claimErr := store.recoverLocked(ctx)
+		lock.Close()
+		for i, deletion := range deletions {
+			if err := store.finishDeletion(ctx, deletion); err != nil {
+				for _, pending := range deletions[i+1:] {
+					pending.transaction.Close()
+				}
+				return errors.Join(claimErr, err)
+			}
+		}
+		if claimErr != nil || !more {
+			return claimErr
+		}
+	}
+}
+
+func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, error) {
 	entries, err := os.ReadDir(store.root)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
+	var deletions []*imageDeletion
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return deletions, false, err
+		}
 		name := entry.Name()
 		path := filepath.Join(store.root, name)
-		if strings.HasPrefix(name, ".transaction-.prepare-") || strings.HasPrefix(name, ".transaction-.import-") {
+		if strings.HasPrefix(name, ".transaction-.prepare-") || strings.HasPrefix(name, ".transaction-.import-") || strings.HasPrefix(name, ".transaction-.remove-") || strings.HasPrefix(name, ".transaction-.delete-") {
 			stage := filepath.Join(store.root, strings.TrimPrefix(name, ".transaction-"))
 			if _, err := os.Lstat(stage); err == nil {
 				continue
 			} else if !errors.Is(err, os.ErrNotExist) {
-				return err
+				return deletions, false, err
 			}
 			file, err := store.openFile(path, unix.O_RDONLY)
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
 			if err != nil {
-				return err
+				return deletions, false, err
 			}
 			err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 			if errors.Is(err, unix.EWOULDBLOCK) {
@@ -400,70 +474,197 @@ func (store *Store) recoverLocked() error {
 			}
 			file.Close()
 			if err != nil {
-				return err
+				return deletions, false, err
 			}
 			continue
 		}
 		if strings.HasPrefix(name, ".ref-stage-") {
 			file, err := store.openFile(path, unix.O_RDONLY)
 			if err != nil {
-				return err
+				return deletions, false, err
 			}
 			file.Close()
 			if err := os.Remove(path); err != nil {
-				return err
+				return deletions, false, err
 			}
 			continue
 		}
-		if strings.HasPrefix(name, ".prepare-") || strings.HasPrefix(name, ".import-") || strings.HasPrefix(name, ".remove-") {
-			if err := store.recoverTransactionLocked(path); err != nil {
-				return err
+		if strings.HasPrefix(name, ".prepare-") || strings.HasPrefix(name, ".import-") || strings.HasPrefix(name, ".remove-") || strings.HasPrefix(name, ".delete-") {
+			deletion, err := store.recoverTransactionLocked(ctx, path)
+			if deletion != nil {
+				deletions = append(deletions, deletion)
+			}
+			if err != nil {
+				return deletions, false, err
+			}
+			if len(deletions) == recoveryBatchSize {
+				return deletions, true, syncDirectory(store.root)
 			}
 		}
 	}
-	return nil
+	return deletions, false, syncDirectory(store.root)
 }
 
-func (store *Store) recoverTransactionLocked(path string) error {
+func (store *Store) recoverTransactionLocked(ctx context.Context, path string) (*imageDeletion, error) {
+	isDeletion := strings.HasPrefix(filepath.Base(path), ".delete-")
 	transaction, err := store.openFile(store.transactionPath(path), unix.O_RDONLY)
+	handoff := false
 	if err == nil {
-		defer transaction.Close()
+		defer func() {
+			if !handoff {
+				transaction.Close()
+			}
+		}()
 		err = unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if errors.Is(err, unix.EWOULDBLOCK) {
-			return nil
+			return nil, nil
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+	} else if isDeletion || !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("unsafe image transaction lock for %s: %w", filepath.Base(path), err)
 	}
 	if err := store.checkDirectory(path, true); err != nil {
-		return err
+		return nil, err
 	}
 	lease, err := store.openFile(filepath.Join(path, ".lease"), unix.O_RDONLY)
 	if err == nil {
 		defer lease.Close()
 		err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if errors.Is(err, unix.EWOULDBLOCK) {
-			return nil
+			return nil, nil
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if err := rootfs.CheckUnmounted(path); err != nil {
+		return nil, err
+	}
+	if isDeletion {
+		handoff = true
+		return &imageDeletion{path: path, transaction: transaction}, nil
+	}
+	deletion, err := store.newDeletionLocked(ctx, path)
+	if deletion == nil {
+		return nil, err
+	}
+	if err == nil && transaction != nil {
+		err = os.Remove(store.transactionPath(path))
+	}
+	return deletion, err
+}
+
+func (store *Store) finishDeletion(ctx context.Context, deletion *imageDeletion) error {
+	defer deletion.transaction.Close()
+	if err := store.removeTree(ctx, deletion.path); err != nil {
 		return err
+	}
+	// Keep the transaction lock while persisting directory removal. Its orphan
+	// file can be removed safely by a later recovery if this owner is canceled.
+	if err := syncDirectory(store.root); err != nil {
+		return err
+	}
+	lock, err := store.lock(ctx, false)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := os.Remove(store.transactionPath(deletion.path)); err != nil {
+		return err
+	}
+	return syncDirectory(store.root)
+}
+
+func (store *Store) removeTree(ctx context.Context, path string) error {
+	if store.removeTreeFn != nil {
+		return store.removeTreeFn(ctx, path)
+	}
+	return removeImageTree(ctx, path)
+}
+
+// Remove leaf entries through pinned directories without following symlinks or
+// crossing mounts. Read entries in bounded batches and check cancellation before
+// each mutation, including the final removal of the tombstone itself.
+func removeImageTree(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("image cleanup requires a real directory")
 	}
 	if err := rootfs.CheckUnmounted(path); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(path); err != nil {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
 		return err
 	}
-	if transaction != nil {
-		return os.Remove(store.transactionPath(path))
+	root := os.NewFile(uintptr(fd), "image-cleanup-root")
+	defer root.Close()
+	if err := removeImageEntries(ctx, root); err != nil {
+		return err
 	}
-	return nil
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Remove(path)
+}
+
+func removeImageEntries(ctx context.Context, directory *os.File) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entries, readErr := directory.ReadDir(128)
+		if readErr != nil && readErr != io.EOF {
+			return readErr
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			flags := 0
+			if entry.IsDir() {
+				fd, err := unix.Openat2(int(directory.Fd()), entry.Name(), &unix.OpenHow{
+					Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC,
+					Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV,
+				})
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					return fmt.Errorf("open image cleanup directory %s without links or mounts: %w", entry.Name(), err)
+				}
+				child := os.NewFile(uintptr(fd), "image-cleanup-directory")
+				err = removeImageEntries(ctx, child)
+				closeErr := child.Close()
+				if err != nil || closeErr != nil {
+					return errors.Join(err, closeErr)
+				}
+				flags = unix.AT_REMOVEDIR
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := unix.Unlinkat(int(directory.Fd()), entry.Name(), flags); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+	}
 }
 
 func (store *Store) List(ctx context.Context) ([]Record, error) {
@@ -607,11 +808,18 @@ func (store *Store) Remove(ctx context.Context, id string, referenced ReferenceC
 }
 
 func (store *Store) remove(ctx context.Context, id string, referenced ReferenceCheck, dryRun bool) error {
+	if err := store.recover(ctx); err != nil {
+		return err
+	}
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() {
+		if lock != nil {
+			lock.Close()
+		}
+	}()
 	record, err := store.resolveIDLocked(ctx, id)
 	if err != nil {
 		return err
@@ -638,9 +846,6 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 	if inUse {
 		return ErrInUse
 	}
-	if err := store.recoverLocked(); err != nil {
-		return err
-	}
 	if err := rootfs.CheckUnmounted(store.path(id)); err != nil {
 		return err
 	}
@@ -650,15 +855,11 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 	if dryRun {
 		return nil
 	}
-	tombstone := filepath.Join(store.root, ".remove-"+strings.TrimPrefix(id, "sha256:"))
-	if err := os.Rename(store.path(id), tombstone); err != nil {
-		return err
+	deletion, claimErr := store.newDeletionLocked(ctx, store.path(id))
+	lock.Close()
+	lock = nil
+	if deletion == nil {
+		return claimErr
 	}
-	if err := syncDirectory(store.root); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(tombstone); err != nil {
-		return err
-	}
-	return syncDirectory(store.root)
+	return errors.Join(claimErr, store.finishDeletion(ctx, deletion))
 }

@@ -102,6 +102,10 @@ Layer downloads use up to three workers per pull and share a verified compressed
 blob cache across images. Layers are applied in their original order; reused
 layers show `Already exists`. The cache does not deduplicate unpacked files across
 different images.
+Image removal and abandoned transaction recovery also clean up large trees
+outside the global metadata lock, keeping unrelated image operations available.
+Active leases, retained container references, and mounted storage still prevent
+deletion; interrupted cleanup is recovered by later imports, pulls, or removals.
 
 ```sh
 casklet image pull redis:8
