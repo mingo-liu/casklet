@@ -312,8 +312,8 @@ func TestManagementCommands(t *testing.T) {
 func TestManagementRejectsInvalidArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"ps", "task"}, {"ps", "--rootfs", "/tmp/r"},
-		{"stop"}, {"stop", "a", "b"}, {"stop", ""}, {"stop", "--force", "task"},
-		{"rm"}, {"rm", "a", "b"}, {"rm", "--force", "task"}, {"rm", "../task"},
+		{"stop"}, {"stop", ""}, {"stop", "--force", "task"},
+		{"rm"}, {"rm", "--force", "task"}, {"rm", "../task"},
 		{"logs"}, {"logs", "a", "b"}, {"logs", "--tail", "-1", "task"},
 		{"logs", "--tail", "1000001", "task"}, {"logs", "--tail", "abc", "task"},
 		{"logs", "task", "--tail", "1"}, {"logs", "task", "-f"},

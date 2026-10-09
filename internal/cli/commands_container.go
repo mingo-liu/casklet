@@ -29,7 +29,7 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 		var records []container.Record
 		records, err = container.List(ctx, r.All)
 		if err == nil {
-			err = writeRecords(stdout, records, r.JSON)
+			err = writeRecords(stdout, container.FilterRecords(records, r.Filters), r.JSON)
 		}
 	case "inspect":
 		var inspection container.Inspection
@@ -65,6 +65,9 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 			_, err = fmt.Fprintln(stdout, record.ID)
 		}
 	case "stop":
+		if len(r.References) > 1 || r.All || len(r.Filters) > 0 {
+			return 0, executeBatch(ctx, r, stdout, containerBatchOperations())
+		}
 		var record container.Record
 		record, err = container.StopWithTimeout(ctx, r.Reference, r.StopTimeout)
 		if err == nil {
@@ -73,6 +76,9 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 	case "logs":
 		err = container.Logs(ctx, r.Reference, r.Tail, r.Follow, stdout)
 	case "rm":
+		if len(r.References) > 1 || r.All || len(r.Filters) > 0 {
+			return 0, executeBatch(ctx, r, stdout, containerBatchOperations())
+		}
 		err = container.Remove(ctx, r.Reference)
 		if err == nil {
 			_, err = fmt.Fprintln(stdout, r.Reference)

@@ -45,6 +45,9 @@ func quoteCLIArgument(value string) string {
 }
 
 func operationError(r Request, err error) error {
+	if len(r.References) > 1 || r.All && (r.Action == "stop" || r.Action == "rm") || len(r.Filters) > 0 {
+		return err
+	}
 	hint := ""
 	ref := quoteCLIArgument(r.Reference)
 	switch {

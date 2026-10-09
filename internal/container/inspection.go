@@ -2,6 +2,7 @@ package container
 
 import (
 	"errors"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -15,24 +16,25 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
-	Health             *Health          `json:"health"`
-	StoppedByUser      bool             `json:"stopped_by_user"`
-	RestartCount       uint64           `json:"restart_count"`
-	RestartAt          *time.Time       `json:"restart_at"`
-	CleanupFailures    []string         `json:"cleanup_failures"`
-	Generation         uint64           `json:"generation"`
-	PreviousExit       *ExecutionResult `json:"previous_exit"`
-	FilesystemRetained bool             `json:"filesystem_retained"`
-	ID                 string           `json:"id"`
-	Name               string           `json:"name"`
-	State              string           `json:"state"`
-	CreatedAt          time.Time        `json:"created_at"`
-	StartedAt          *time.Time       `json:"started_at"`
-	FinishedAt         *time.Time       `json:"finished_at"`
-	ExitCode           *int             `json:"exit_code"`
-	LogTruncated       bool             `json:"log_truncated"`
-	Config             InspectionConfig `json:"config"`
-	Limits             ResourceLimits   `json:"limits"`
+	Labels             map[string]string `json:"labels"`
+	Health             *Health           `json:"health"`
+	StoppedByUser      bool              `json:"stopped_by_user"`
+	RestartCount       uint64            `json:"restart_count"`
+	RestartAt          *time.Time        `json:"restart_at"`
+	CleanupFailures    []string          `json:"cleanup_failures"`
+	Generation         uint64            `json:"generation"`
+	PreviousExit       *ExecutionResult  `json:"previous_exit"`
+	FilesystemRetained bool              `json:"filesystem_retained"`
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	State              string            `json:"state"`
+	CreatedAt          time.Time         `json:"created_at"`
+	StartedAt          *time.Time        `json:"started_at"`
+	FinishedAt         *time.Time        `json:"finished_at"`
+	ExitCode           *int              `json:"exit_code"`
+	LogTruncated       bool              `json:"log_truncated"`
+	Config             InspectionConfig  `json:"config"`
+	Limits             ResourceLimits    `json:"limits"`
 }
 
 type InspectionConfig struct {
@@ -89,6 +91,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	}
 	logSize, logFiles := cfg.LogRetention()
 	return Inspection{
+		Labels:        maps.Clone(record.Labels),
 		Health:        record.effectiveHealth(),
 		StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount, RestartAt: record.RestartAt,
 		CleanupFailures: append([]string{}, record.CleanupFailures...),

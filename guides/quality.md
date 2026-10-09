@@ -31,6 +31,37 @@ existing exit-wait regressions passed, as did real Mac readiness, cancellation,
 health/restart, and exit-wait/listing checks. The complete privileged and macOS
 suites and Intel execution were not run for this step.
 
+## 2026-10-09: Container labels, filtering, and batch lifecycle operations
+
+Detached `run --label KEY=VALUE` and JSON `label` arrays save bounded immutable
+metadata independently of environment values. Last repeated keys win, including
+CLI overrides of config labels; labels survive restarts and appear in ps JSON
+and inspect. Store updates and completion reject label mutation. Repeated ps,
+stop, and rm filters intersect label presence/value, lifecycle status, and health
+predicates, including repeated predicates of the same type.
+
+Stop/removal accept multiple references or explicit filter/all selection. Batches
+snapshot full IDs before mutation, deduplicate, preserve operand order, and sort
+selector results. Each operation uses the existing operation lock and current
+state checks; running removal remains forbidden. Successful IDs remain on stdout
+while every failure is reported and aggregated to a nonzero status. Cancellation
+and output failures stop further work; empty selections succeed. Selection never
+redirects a reused name or includes containers created later.
+
+Regression coverage includes literal/empty values, bounds and escaped JSON,
+configuration precedence, persisted labels across reopening/executions, immutable
+updates/completion, filter intersection and health derivation, snapshot ordering,
+deduplication, partial failures, cancellation, output errors, and focused help.
+Scoped macOS and privileged Linux lifecycle tests plus a deterministic Linux
+name-reuse/operation-lock race are added. Formatting, full Darwin unit tests,
+vet, Darwin arm64 client/Linux engine builds, and relevant Darwin race tests
+passed. Linux arm64 full unit tests, vet, formatting, and container/config/CLI
+race tests passed in the dedicated development VM. Privileged label/filter/batch
+lifecycle and name-reuse/operation-lock regressions passed, together with readiness
+regressions. Real Mac label/filter/batch, short-ID lifecycle, and readiness checks
+passed. The complete privileged and macOS suites and Intel execution were not run
+for this step.
+
 ## 2026-10-09: Unique short IDs for container and image operations
 
 Container lookup now accepts unique hexadecimal ID prefixes of any length,

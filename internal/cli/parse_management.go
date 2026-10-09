@@ -15,6 +15,18 @@ import (
 func parseManagement(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	if r.Action == "ps" || r.Action == "stop" || r.Action == "rm" {
+		fs.Func("filter", "repeatable container selector", func(value string) error {
+			filter, err := container.ParseFilter(value)
+			if err == nil {
+				r.Filters = append(r.Filters, filter)
+			}
+			return err
+		})
+	}
+	if r.Action == "stop" || r.Action == "rm" {
+		fs.BoolVar(&r.All, "all", false, "select all retained containers")
+	}
 	switch r.Action {
 	case "wait":
 		fs.BoolVar(&r.Healthy, "healthy", false, "wait for the observed execution to become healthy")
@@ -68,6 +80,24 @@ func parseManagement(r Request, args []string) (Request, error) {
 		}
 		return r, nil
 	}
+	if r.Action == "stop" || r.Action == "rm" {
+		if fs.NArg() > 0 && (r.All || len(r.Filters) > 0) {
+			return r, errors.New("container operands cannot be combined with --all or --filter")
+		}
+		if fs.NArg() == 0 && !r.All && len(r.Filters) == 0 {
+			return r, fmt.Errorf("%s requires container IDs or names, --filter, or --all", r.Action)
+		}
+		r.References = append([]string(nil), fs.Args()...)
+		for _, ref := range r.References {
+			if err := validateManagementReference(ref); err != nil {
+				return r, err
+			}
+		}
+		if len(r.References) == 1 {
+			r.Reference = r.References[0]
+		}
+		return r, nil
+	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
 		return r, fmt.Errorf("%s requires exactly one container ID or name; flags must precede it", r.Action)
 	}
@@ -77,8 +107,8 @@ func parseManagement(r Request, args []string) (Request, error) {
 		}
 	}
 	r.Reference = fs.Arg(0)
-	if strings.ContainsAny(r.Reference, "/\\\x00") || r.Reference == "." || r.Reference == ".." {
-		return r, errors.New("invalid container ID or name")
+	if err := validateManagementReference(r.Reference); err != nil {
+		return r, err
 	}
 	if r.Action == "logs" {
 		explicitTail := false
@@ -88,4 +118,11 @@ func parseManagement(r Request, args []string) (Request, error) {
 		}
 	}
 	return r, nil
+}
+
+func validateManagementReference(ref string) error {
+	if ref == "" || strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, "/\\\x00") || ref == "." || ref == ".." {
+		return errors.New("invalid container ID or name; flags must precede operands")
+	}
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
 )
 
 type Request struct {
@@ -18,6 +19,8 @@ type Request struct {
 	Name        string
 	All         bool
 	JSON        bool
+	References  []string
+	Filters     []container.Filter
 	Reference   string
 	Tail        int
 	Follow      bool

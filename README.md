@@ -69,6 +69,21 @@ Application settings can also come from `run --config redis.json` and repeatable
 scalars override the file, and explicit `--env` overrides env-files. Files are read
 on the Mac. See [deployment configuration](guides/usage.md#repeatable-deployment-configuration).
 
+Group detached containers with immutable labels, then filter and manage them in
+batches. Labels survive restart and are independent of workload environment;
+`ps --json` and `inspect` expose them. Repeated filters use AND; `ps -a` includes
+stopped records. `stop`/`rm` accept multiple references or `--filter`/`--all`,
+without mixing references and selectors. Removal requires stopped containers;
+partial failures return 125 and preserve completed IDs on stdout. See
+[labels and batch operations](guides/usage.md#labels-filters-and-batch-lifecycle-operations).
+
+```sh
+casklet run -d --name demo-worker --label project=demo -- /bin/sleep 300
+casklet ps -a --filter label=project=demo --json
+casklet stop --filter label=project=demo
+casklet rm --filter label=project=demo --filter status=exited
+```
+
 ## Pull progress and image management
 
 Automatic pulls and explicit `image pull` show per-layer download, verification,

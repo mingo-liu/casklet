@@ -92,6 +92,17 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.Config.TTY, "tty", false, "allocate a terminal")
 		fs.BoolVar(&r.Config.TTY, "t", false, "allocate a terminal")
 		fs.StringVar(&r.Name, "name", "", "detached container name")
+		fs.Func("label", "container metadata KEY=VALUE", func(value string) error {
+			key, val, err := config.ParseLabel(value)
+			if err != nil {
+				return err
+			}
+			if r.Config.Labels == nil {
+				r.Config.Labels = map[string]string{}
+			}
+			r.Config.Labels[key] = val
+			return config.ValidateLabels(r.Config.Labels)
+		})
 		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
@@ -216,6 +227,9 @@ func parseRun(r Request, args []string) (Request, error) {
 	fs.Visit(func(f *flag.Flag) {
 		interactiveSpecified = interactiveSpecified || f.Name == "i" || f.Name == "interactive"
 	})
+	if !r.Detach && len(r.Config.Labels) > 0 {
+		return r, errors.New("--label requires --detach")
+	}
 	if !r.Detach && r.Config.RestartPolicy != "" {
 		return r, errors.New("--restart requires --detach")
 	}

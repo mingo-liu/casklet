@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -105,7 +106,11 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if record.Terminal() {
 		return nil
 	}
+	labels := maps.Clone(record.Labels)
 	update(&record)
+	if !maps.Equal(labels, record.Labels) {
+		return errors.New("container labels are immutable")
+	}
 	if !record.Terminal() {
 		return errors.New("completion requires a terminal state")
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -198,7 +199,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 			os.RemoveAll(path)
 		}
 	}()
-	record := Record{LogLocking: true, RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
+	record := Record{Labels: maps.Clone(cfg.Labels), LogLocking: true, RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
 	if err := store.writeJSON(path, "config.json", cfg, maxConfigBytes); err != nil {
 		return Record{}, err
 	}
@@ -409,11 +410,15 @@ func (store *Store) Update(ctx context.Context, id string, update func(*Record) 
 		return err
 	}
 	originalName := record.Name
+	labels := maps.Clone(record.Labels)
 	if err := update(&record); err != nil {
 		return err
 	}
 	if record.Name != originalName {
 		return errors.New("container name is immutable")
+	}
+	if !maps.Equal(labels, record.Labels) {
+		return errors.New("container labels are immutable")
 	}
 	if err := validateRecord(record, id); err != nil {
 		return err

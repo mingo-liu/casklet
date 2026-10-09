@@ -60,6 +60,19 @@ OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会
 显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。详见
 [部署配置](guides/usage.md#repeatable-deployment-configuration)（英文）。
 
+使用不可修改的标签为后台容器分组，再筛选和批量管理。标签在重启后保留，
+独立于工作负载环境变量；`ps --json` 和 `inspect` 会显示标签。重复筛选条件使用 AND，
+`ps -a` 包含已停止的记录。`stop`/`rm` 支持多个引用或 `--filter`/`--all`，
+引用与选择条件不能混用。删除要求容器已经停止；部分失败返回 125，已完成的 ID
+保留在 stdout。详情见[标签与批量操作](guides/usage.md#labels-filters-and-batch-lifecycle-operations)（英文）。
+
+```sh
+casklet run -d --name demo-worker --label project=demo -- /bin/sleep 300
+casklet ps -a --filter label=project=demo --json
+casklet stop --filter label=project=demo
+casklet rm --filter label=project=demo --filter status=exited
+```
+
 ## 拉取进度与镜像管理
 
 自动拉取和显式 `image pull` 都会在 stderr 显示逐层下载、校验和解包进度。

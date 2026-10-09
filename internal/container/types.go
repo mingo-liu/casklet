@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 const (
@@ -32,33 +34,34 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
-	Health          *Health          `json:"health,omitempty"`
-	RestartBootID   string           `json:"restart_boot_id,omitempty"`
-	StoppedBootID   string           `json:"stopped_boot_id,omitempty"`
-	StoppedByUser   bool             `json:"stopped_by_user,omitempty"`
-	RestartCount    uint64           `json:"restart_count,omitempty"`
-	RestartAt       *time.Time       `json:"restart_at,omitempty"`
-	LogLocking      bool             `json:"log_locking,omitempty"`
-	CleanupFailures []string         `json:"cleanup_failures,omitempty"`
-	Generation      uint64           `json:"generation"`
-	LaunchAt        *time.Time       `json:"launch_at,omitempty"`
-	PreviousExit    *ExecutionResult `json:"previous_exit,omitempty"`
-	StopTimeout     *time.Duration   `json:"stop_timeout,omitempty"`
-	RetainRootFS    bool             `json:"retain_rootfs"`
-	Version         int              `json:"version"`
-	ID              string           `json:"id"`
-	BootID          string           `json:"boot_id,omitempty"`
-	Name            string           `json:"name"`
-	State           string           `json:"state"`
-	CreatedAt       time.Time        `json:"created_at"`
-	StartedAt       *time.Time       `json:"started_at,omitempty"`
-	FinishedAt      *time.Time       `json:"finished_at,omitempty"`
-	ExitCode        *int             `json:"exit_code,omitempty"`
-	Error           string           `json:"error,omitempty"`
-	RunPath         string           `json:"run_path,omitempty"`
-	Cgroup          string           `json:"cgroup,omitempty"`
-	LogTruncated    bool             `json:"log_truncated,omitempty"`
-	Command         []string         `json:"command"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Health          *Health           `json:"health,omitempty"`
+	RestartBootID   string            `json:"restart_boot_id,omitempty"`
+	StoppedBootID   string            `json:"stopped_boot_id,omitempty"`
+	StoppedByUser   bool              `json:"stopped_by_user,omitempty"`
+	RestartCount    uint64            `json:"restart_count,omitempty"`
+	RestartAt       *time.Time        `json:"restart_at,omitempty"`
+	LogLocking      bool              `json:"log_locking,omitempty"`
+	CleanupFailures []string          `json:"cleanup_failures,omitempty"`
+	Generation      uint64            `json:"generation"`
+	LaunchAt        *time.Time        `json:"launch_at,omitempty"`
+	PreviousExit    *ExecutionResult  `json:"previous_exit,omitempty"`
+	StopTimeout     *time.Duration    `json:"stop_timeout,omitempty"`
+	RetainRootFS    bool              `json:"retain_rootfs"`
+	Version         int               `json:"version"`
+	ID              string            `json:"id"`
+	BootID          string            `json:"boot_id,omitempty"`
+	Name            string            `json:"name"`
+	State           string            `json:"state"`
+	CreatedAt       time.Time         `json:"created_at"`
+	StartedAt       *time.Time        `json:"started_at,omitempty"`
+	FinishedAt      *time.Time        `json:"finished_at,omitempty"`
+	ExitCode        *int              `json:"exit_code,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	RunPath         string            `json:"run_path,omitempty"`
+	Cgroup          string            `json:"cgroup,omitempty"`
+	LogTruncated    bool              `json:"log_truncated,omitempty"`
+	Command         []string          `json:"command"`
 }
 
 // Terminal reports whether a supervisor has finished the container.
@@ -89,6 +92,9 @@ func validateReference(ref string) error {
 }
 
 func validateRecord(record Record, id string) error {
+	if err := config.ValidateLabels(record.Labels); err != nil {
+		return err
+	}
 	if err := validateID(id); err != nil {
 		return err
 	}

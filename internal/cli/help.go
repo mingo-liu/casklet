@@ -44,6 +44,8 @@ const runOptions = `Options:
   --config       Strict JSON run options; CLI scalars override config values
   --env-file     Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
+  --label        Immutable detached metadata KEY=VALUE; repeat; last key wins
+                 Up to 64 keys, 16 KiB total; values are independent of environment
   --workdir      Absolute working directory (image default, otherwise /)
   --user         Numeric UID[:GID]; overrides image User (otherwise 0:0)
   --mount        type=bind,source=/HOST,target=/PATH[,readonly]
@@ -237,19 +239,26 @@ Examples:
   casklet exec worker -- /bin/echo hello
   casklet exec -it worker -- /bin/sh
 `,
-	"ps": `Usage: casklet ps [-a|--all] [--json]
+	"ps": `Usage: casklet ps [-a|--all] [--json] [--filter FILTER ...]
 
 Options:
   -a, --all  Include completed containers (default: active containers only)
-  --json     Print JSON records with full container IDs
+  --json     Print JSON records with full container IDs and labels
+  --filter   label=KEY[=VALUE], status=STATE, or health=STATUS; repeat (AND)
 
 Notes:
   Table IDs show the first 12 hexadecimal characters; JSON retains full IDs.
   Container operations accept an exact name, full ID, or unique ID prefix.
+  Every filter must match, including repeated filters of the same type (AND).
+  status: created, starting, running, stopping, exited, failed; use -a for terminal states.
+  health: none (no check), starting, healthy, unhealthy, stopped.
+  label=KEY tests presence; label=KEY=VALUE tests an exact, case-sensitive value.
+  Empty values are allowed; labels are immutable and survive restart.
 
 Examples:
   casklet ps
   casklet ps -a --json
+  casklet ps -a --filter label=project=demo --filter status=exited
 `,
 	"inspect": `Usage: casklet inspect ID|NAME
 
@@ -261,6 +270,7 @@ Notes:
   Includes restart_policy, restart_count, restart_at, and stopped_by_user.
   Health includes status, consecutive failures, and five recent probe results.
   Probe output is discarded; unhealthy does not change the restart policy.
+  Labels are exposed as metadata, independently of the workload environment.
   Environment names are shown without values.
 
 Examples:
@@ -296,19 +306,30 @@ Examples:
   casklet logs --tail 20 worker
   casklet logs -f worker
 `,
-	"stop": `Usage: casklet stop [--timeout DURATION] ID|NAME
+	"stop": `Usage: casklet stop [--timeout DURATION] ID|NAME [ID|NAME ...]
+       casklet stop [--timeout DURATION] (--all | --filter FILTER ...)
 
 Options:
   --timeout  Override graceful shutdown, 0s-1m (default: container configuration)
+  --all      Select all retained containers; may be narrowed by --filter
+  --filter   label=KEY[=VALUE], status=STATE, or health=STATUS; repeat (AND)
 
 Notes:
   Flags must precede ID|NAME. Sends the configured stop signal, then SIGKILL after the grace period.
   Keeps the container's files and record for start, inspect, or rm.
   Suppresses automatic restarts until start/restart; always resumes on a new VM boot.
+  All filters match together (AND); values and valid states match ps --help.
+  Selectors consider all retained records; no matches succeed without output.
+  Explicit operands cannot combine with --all/--filter. Selection pins full IDs once.
+  Bulk stdout prints completed full IDs (deduplicated; selectors sorted by ID).
+  Failures are reported per container; other selected containers continue; partial failure returns 125.
+  Cancellation or stdout failure stops further operations; completed operations are retained.
 
 Examples:
   casklet stop worker
   casklet stop --timeout 10s worker
+  casklet stop api database
+  casklet stop --filter label=project=demo
 `,
 	"wait": `Usage: casklet wait [--healthy [--timeout DURATION]] ID|NAME
 
@@ -355,18 +376,29 @@ Examples:
   casklet restart worker
   casklet restart --timeout 10s worker
 `,
-	"rm": `Usage: casklet rm ID|NAME
+	"rm": `Usage: casklet rm ID|NAME [ID|NAME ...]
+       casklet rm (--all | --filter FILTER ...)
 
 Options:
+  --all      Select all retained containers; may be narrowed by --filter
+  --filter   label=KEY[=VALUE], status=STATE, or health=STATUS; repeat (AND)
   -h, --help  Show this help
 
 Notes:
   Requires a stopped container. Removes its record, retained files, and logs.
   Stop a running container before removal.
+  All filters match together (AND); values and valid states match ps --help.
+  Selectors consider all retained records; no matches succeed without output.
+  Explicit operands cannot combine with --all/--filter. Selection pins full IDs once.
+  Bulk stdout prints completed full IDs (deduplicated; selectors sorted by ID).
+  Failures are reported per container; other selected containers continue; partial failure returns 125.
+  Cancellation or stdout failure stops further operations; completed operations are retained.
 
 Examples:
   casklet stop worker
   casklet rm worker
+  casklet rm api database
+  casklet rm --filter label=project=demo --filter status=exited
 `,
 	"image": `Usage: casklet image COMMAND
 

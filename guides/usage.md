@@ -339,6 +339,61 @@ generation and its files. A failed `restart` can therefore leave the container
 stopped; release the port and retry `start` or `restart`. `start` on an already
 running container remains idempotent.
 
+### Labels, filters, and batch lifecycle operations
+
+Detached containers accept repeatable `--label KEY=VALUE`. Labels are immutable
+metadata saved with the retained record and configuration; they survive
+start/restart and do not become workload environment variables. `ps --json` and
+`inspect` expose labels. Repeated keys use the last value, including CLI labels
+following config labels. Config uses `"label": ["project=demo", "role=api"]`.
+
+Keys contain 1-128 ASCII letters, digits, dots, underscores, colons, slashes, or
+hyphens and start alphanumeric. Values are literal UTF-8 without control
+characters, may be empty or contain equals signs, and are limited to 4096 bytes.
+Each container has at most 64 keys and 16 KiB of key/value bytes in total.
+
+```sh
+casklet run -d --name api --label project=demo --label role=api -- /bin/sleep 300
+casklet run -d --name database --label project=demo --label role=db -- /bin/sleep 300
+casklet ps --filter label=project=demo --filter status=running --json
+casklet stop api database
+casklet start api
+casklet stop --timeout 2s --filter label=project=demo
+casklet rm --filter label=project=demo --filter status=exited
+```
+
+`ps`, `stop`, and `rm` accept repeatable `--filter` with these predicates:
+
+| Filter | Meaning |
+| --- | --- |
+| `label=KEY` | The label is present, including an empty value |
+| `label=KEY=VALUE` | The label has this exact, case-sensitive value |
+| `status=STATE` | `created`, `starting`, `running`, `stopping`, `exited`, or `failed` |
+| `health=STATUS` | `none` (no check), `starting`, `healthy`, `unhealthy`, or `stopped` |
+
+All predicates must match (AND), including repeated predicates of the same type.
+Contradictory predicates therefore select nothing. `ps` still defaults to active
+containers; use `-a` when filtering terminal states. `stop` and `rm` selectors
+consider all retained containers. `--all` explicitly selects every retained
+container and can be narrowed with filters; it does not bypass the stopped-only
+removal requirement. Flags precede operands, and explicit operands cannot be
+combined with `--all` or `--filter`.
+
+Batch commands snapshot matching full IDs before the first operation. Explicit
+references are deduplicated in operand order; selector results run in sorted ID
+order. Newly created containers are excluded. Name reuse never redirects an
+operation to a replacement container. The operation lock and current state are
+rechecked for each ID; a container restarted during selection cannot be removed
+while running. Filters describe the selection snapshot, so state/health can
+change before an operation takes its lock.
+
+Bulk stdout prints each completed full ID. Every failure is reported on stderr,
+other selected containers continue, and any failure returns 125. Thus a failed
+command can have completed some operations; check stdout before retrying. Empty
+selections succeed with no output. Cancellation or stdout failure stops further
+operations and preserves completed work. Single-operand `rm` retains its existing
+reference output. There is no forced removal or rollback of completed operations.
+
 ### Automatic restarts
 
 Use `run -d --restart POLICY`; the flag requires detached execution. Policies are
@@ -522,6 +577,7 @@ before VM startup. No shell evaluation or variable interpolation occurs.
   "restart": "unless-stopped",
   "env-file": ["application.env"],
   "env": ["MODE=production"],
+  "label": ["project=demo", "role=database"],
   "mount": ["type=volume,source=app-data,target=/data"]
 }
 ```
