@@ -30,7 +30,10 @@ the engine plus the rootfs preparation helper. The payload hash determines
 whether an engine update is needed. Installation atomically replaces the guest
 executable and preserves the Linux container/image stores. The writable Mac
 home share provides installation staging and live bind sources; persistent
-container roots remain on the Linux disk.
+container roots remain on the Linux disk. Development and tests reuse this same
+VM, with optional guest build tools and source snapshots on its Linux disk. The
+privileged test runner requires exclusive VM use, temporarily saves the daily
+engine store and installed restart manager, and restores both after testing.
 The reuse check verifies the installed executable's SHA-256 as well as the
 version marker, so executable corruption triggers atomic reinstallation before
 guest engine execution.

@@ -33,6 +33,9 @@ casklet run -it -- /bin/sh
 更新源码后，再执行 `make build` 和 `sudo make install` 更新已安装的客户端。
 下次执行需要引擎的命令时，会自动更新其内置的虚拟机引擎，保留现有容器和镜像。
 
+开发、测试和日常使用共用同一个 `casklet-runtime` 虚拟机。可选的虚拟机开发工具及
+保留日常数据、独占运行的 Linux 测试流程见[开发指南](guides/development.md#internal-linux-engine-tests)（英文）。
+
 ## 运行应用镜像
 
 ```sh

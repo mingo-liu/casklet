@@ -28,6 +28,6 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go test -c -o bin/integration.tes
 CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go build -o bin/integration-helper ./tests/integration/testdata
 helper=$project/bin/integration-helper
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" CASKLET_LEGACY_ENGINE="${CASKLET_LEGACY_ENGINE:-}" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
+    exec sudo env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" CASKLET_LEGACY_ENGINE="${CASKLET_LEGACY_ENGINE:-}" "$project/scripts/test-shared-vm.sh" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
 fi
-exec env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
+exec env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" "$project/scripts/test-shared-vm.sh" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"

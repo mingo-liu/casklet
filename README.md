@@ -39,6 +39,10 @@ After updating the source, run `make build` and `sudo make install` again to upd
 the installed client. Its bundled guest engine updates automatically on the next
 engine command, preserving existing containers and images.
 
+Use the same `casklet-runtime` VM for development and tests. Optional guest build
+tools and the data-preserving, exclusive Linux test workflow are described in the
+[development guide](guides/development.md#internal-linux-engine-tests).
+
 ## Run an application image
 
 ```sh

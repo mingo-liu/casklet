@@ -33,15 +33,15 @@ architecture must match the client. Build each release architecture separately;
 | `make vuln` | Reachable vulnerability checks for Darwin/Linux on arm64/amd64 |
 | `make test-macos` | Opt-in macOS end-to-end tests through Lima |
 | `make engine` | Internal Linux executable for guest development |
-| `make test-integration` | Privileged Linux engine suite, inside a dedicated VM |
+| `make test-integration` | Privileged Linux engine suite, inside casklet-runtime |
 
 The macOS suite checks VM stop/start as well as commands and terminals. It skips
 the VM reboot test if another active container exists, preserving that workload.
 
 The Go version in `go.mod` is the minimum patched build toolchain and the exact
 version selected by CI. Keep it aligned with the verified Go archives in
-`dev/lima.yaml` when updating the toolchain. `make vuln` builds the pinned
-govulncheck analyzer as a host executable, then scans all four supported
+`scripts/prepare-development.sh` when updating the toolchain. `make vuln` builds
+the pinned govulncheck analyzer as a host executable, then scans all four supported
 client/engine targets against the current Go vulnerability database. It needs
 network access and fails on reachable vulnerable symbols. Review reported
 platform and input conditions before treating a finding as an exploit.
@@ -49,25 +49,29 @@ platform and input conditions before treating a finding as an exploit.
 The client maintains its initialization lock and generated VM configuration in
 `~/Library/Application Support/casklet`. Lima owns the VM disk and SSH
 configuration under its own instance directory. The product instance is
-`casklet-runtime`; the separate development instance is named `casklet`.
+`casklet-runtime`, shared by everyday use, development, and tests. Do not create
+a second development VM. Development tools are optional guest packages; the
+installed product engine continues to be managed by the macOS client.
 
 ## Internal Linux engine tests
 
 Linux remains an internal execution and test environment. The ordinary macOS
 unit suite excludes Linux-specific tests. Runtime changes must also pass the
-privileged suite in a dedicated Linux VM.
+privileged suite in the same `casklet-runtime` VM.
 
-The existing `dev/lima.yaml` creates a plain Ubuntu development VM with Go and
-engine prerequisites; its disabled sharing and forwarding intentionally differ
-from the product VM. Set up and transfer a fresh snapshot:
+Add the guest build tools once, then transfer a fresh source snapshot onto the
+VM's Linux disk. Build there rather than on the shared Mac filesystem so Linux
+ownership, mounts, and extended attributes work correctly. Guest builds write
+only to the snapshot and do not replace `/usr/local/bin/casklet`:
 
 ```sh
-limactl start --name casklet dev/lima.yaml
+./bin/casklet machine start
+limactl shell casklet-runtime sh < scripts/prepare-development.sh
 set -o pipefail
-./scripts/snapshot.sh | limactl shell casklet sh -c \
+./scripts/snapshot.sh | limactl shell casklet-runtime sh -c \
   'source_dir=$(mktemp -d "$HOME/casklet-source.XXXXXXXX") &&
     tar -xzf - -C "$source_dir" && printf "Source directory: %s\n" "$source_dir"'
-limactl shell casklet
+limactl shell casklet-runtime
 # Change to the directory printed above.
 make engine rootfs
 make fmt-check test vet test-race
@@ -77,7 +81,26 @@ make test-integration
 Snapshots include tracked and unignored source files, including the embedded
 rootfs helper, but exclude generated engines and host state. Use a fresh snapshot
 after changes. Engine tests need root, systemd, cgroups v2, namespaces, and network
-administration privileges, and must not run on a shared production Linux host.
+administration privileges.
+
+Privileged integration tests require exclusive use of the VM. Stop everyday
+containers and remove idle named networks first; do not run macOS engine commands,
+other privileged tests, or reboot the VM during the suite. The runner refuses
+active casklet services, existing casklet bridges/rules, and mounted engine storage.
+It pauses the installed restart manager, saves the entire everyday engine store
+by rename, and runs against an empty store. On success, failure, or a catchable
+signal it restores the original store and manager. Images, cache policies, volumes,
+and retained container files are preserved; test cache pruning cannot touch them.
+Failed test artifacts remain in `/var/lib/casklet-integration/results` for inspection.
+After checking for leaked mounts and services, remove that transaction directory
+before retrying. An uncatchable kill or VM shutdown can interrupt restoration:
+keep the client stopped, stop any remaining test services, move the unfinished
+test store out of `/var/lib/casklet`, and restore `casklet-integration/store` there
+and `restart-service` to `/etc/systemd/system/casklet-restarts.service` when present.
+Restore `restart-enable` to the service's `multi-user.target.wants` symlink too,
+then reload systemd and restart the manager if `manager-active` contains `1`.
+Never remove a saved `store` before restoring it.
+
 CI runs formatting, unit tests, static checks, and race detection on macOS and
 native Linux amd64/arm64 runners. It builds both macOS client architectures and
 their bundled Linux engines, and each native Linux engine. A separate job runs
@@ -91,7 +114,7 @@ delegation. Do not use that provisioning script on a shared self-hosted runner.
 All jobs run for pushes, pull requests, and manual dispatch; integration failures
 fail CI rather than being ignored. Configure these checks as required in the
 repository's branch/release rules. macOS end-to-end tests still run locally
-through the dedicated Lima product VM with `make test-macos`.
+through the same Lima VM with `make test-macos`.
 
 ## OCI regression tests
 
@@ -175,7 +198,7 @@ suite does not. Pull staging and caches live on the VM disk.
 
 ### Named network regression checks
 
-The dedicated VM provisioner permits `casklet0` and the owned named bridge prefix
+The disposable CI VM provisioner permits `casklet0` and the owned named bridge prefix
 `csn+` in its existing IPv4 FORWARD chain, because a host DROP policy can override
 accepts in separate nftables base chains. Production networking never changes
 unrelated forwarding rules. Run `TestNamedNetwork*` in the privileged Linux suite

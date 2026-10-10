@@ -6,6 +6,42 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-10: One Lima VM for everyday use, development, and tests
+
+Development now reuses `casklet-runtime` instead of creating a separate plain
+`casklet` VM. Optional Go/Make setup lives in `scripts/prepare-development.sh`;
+source snapshots and guest build output stay on the VM's Linux disk. Removed
+`dev/lima.yaml` and aligned the development guide, architecture, repository
+instructions, and bilingual READMEs with this workflow.
+
+The privileged Linux runner requires exclusive VM use and refuses active casklet
+services, existing bridges/rules, and mounted engine storage. A stable lock excludes
+concurrent integration runners. It temporarily saves the everyday engine store,
+installed restart unit, and its boot-enable link; tests use a fresh store. Cleanup
+restores daily data and the manager on success, test failure, and catchable signals.
+Failed artifacts remain for inspection, and interrupted-run recovery is documented.
+The boot-enable link must be absent during testing so systemd can unload transient
+restart managers between cases. Cleanup reloads systemd before restoring that link
+to prevent restarting the test executable as the daily manager.
+
+Validation:
+
+- macOS arm64 build, formatting, unit tests, and vet passed. Linux arm64 engine
+  build, rootfs preparation, formatting, unit tests, and vet passed in the shared VM.
+  The real macOS client passed `doctor` and a foreground execution smoke afterward.
+- The complete privileged Linux integration suite passed in `casklet-runtime`,
+  including the pinned pre-named-network engine from `e470555`. An initial run
+  exposed the target-link/transient-unit conflict above; both restart-policy
+  regressions and the complete suite passed after fixing the runner.
+- Real-VM guard checks verified success, nonzero test exit, SIGTERM, concurrent-run
+  refusal, and active-workload refusal. Daily store metadata, image listings, and
+  retained Redis/Tomcat records matched before and after testing; the restored
+  service uses `/usr/local/bin/casklet` with `Transient=no`.
+- The old development VM's home, engine data, and Go installation were archived
+  and gzip-validated before deletion. Lima now contains only `casklet-runtime`.
+- The full macOS end-to-end suite and Intel/Linux amd64 execution were not run
+  for this workflow change.
+
 ## 2026-10-10: Independent bounded download-cache management
 
 Added `image cache ls/prune/limit` with focused help and JSON output. Cache-only
