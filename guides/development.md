@@ -59,7 +59,8 @@ Linux remains an internal execution and test environment. The ordinary macOS
 unit suite excludes Linux-specific tests. Runtime changes must also pass the
 privileged suite in the same `casklet-runtime` VM.
 
-Add the guest build tools once, then transfer a fresh source snapshot onto the
+Add the guest build tools once (including GCC for Go race checks), then transfer
+a fresh source snapshot onto the
 VM's Linux disk. Build there rather than on the shared Mac filesystem so Linux
 ownership, mounts, and extended attributes work correctly. Guest builds write
 only to the snapshot and do not replace `/usr/local/bin/casklet`:

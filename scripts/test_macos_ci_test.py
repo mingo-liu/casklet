@@ -72,7 +72,7 @@ print('fake VM diagnostics')
             with patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), \
                     patch.object(runner.subprocess, "Popen", side_effect=launch):
                 result = runner.run_suite(directory, artifacts,
-                                          timeout=0.2 if mode == "timeout" else 5,
+                                          timeout=1 if mode == "timeout" else 5,
                                           temporary_parent=directory, shared_home=shared_home)
         finally:
             signal.signal(signal.SIGTERM, old)

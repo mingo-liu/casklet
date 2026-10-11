@@ -23,6 +23,14 @@ retains its directory for explicit recovery. Artifacts include test/guest/Lima
 logs, excluding VM disks, SSH keys, and credential files. Setup and interruption
 recovery are documented, with bilingual README pointers.
 
+The first hosted Linux CI run reproduced an uncovered disposable-VM case: an
+absent installed restart manager made `systemctl stop` fail before tests. The
+shared wrapper now skips that stop only for an explicitly inspected `not-found`
+unit and enumerates actual loaded units before cleanup, avoiding empty wildcard
+stops. Inspection and real stop failures still fail and preserve recovery data.
+The guest development setup also installs GCC, required by Go race checks on a
+fresh image.
+
 Validation:
 
 - Go 1.27.2 macOS arm64/amd64 client and embedded Linux engine builds, formatting,
@@ -34,6 +42,10 @@ Validation:
 - Fake-runner regressions passed success, suite failure, launch/bootstrap failure,
   timeout, SIGTERM, teardown failure, daily-state preservation, and SSH-key
   exclusion. Ordinary macOS CI runs these checks without needing virtualization.
+  Eight additional fake-systemd cases exercise the full relocated Linux wrapper
+  for absent/present managers, populated/empty unit inventory, test failure,
+  inspection failure, and manager/test stop failures, including restoration of
+  daily data and enabled-service links or safe retention of original backups.
 - The real disposable macOS arm64 suite passed all 44 tests in 149.128 seconds,
   including VM stop/start, host ports, terminals, repair, images, and signals.
   The runner exited zero and deleted its VM, Lima home, and separate host state.
