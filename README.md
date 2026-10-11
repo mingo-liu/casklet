@@ -293,6 +293,10 @@ make fmt-check test vet test-race vuln
 make test-macos # Real commands through the runtime VM; creates it if needed.
 ```
 
-The internal Linux engine retains a privileged integration suite in a separate
-dedicated development VM. Generated binaries, templates, runtime state, and
+The internal Linux engine retains a privileged integration suite in the shared
+`casklet-runtime` VM, with daily data preserved during exclusive testing.
+Maintainers can enable scheduled, release, and manual macOS end-to-end CI on a
+dedicated Mac runner; each run removes its disposable VM. See the
+[runner setup](guides/development.md#dedicated-macos-end-to-end-ci).
+Generated binaries, templates, runtime state, and
 local `docs/` notes remain untracked. See [LICENSE](LICENSE).

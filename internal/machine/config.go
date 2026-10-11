@@ -48,6 +48,12 @@ type Instance struct {
 func defaultOptions() Options { return Options{CPUs: 4, Memory: 4, Disk: 20} }
 
 func stateDirectory() (string, error) {
+	if directory := os.Getenv("CASKLET_MACHINE_STATE_DIR"); directory != "" {
+		if !filepath.IsAbs(directory) {
+			return "", errors.New("CASKLET_MACHINE_STATE_DIR must be an absolute path")
+		}
+		return filepath.Clean(directory), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

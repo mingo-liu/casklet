@@ -52,8 +52,60 @@ Validation:
   container/image/volume data survived. CPU/memory were restored for later tests.
   The disposable VM was stopped and deleted afterward. Daily VM resources and
   storage were not changed.
-- The full macOS suite, Intel Mac execution, and privileged Linux integration
-  were not run for this host-only resource editor change.
+- Hosted CI passed all ordinary checks and full privileged Linux integration on
+  amd64 and arm64. The full macOS suite and Intel Mac execution were not run
+  locally for this host-only resource editor change.
+
+## 2026-10-11: Disposable macOS end-to-end CI
+
+Added an opt-in weekly, release, and manual workflow for a dedicated Mac runner.
+Pull requests and ordinary pushes never select the persistent runner. A hosted
+gate requires the immutable source revision to be merged into `main`; manual
+dispatch is restricted to `main`. The runner requires a configured `macos-e2e`
+environment, queues concurrent runs, and checks out without persistent credentials.
+
+The reusable runner gives each full `make test-macos` invocation a fresh short
+`LIMA_HOME` and absolute `CASKLET_MACHINE_STATE_DIR`, preserving the default
+host state and daily VM. It enables opt-in resize growth only in this disposable
+VM. An outer deadline and catchable signals terminate the command group; bounded
+diagnostics run before forced VM stop/deletion. Cleanup failure fails the run and
+retains its directory for explicit recovery. Artifacts include test/guest/Lima
+logs, excluding VM disks, SSH keys, and credential files. Setup and interruption
+recovery are documented, with bilingual README pointers.
+
+The first hosted Linux CI run reproduced an uncovered disposable-VM case: an
+absent installed restart manager made `systemctl stop` fail before tests. The
+shared wrapper now skips that stop only for an explicitly inspected `not-found`
+unit and enumerates actual loaded units before cleanup, avoiding empty wildcard
+stops. Inspection and real stop failures still fail and preserve recovery data.
+The guest development setup also installs GCC, required by Go race checks on a
+fresh image.
+
+Validation:
+
+- Go 1.27.2 macOS arm64/amd64 client and embedded Linux engine builds, formatting,
+  unit tests, vet, and machine package race checks passed. Actionlint passed for
+  both workflows and the custom runner label. The minimum Go version and verified
+  development archive pins were updated because Go 1.27.1 exposed reachable
+  standard-library vulnerabilities in the existing CI scan. The final four-target
+  `make vuln` scan found no reachable vulnerabilities with Go 1.27.2.
+- Fake-runner regressions passed success, suite failure, launch/bootstrap failure,
+  timeout, SIGTERM, teardown failure, daily-state preservation, and SSH-key
+  exclusion. Ordinary macOS CI runs these checks without needing virtualization.
+  Eight additional fake-systemd cases exercise the full relocated Linux wrapper
+  for absent/present managers, populated/empty unit inventory, test failure,
+  inspection failure, and manager/test stop failures, including restoration of
+  daily data and enabled-service links or safe retention of original backups.
+- The real disposable macOS arm64 suite passed all 44 tests in 149.128 seconds,
+  including VM stop/start, host ports, terminals, repair, images, and signals.
+  The runner exited zero and deleted its VM, Lima home, and separate host state.
+  An initial cold run failed before the suite because engine staging was outside
+  the writable share; its VM was also deleted and its logs preserved. Moving
+  isolated staging inside the shared home fixed that gap without touching daily
+  state. The full VM run used Go 1.27.1; final builds and static/unit checks used
+  Go 1.27.2 after the security baseline update.
+- GitHub workflow execution requires the dedicated runner and environment to be
+  configured; no hosted end-to-end job or Intel Mac execution was claimed.
 
 ## 2026-10-10: One Lima VM for everyday use, development, and tests
 
