@@ -6,8 +6,8 @@ fail() { printf 'prepare-development: %s\n' "$*" >&2; exit 1; }
 [ -f /usr/local/lib/casklet/provisioned-v1 ] || fail 'start the VM with casklet machine start first'
 sudo -n true || fail 'passwordless sudo is required'
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl make
-version=1.27.1
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gcc make
+version=1.27.2
 if command -v go >/dev/null 2>&1; then
     go version
     exit 0
@@ -15,11 +15,11 @@ fi
 case $(uname -m) in
     aarch64)
         arch=arm64
-        checksum=3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
+        checksum=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
         ;;
     x86_64)
         arch=amd64
-        checksum=63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+        checksum=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
         ;;
     *) fail 'unsupported Linux architecture' ;;
 esac
