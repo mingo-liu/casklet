@@ -965,6 +965,7 @@ volume references inside each service use the declared logical names.
 ```sh
 casklet project up --config project.json --timeout 30s
 casklet project ps --json demo
+casklet stats --watch --filter label=io.casklet.project.name=demo
 casklet exec cp-demo-worker -- redis-cli -h redis GET example
 casklet project down demo
 # Explicitly delete owned data volumes too:
@@ -1023,3 +1024,28 @@ and a cancelable project lock live under the local casklet configuration directo
 `CASKLET_MACHINE_STATE_DIR` relocates this state together with isolated machine
 state. Keep ownership files with the machine they describe; without receipts,
 containers can still be discovered by their labels but networks/volumes are preserved.
+
+## Multi-container resource monitoring
+
+`stats` accepts multiple container references, `--all`, or repeatable `--filter`
+selectors using the same AND semantics as `ps`. Operands cannot be mixed with
+selectors. Selectors include completed retained containers, whose metrics are
+unavailable. Explicit references are resolved before sampling; duplicate IDs are
+sampled once. Multiple containers share one sampling wait rather than serial waits.
+
+```sh
+casklet stats --interval 250ms worker database
+casklet stats --watch --filter label=project=demo
+casklet stats --watch --json --interval 1s --all
+```
+
+The default is one sample. `--watch` streams successive tables, or newline-delimited
+JSON, over one guest session. One explicit operand keeps the existing JSON object;
+multiple operands/selectors emit arrays, including `[]` for an empty selection.
+No ANSI cursor controls are emitted, so redirected output stays readable.
+Selection pins full IDs once; later containers and reused names are excluded.
+A removed selected ID stays as an unavailable row. Each frame acquires fresh
+execution metrics after restart; a generation change during sampling reports
+unavailable metrics rather than combining different executions. CPU 100% means one
+fully used core. Missing metrics are N/A/JSON null rather than zero. Empty selections
+exit after one frame. Interrupting monitoring leaves workloads running.

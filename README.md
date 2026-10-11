@@ -182,6 +182,12 @@ casklet stop worker
 casklet rm worker
 ```
 
+Monitor several containers or a labeled project with `casklet stats --watch worker database`
+or `casklet stats --watch --filter label=project=demo`. Add `--json` for one JSON frame
+per line; selection pins existing IDs and interruption leaves workloads running.
+See [resource monitoring](guides/usage.md#multi-container-resource-monitoring).
+
+
 `ps` and `stats` tables show the first 12 characters of container IDs. JSON output
 and `inspect` retain full IDs. Management commands accept exact names, full IDs,
 or unique hexadecimal ID prefixes of any length. Exact names take precedence;

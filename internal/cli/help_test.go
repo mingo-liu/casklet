@@ -89,7 +89,7 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 			}
 		}
 		stats, err := scopedUsage("stats", macOS)
-		if err != nil || !strings.Contains(stats, "12 hexadecimal") || !strings.Contains(stats, "--json retains the full ID") {
+		if err != nil || !strings.Contains(stats, "12 hexadecimal") || !strings.Contains(stats, "--json retains the full ID") || !strings.Contains(stats, "--watch") || !strings.Contains(stats, "--filter") {
 			t.Fatalf("stats help lacks ID display guidance: %q %v", stats, err)
 		}
 		images, err := scopedUsage("image ls", macOS)

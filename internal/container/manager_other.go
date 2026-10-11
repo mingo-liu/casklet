@@ -45,3 +45,7 @@ func RestartManager() int                              { return 125 }
 func EnsureRestartManager(context.Context, bool) error { return errUnsupportedStore }
 
 func WaitHealthy(context.Context, string, time.Duration) error { return errUnsupportedStore }
+
+func StatsMany(context.Context, []string, time.Duration) ([]Statistics, error) {
+	return nil, errUnsupportedStore
+}

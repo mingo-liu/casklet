@@ -33,6 +33,11 @@ func TestProjectDeploymentThroughLinuxEngine(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &records); err != nil || len(records) != 2 {
 		t.Fatalf("deployment %v %s", err, output)
 	}
+	var metrics []container.Statistics
+	output = backgroundSuccess(t, "stats", "--json", "--interval", "100ms", "--filter", "label="+project.LabelName+"="+name)
+	if err := json.Unmarshal([]byte(output), &metrics); err != nil || len(metrics) != 2 || metrics[0].MemoryBytes == nil || metrics[1].CPUPercent == nil {
+		t.Fatalf("project metrics %v %s", err, output)
+	}
 	db := ""
 	for _, record := range records {
 		if record.Labels[project.LabelService] == "db" {

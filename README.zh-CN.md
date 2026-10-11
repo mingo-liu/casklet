@@ -158,6 +158,12 @@ casklet stop worker
 casklet rm worker
 ```
 
+使用 `casklet stats --watch worker database` 持续监控多个容器，或用
+`casklet stats --watch --filter label=project=demo` 选择项目。添加 `--json`
+可逐行输出 JSON 帧；选择固定现有 ID，中断监控不会停止容器。
+参见[资源监控](guides/usage.md#multi-container-resource-monitoring)。
+
+
 `ps` 和 `stats` 表格中的容器 ID 显示前 12 位，JSON 输出和 `inspect` 保留完整 ID。
 管理命令支持精确名称、完整 ID 或任意长度的唯一十六进制 ID 前缀。精确名称优先；
 前缀匹配多个容器时会报错，需要使用更长的 ID 或精确名称。

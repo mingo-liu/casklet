@@ -385,3 +385,13 @@ lock before lease/reference checks. This closes the inspect/remove name-reuse ra
 Rollback uses the current startup token and exact IDs, independent of caller
 cancellation, with a two-minute bound. Existing resumed services are preserved.
 Unverified creations after abrupt transport/process loss remain for inspection.
+
+## Resource monitoring
+
+The CLI resolves and deduplicates a statistics selection to immutable IDs once.
+Container multi-sampling pins each execution cgroup, reads starting counters,
+waits once for the entire set, reads final counters, and rechecks ID/generation.
+Removed or changed executions expose unavailable values. Each watch frame obtains
+fresh readers, so restarts never share counters. Readers close before output and
+between frames. The CLI throttles unavailable frames, owns cancellation/output,
+and streams table frames or newline-delimited JSON through the existing guest session.

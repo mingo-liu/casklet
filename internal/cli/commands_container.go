@@ -44,11 +44,7 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 			err = encoder.Encode(inspection)
 		}
 	case "stats":
-		var stats container.Statistics
-		stats, err = container.Stats(ctx, r.Reference, r.Interval)
-		if err == nil {
-			err = writeStats(stdout, stats, r.JSON)
-		}
+		err = executeStats(ctx, r, stdout, containerStatsOperations())
 	case "wait":
 		if r.Healthy {
 			err = container.WaitHealthy(ctx, r.Reference, r.WaitTimeout)

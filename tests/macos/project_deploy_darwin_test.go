@@ -49,6 +49,10 @@ func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	if err := json.Unmarshal([]byte(success(t, "project", "up", "--config", file, "--json")), &first); err != nil || len(first) != 2 {
 		t.Fatalf("up %v %v", first, err)
 	}
+	var metrics []container.Statistics
+	if err := json.Unmarshal([]byte(success(t, "stats", "--json", "--interval", "100ms", "--filter", "label="+project.LabelName+"="+name)), &metrics); err != nil || len(metrics) != 2 || metrics[0].MemoryBytes == nil || metrics[1].CPUPercent == nil {
+		t.Fatalf("project resource monitoring %v %v", metrics, err)
+	}
 	var db string
 	for _, record := range first {
 		if record.Labels[project.LabelService] == "db" {

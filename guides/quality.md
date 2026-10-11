@@ -46,11 +46,41 @@ Validation:
 
 - macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
   and project/CLI race checks passed.
-- The initial complete disposable macOS arm64 suite passed in 181.111 seconds;
-  final cancellation/configuration checks are being validated in a second run.
+- The complete disposable macOS arm64 suite passed in 180.811 seconds after the
+  final cancellation/configuration checks, including status during a pending
+  dependency, cancellation cleanup, readiness/DNS, reuse and retained data. The
+  runner deleted its isolated VM and state without changing the daily machine.
 - Hosted PR CI validates native Linux unit/race/build checks, vulnerability scans
   and privileged integration before merge. Intel Mac execution was not performed
   locally.
+
+## 2026-10-11: Multi-container statistics and continuous monitoring
+
+Added multiple operands, retained-container all/filter selection, and `stats --watch`.
+Selections resolve and deduplicate immutable IDs once. The engine pins each cgroup,
+reads first counters, waits once across the set, reads final counters, and fences
+execution generations. Removed rows stay unavailable; later frames reacquire new
+execution readers without combining counters. CPU/memory null semantics and the
+single-operand JSON object remain compatible. Selectors/multiple operands emit
+arrays; watch uses newline-delimited JSON or successive plain tables over one SSH
+session. Empty selections exit, and unavailable frames remain interval-limited.
+
+Regressions cover parser conflicts, selector filtering/sorting, duplicate IDs,
+fixed identities, JSON frames, empty selection, cancellation, and idle throttling.
+Linux integration adds two-container real-counter/common-window verification.
+The real Mac test covers multiple metrics, streaming frames and interrupt status
+without terminating workloads. Help, architecture and bilingual documentation agree.
+
+Validation:
+
+- macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
+  and CLI/container/cgroup race tests passed.
+- The complete disposable macOS arm64 suite passed in 164.937 seconds, including
+  multi-container watch, VM lifecycle, storage, health and terminal regressions.
+  The runner restored no daily state because its Lima/host state were isolated.
+- Hosted PR CI passed full unit/vet/race/build checks on macOS and native Linux
+  amd64/arm64, the four-target vulnerability scan, and both complete privileged
+  Linux integration suites. Intel Mac execution was not performed locally.
 
 ## 2026-10-11: Private OCI registry authentication
 
