@@ -30,6 +30,10 @@ func TestScopedHostHelpDoesNotOpenLimaOrLocalState(t *testing.T) {
 			t.Errorf("help after options %q: %q %v", args, output.String(), err)
 		}
 	}
+	var resize bytes.Buffer
+	if err := HostCommand(context.Background(), []string{"machine", "resize", "--memory=8", "--help"}, &resize, io.Discard); err != nil || resize.String() != hostHelp["machine resize"] {
+		t.Fatalf("resize help after options: %s %v", &resize, err)
+	}
 }
 
 func TestHostHelpRejectsUnknownAndExtraTopicsWithoutLima(t *testing.T) {
@@ -38,6 +42,7 @@ func TestHostHelpRejectsUnknownAndExtraTopicsWithoutLima(t *testing.T) {
 		{"machine", "unknown", "--help"}, {"machine", "--help", "extra"},
 		{"machine", "share", "--help", "extra"}, {"rootfs", "--help", "extra"},
 		{"machine", "init", "--cpus", "2", "--help", "extra"},
+		{"machine", "resize", "--cpus", "2", "--help", "extra"},
 	} {
 		var output bytes.Buffer
 		err := HostCommand(context.Background(), args, &output, io.Discard)
@@ -54,6 +59,7 @@ func TestHostHelpDoesNotInterpretOptionOrDirectoryValues(t *testing.T) {
 	for _, args := range [][]string{
 		{"machine", "init", "--mount", "--help"},
 		{"machine", "init", "--cpus", "-h"},
+		{"machine", "resize", "--cpus", "-h"},
 		{"rootfs", "./--help"},
 	} {
 		if _, err := parseHostCommand(args); errors.Is(err, flag.ErrHelp) {

@@ -59,8 +59,10 @@ Linux remains an internal execution and test environment. The ordinary macOS
 unit suite excludes Linux-specific tests. Runtime changes must also pass the
 privileged suite in the same `casklet-runtime` VM.
 
-Add the guest build tools once (including GCC for Go race checks), then transfer
-a fresh source snapshot onto the
+Linux race tests require a C compiler; `scripts/prepare-development.sh` installs
+GCC alongside Go and Make.
+
+Add the guest build tools once, then transfer a fresh source snapshot onto the
 VM's Linux disk. Build there rather than on the shared Mac filesystem so Linux
 ownership, mounts, and extended attributes work correctly. Guest builds write
 only to the snapshot and do not replace `/usr/local/bin/casklet`:
@@ -262,8 +264,10 @@ suite does not. Pull staging and caches live on the VM disk.
   VM creation, or `machine stop`, `machine share DIRECTORY`, and `machine start`
   for an existing VM. Stopping terminates workloads and preserves their files.
 - Initialization flags apply only to a new machine. To change an existing VM,
-  stop it, use Lima's configuration tools, then start it. Preserve the product's
-  dedicated loopback forwarding rules and writable home share.
+  use `machine stop`, `machine resize --cpus 6 --memory 8 --disk 40`, and
+  `machine start`. Omitted resources remain unchanged; disk shrinking is rejected.
+  Resize preserves dedicated loopback forwarding rules, shares, and existing data.
+  `machine status` reports configured resources; changes apply on the next start.
 - Guest diagnostics are available through `limactl shell casklet-runtime`.
   VM image download and Ubuntu package installation require internet access.
 - Engine installation enables `casklet-restarts.service` for automatic policies.
@@ -272,6 +276,16 @@ suite does not. Pull staging and caches live on the VM disk.
   upgrades replace this manager independently of active workload supervisors.
 - Report integration checks that could not run. Unit tests and cross-compilation
   alone do not establish terminal, networking, or resource-limit behavior.
+
+### Machine resize regression checks
+
+`TestMachineResizePreservesDataAndGrowsFilesystem` verifies resource changes and
+retained container, image, and volume data across disk growth. It is skipped in
+ordinary `make test-macos` runs because disk growth cannot be undone. Enable it
+only in a disposable, isolated VM environment with `CASKLET_MACOS_RESIZE_GROW=1`
+and an absolute non-default `LIMA_HOME`. The test rejects the default Lima home,
+requires no active containers, and adds 1 GiB to the isolated machine's disk.
+The runner must destroy that disposable VM after testing.
 
 ### Named network regression checks
 

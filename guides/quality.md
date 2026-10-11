@@ -6,6 +6,56 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-11: Resize existing stopped product machines
+
+Added `machine resize --cpus/--memory/--disk` with focused help and matching
+`help machine resize`. Omitted resources stay configured; CPU/memory may increase
+or decrease, while disk shrinking is rejected before edits. A stable machine lock
+serializes resize with creation, startup, stop, and shares. Missing, running,
+transitional, plain, incompatible, and unavailable-resource instances fail without
+implicit startup or shutdown. Current values are accepted as a no-op while stopped.
+
+Edits use Lima's resource flags against the existing instance, preserving the VM
+disk and unrelated shares, forwarding, and provisioning. `machine status` displays
+configured resources. Lima applies resource changes and disk growth at the next
+start; Ubuntu cloud-init grows the root partition/filesystem. Checked this behavior
+against the installed Lima 2.2.1 and the supported 2.0.0 source, including
+[the disk startup path](https://github.com/lima-vm/lima/blob/v2.0.0/pkg/instance/start.go)
+and [the root growpart configuration](https://github.com/lima-vm/lima/blob/v2.0.0/pkg/cidata/cidata.TEMPLATE.d/user-data).
+
+The minimum Go version and guest development archive pins now use Go 1.27.2,
+which fixes standard-library vulnerabilities reported by the existing four-target
+`make vuln` gate with Go 1.27.1. Archive checksums match the official Go downloads. Guest development setup
+installs GCC as required by Linux race tests. Hosted Linux integration initially
+failed before tests because a fresh VM has no restart manager unit. The shared
+runner now skips that stop only for an inspected `not-found` unit and cleans up
+only enumerated loaded test units; actual inspection/stop failures stay visible.
+Eight fake-runner scenarios verify absent/present units, failure propagation, and
+daily-store/manager preservation, and run in the ordinary CI check jobs.
+
+Regressions cover parser bounds, omitted values, reductions, fractional disk shrink,
+state/compatibility refusal, edit errors, lock cancellation, idempotence, focused
+help parity, and configured status. An opt-in macOS test uses a disposable
+non-default Lima home to verify actual CPU/memory application, root filesystem
+growth, unrelated configuration preservation, and retained container/image/volume
+data after restart. Ordinary daily-use tests skip irreversible disk growth.
+
+Validation:
+
+- `make fmt-check test vet build` passed on macOS arm64 with Go 1.27.2.
+  Darwin amd64 client/embedded Linux amd64 builds also passed, and the native
+  arm64 binary was restored. Machine/CLI race checks passed.
+- `make vuln` passed for Darwin/Linux on arm64/amd64 with Go 1.27.2.
+- The isolated macOS arm64 resize regression passed against Lima 2.2.1: CPU and
+  memory reductions applied, the configured disk grew from 20 to 21 GiB and
+  the root filesystem expanded, unrelated configuration stayed intact, and retained
+  container/image/volume data survived. CPU/memory were restored for later tests.
+  The disposable VM was stopped and deleted afterward. Daily VM resources and
+  storage were not changed.
+- Hosted CI passed all ordinary checks and full privileged Linux integration on
+  amd64 and arm64. The full macOS suite and Intel Mac execution were not run
+  locally for this host-only resource editor change.
+
 ## 2026-10-11: Disposable macOS end-to-end CI
 
 Added an opt-in weekly, release, and manual workflow for a dedicated Mac runner.

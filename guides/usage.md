@@ -76,6 +76,26 @@ and preserves their data. After starting it again, use `start` or `restart` to
 run retained containers. Engine updates occur automatically when a different
 client build is used, without replacing container or image storage.
 
+Change an existing stopped VM's resources without recreating it:
+
+```sh
+casklet machine stop
+casklet machine resize --cpus 6 --memory 8 --disk 40
+casklet machine status
+casklet machine start
+```
+
+`resize` requires at least one option; omitted resources retain their configuration.
+CPU count accepts 1–64, memory 1–128 GiB, and disk 4–1024 GiB, matching `init`.
+CPU and memory can increase or decrease; disk shrinking is rejected. A running,
+missing, or incompatible VM is rejected without an implicit stop/start. Repeating
+current values while stopped makes no change. Lima edits only resource settings,
+preserving shares, forwarding, provisioning, and existing VM data. The next
+`machine start` applies CPU/memory and grows the disk and Ubuntu root filesystem;
+`status` shows configured capacity, including pending changes before startup.
+Stopping terminates workloads and preserves files; restart policies resume on boot
+as described above. Disk growth does not compact the Mac's sparse disk file.
+
 CPU, memory, and process limits apply inside the VM and are additionally bounded
 by VM resources. User namespace mappings and rootless identities refer to Linux
 guest accounts. The Mac client does not escalate host privileges. The engine

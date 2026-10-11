@@ -613,7 +613,7 @@ Examples:
 
 func hostHelpTopic(topic string) bool {
 	switch topic {
-	case "machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "rootfs":
+	case "machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "machine resize", "rootfs":
 		return true
 	}
 	return false
