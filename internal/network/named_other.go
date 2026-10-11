@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 )
 
 var errNamedUnsupported = errors.New("named networks require the internal Linux engine")
@@ -18,3 +19,10 @@ func (*Store) List(context.Context) ([]Record, error)               { return nil
 func (*Store) Inspect(context.Context, string) (Record, error)      { return Record{}, errNamedUnsupported }
 func (*Store) Acquire(context.Context, string) (*os.File, error)    { return nil, errNamedUnsupported }
 func (*Store) Remove(context.Context, string, ReferenceCheck) error { return errNamedUnsupported }
+
+func (*Store) CreateExclusive(context.Context, string) (Record, error) {
+	return Record{}, errNamedUnsupported
+}
+func (*Store) RemoveIfCreated(context.Context, string, time.Time, ReferenceCheck) error {
+	return errNamedUnsupported
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 )
 
 type Store struct{}
@@ -23,4 +24,11 @@ func (*Store) Remove(context.Context, string, ReferenceCheck) error { return err
 func (*Store) Export(context.Context, string, io.Writer) error { return errUnsupported }
 func (*Store) Restore(context.Context, string, io.Reader) (Record, error) {
 	return Record{}, errUnsupported
+}
+
+func (*Store) CreateExclusive(context.Context, string) (Record, error) {
+	return Record{}, errUnsupported
+}
+func (*Store) RemoveIfCreated(context.Context, string, time.Time, ReferenceCheck) error {
+	return errUnsupported
 }

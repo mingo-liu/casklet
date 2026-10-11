@@ -927,3 +927,99 @@ Plain `wait ID|NAME` still waits for process exit and prints/returns its exit co
 Temporary files under `/tmp` are reset on each execution, so readiness probes must
 account for that lifecycle. See the [Docker HEALTHCHECK reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
 for the source image configuration semantics.
+
+## Project deployment
+
+A local project JSON file groups detached services, named networks, data volumes
+and startup dependencies. `project up` validates the entire file and expands local
+paths/env-files before making VM changes. Networks default to `["default"]`; declare
+an empty array and use `network: "none"` for loopback-only services. Network and
+volume references inside each service use the declared logical names.
+
+```json
+{
+  "name": "demo",
+  "networks": ["default"],
+  "volumes": ["redis-data"],
+  "services": {
+    "redis": {
+      "run": {
+        "image": "redis:8",
+        "mount": ["type=volume,source=redis-data,target=/data"],
+        "health-cmd": "redis-cli ping | grep -q PONG",
+        "health-interval": "1s",
+        "restart": "unless-stopped"
+      }
+    },
+    "worker": {
+      "depends-on": {"redis": "healthy"},
+      "run": {
+        "image": "redis:8",
+        "command": ["/bin/sh", "-c", "redis-cli -h redis SET example ready; exec sleep 300"]
+      }
+    }
+  }
+}
+```
+
+```sh
+casklet project up --config project.json --timeout 30s
+casklet project ps --json demo
+casklet exec cp-demo-worker -- redis-cli -h redis GET example
+casklet project down demo
+# Explicitly delete owned data volumes too:
+casklet project down --volumes demo
+```
+
+Project, service and logical resource names use lowercase DNS labels; generated
+`cp-PROJECT-LOGICAL` names must fit 63 characters. Each service gets its logical
+name as an alias on its selected network. `run` uses the existing run-config field
+schema, including image credentials, limits, binds, env-files, ports, health checks
+and restart policies. Name, detach, interactive, tty, rootless, userns and UID/GID
+mapping fields are managed by the project and cannot be supplied. Services are
+privileged detached executions; macOS still runs the client as the regular user.
+Source, bind and env-file paths resolve relative to the project file. Environment
+file contents are expanded once before deployment. Reserved `io.casklet.project.*`
+labels track project/service ownership, effective-config hashes and startup attempts;
+at most 60 additional user labels are supported. No environment values are saved
+in the local project ownership file.
+
+`depends-on` maps service names to `started` or `healthy`. Dependencies form a
+validated acyclic graph and start before their consumers, with deterministic ties.
+`started` requires a running dependency; `healthy` uses its saved healthcheck and
+pins the observed execution through the existing readiness wait. Missing checks,
+stops or execution changes fail the wait. `--timeout` applies to each health wait
+(default 30s, greater than zero and at most 24h). Dependency conditions apply during
+startup; later health changes do not stop downstream services. There are at most
+64 services and 16 declared networks/volumes each. Overlapping host ports are
+rejected before startup; live port availability uses the existing Mac preflight.
+
+Repeated `up` keeps matching running containers and starts matching stopped ones.
+Identity includes effective run defaults, expanded env values, source paths and
+entrypoint selection. Environment/config changes fail before deployment mutations;
+use `down`, edit the configuration and run `up` again. Image tags retain their cached
+version; pin a digest for reproducibility. A retained service keeps its immutable
+image across reuse. Services removed from the file require `down` before deploying
+again. Existing resources are reused only when their creation receipts match local
+project ownership; manually created same-name resources are never adopted.
+
+On an ordinary startup failure or cancellation, a bounded cleanup stops/removes
+only containers marked with this invocation's startup token and removes only its
+new verified resources. Previously existing services and volumes stay; an existing
+stopped service resumed by this invocation remains running. Image caches remain.
+Cleanup errors preserve remaining resources and receipts and are reported for retry.
+An abrupt process kill can leave a partially deployed project; use `project ps` and
+`project down` to inspect/clean it. A resource created before its receipt reaches
+local state is preserved as unverified and may require explicit manual cleanup.
+
+`down` snapshots full container IDs, stops/removes the managed group and removes
+owned networks. Data volumes survive unless `--volumes` is explicit. Resource
+creation identities are rechecked under the guest deletion lock, so manually
+replaced resources are preserved. Existing lease/reference/mount guards still
+apply. Partial failures return 125 and leave successful removals complete; retry
+with the same name. `down` needs no original config or env-files. Ownership receipts
+and a cancelable project lock live under the local casklet configuration directory's
+`projects` subdirectory (on macOS, `~/Library/Application Support/casklet/projects`).
+`CASKLET_MACHINE_STATE_DIR` relocates this state together with isolated machine
+state. Keep ownership files with the machine they describe; without receipts,
+containers can still be discovered by their labels but networks/volumes are preserved.

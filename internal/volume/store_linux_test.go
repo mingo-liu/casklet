@@ -104,3 +104,31 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 		t.Fatalf("uncancelable lock: %v", err)
 	}
 }
+
+func TestVolumeProjectReceiptsFenceCreationAndRemoval(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	record, err := store.CreateExclusive(ctx, "data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateExclusive(ctx, "data"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("adopted existing volume: %v", err)
+	}
+	check := func(context.Context, string) (bool, error) {
+		t.Fatal("identity comparison must precede reference scanning")
+		return false, nil
+	}
+	if err := store.RemoveIfCreated(ctx, "data", record.CreatedAt.Add(time.Second), check); err == nil {
+		t.Fatal("removed replacement identity")
+	}
+	if _, err := store.Inspect(ctx, "data"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveIfCreated(ctx, "data", record.CreatedAt, func(context.Context, string) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveIfCreated(ctx, "data", record.CreatedAt, check); err != nil {
+		t.Fatalf("retry missing resource: %v", err)
+	}
+}

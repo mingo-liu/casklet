@@ -144,6 +144,26 @@ IDs/prefixes rather than registry names such as `redis:8`.
 casklet image rm IMAGE_ID
 ```
 
+## Deploy a project
+
+Use `project up --config project.json` to deploy multiple services with declared
+networks, data volumes and `started`/`healthy` startup dependencies. Matching services
+are reused; changed configuration fails before deployment mutations. Resources use
+`cp-PROJECT-LOGICAL` names and scoped service aliases. See the
+[project configuration example](guides/usage.md#project-deployment).
+
+```sh
+casklet project up --config project.json
+casklet project ps demo
+casklet project down demo
+# Also delete project-owned data volumes:
+casklet project down --volumes demo
+```
+
+Failures clean only this invocation's newly created verified resources. Existing
+services and volumes remain; `down` preserves data volumes by default. Local
+ownership receipts prevent adopting or deleting unrelated same-name resources.
+
 ## Common operations
 
 ```sh

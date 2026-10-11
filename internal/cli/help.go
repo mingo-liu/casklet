@@ -10,6 +10,7 @@ const commandOverview = `Usage: casklet COMMAND [OPTIONS]
 Commands:
   run       Run a command in a new container
   exec      Run a command in a running container
+  project   Deploy and manage dependent services
   ps        List containers
   inspect   Show a container's configuration and lifecycle as JSON
   stats     Sample a container's memory and CPU usage
@@ -382,6 +383,74 @@ Examples:
   casklet exec worker -- /bin/echo hello
   casklet exec -it worker -- /bin/sh
 `,
+	"project": `Usage: casklet project COMMAND
+
+Commands:
+  up    Deploy services from a local JSON project file
+  down  Stop and remove managed containers and owned networks
+  ps    Show all retained containers belonging to a project
+
+Notes:
+  Project names and logical service/resource names use lowercase DNS labels.
+  Resources use cp-PROJECT-LOGICAL names; services get scoped DNS aliases.
+  Run project COMMAND --help for options. Data volumes are preserved by default.
+
+Examples:
+  casklet project up --config project.json
+  casklet project ps demo
+  casklet project down demo
+`,
+	"project up": `Usage: casklet project up --config FILE [--timeout DURATION] [--json]
+
+Options:
+  --config   Local strict JSON project file, at most 1 MiB
+  --timeout  Each dependency health wait, greater than 0s up to 24h (default: 30s)
+  --json     Print managed container records as a JSON array
+
+Notes:
+  Define name, services, optional networks and volumes in the file.
+  Each service has a run object and optional depends-on conditions: started/healthy.
+  Default network is default; volume/network references use declared logical names.
+  Config-relative paths and env-files are read locally before VM operations.
+  Reuses matching running services and starts matching stopped services.
+  Changed configs or unowned resource names fail before deployment changes.
+  On failure, only this invocation's new verified containers/resources are removed.
+  Existing services resumed by up remain running. Image caches are preserved.
+
+Examples:
+  casklet project up --config project.json
+  casklet project up --config project.json --timeout 1m --json
+`,
+	"project down": `Usage: casklet project down [--volumes] NAME
+
+Options:
+  --volumes  Also delete project-owned data volumes after removing their users
+
+Notes:
+  Stops/removes managed containers by pinned IDs and removes owned networks.
+  Data volumes survive by default. Unowned or replaced resources are preserved.
+  All failures are reported; completed removals remain completed for safe retries.
+  Ownership receipts live in the local casklet machine state directory.
+  Down needs the project name only; original config/env-files are not reopened.
+
+Examples:
+  casklet project down demo
+  casklet project down --volumes demo
+`,
+	"project ps": `Usage: casklet project ps [--json] NAME
+
+Options:
+  --json  Print managed container records with full IDs as a JSON array
+
+Notes:
+  Includes running and completed project containers, with health status.
+  Reads reserved project labels; unrelated user project labels are excluded.
+
+Examples:
+  casklet project ps demo
+  casklet project ps --json demo
+`,
+
 	"ps": `Usage: casklet ps [-a|--all] [--json] [--filter FILTER ...]
 
 Options:

@@ -151,6 +151,15 @@ func (s *Store) list() ([]Record, error) {
 	return out, nil
 }
 func (s *Store) Create(ctx context.Context, name string) (Record, error) {
+	return s.create(ctx, name, false)
+}
+
+// CreateExclusive refuses to adopt an existing resource during project creation.
+func (s *Store) CreateExclusive(ctx context.Context, name string) (Record, error) {
+	return s.create(ctx, name, true)
+}
+
+func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record, error) {
 	if err := config.ValidateNetworkName(name); err != nil {
 		return Record{}, err
 	}
@@ -160,6 +169,9 @@ func (s *Store) Create(ctx context.Context, name string) (Record, error) {
 	}
 	defer l.Close()
 	if r, err := s.read(name); err == nil {
+		if exclusive {
+			return Record{}, os.ErrExist
+		}
 		return r, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Record{}, err
@@ -217,15 +229,34 @@ func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
 	return namedLock(ctx, filepath.Join(s.root, ".lease-"+name), unix.LOCK_SH)
 }
 func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
+	return s.remove(ctx, name, time.Time{}, referenced)
+}
+
+// RemoveIfCreated fences a project receipt under the same lock as deletion.
+func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
+	if created.IsZero() {
+		return errors.New("resource removal requires a creation identity")
+	}
+	return s.remove(ctx, name, created, referenced)
+}
+
+func (s *Store) remove(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
 	l, err := s.lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
 	r, err := s.read(name)
+	if !created.IsZero() && errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
+	if !created.IsZero() && !r.CreatedAt.Equal(created) {
+		return errors.New("network creation identity changed; preserving replacement")
+	}
+
 	lease, err := namedLock(ctx, filepath.Join(s.root, ".lease-"+name), unix.LOCK_SH)
 	if err != nil {
 		return err

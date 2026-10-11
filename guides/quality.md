@@ -6,6 +6,52 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-11: Declarative project deployment and bounded rollback
+
+Added local strict JSON `project up --config`, `project ps`, and `project down`.
+A bounded acyclic dependency graph supports started/healthy conditions, scoped
+networks/volumes and service DNS aliases. The host expands paths and env-files
+before VM changes and fingerprints effective explicit run values. Project-owned
+names, detach mode and reserved labels cannot be overridden. Overlapping ports,
+alias conflicts, disabled required health checks and configuration drift fail
+before deployment mutations. Matching running services are reused and stopped
+services resume through the existing lifecycle path.
+
+The orchestrator calls existing CLI paths, preserving Keychain authentication,
+Mac path/share translation, host-port checks, health waits and generation fencing.
+A cancelable local per-project lock serializes mutations; read-only status remains
+available during health waiting. Synced private ownership receipts contain resource
+names/timestamps only, not run arguments or environment values. Private guest
+resource operations refuse adopting existing names and compare creation receipts
+under the deletion metadata lock before reference/lease/mount checks.
+
+Startup failures/cancellation use a bounded independent cleanup context and
+transaction labels to remove only this invocation's new containers and verified
+resources. Existing resources and resumed services stay. Down pins container IDs,
+aggregates partial failures, removes owned networks and preserves data volumes
+unless --volumes is explicit. Replaced/unverified resources are preserved.
+Abrupt transport/process loss and lost local receipts require explicit inspection
+rather than inferred resource ownership. Schema, examples, help parity, architecture,
+and bilingual quick starts describe these boundaries.
+
+Regressions cover duplicate/unknown/null fields, graph cycles, logical resource
+validation, local file expansion, stable/drifted fingerprints, explicit image env
+overrides, aliases/ports, ownership mismatches, exclusive resource creation,
+conditional deletion, repeated startup, existing-service preservation, rollback,
+cancellation, receipt persistence, unsafe artifacts, lock cancellation and partial
+cleanup retries. Privileged Linux adds real project deployment/data retention;
+Mac adds DNS/readiness/reuse/drift, volume retention and failure/cancel cleanup.
+
+Validation:
+
+- macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
+  and project/CLI race checks passed.
+- The initial complete disposable macOS arm64 suite passed in 181.111 seconds;
+  final cancellation/configuration checks are being validated in a second run.
+- Hosted PR CI validates native Linux unit/race/build checks, vulnerability scans
+  and privileged integration before merge. Intel Mac execution was not performed
+  locally.
+
 ## 2026-10-11: Private OCI registry authentication
 
 Added macOS `login --username USER --password-stdin [REGISTRY]` and idempotent
