@@ -14,7 +14,7 @@ security guarantee for untrusted code.
 
 ## Quick start
 
-Building from source requires Go 1.27.1+ and Make. Run these commands from the
+Building from source requires Go 1.27.2+ and Make. Run these commands from the
 repository directory:
 
 ```sh
@@ -203,6 +203,17 @@ you can choose resources and additional shared directories:
 
 ```sh
 casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
+```
+
+For an existing VM, stop it before changing resources. Omitted values stay unchanged;
+disk size can only grow. The next start applies the configuration and expands the
+existing disk while preserving containers, images, volumes, shares, and other settings.
+`machine status` reports configured resources.
+
+```sh
+casklet machine stop
+casklet machine resize --cpus 6 --memory 8 --disk 40
+casklet machine start
 ```
 
 Back up a stopped volume with `casklet volume export app-data > app-data.tar`,

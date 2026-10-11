@@ -15,7 +15,7 @@ func TestScopedHelpMatchesNamedHelp(t *testing.T) {
 		{"image", "cache"}, {"image", "cache", "ls"}, {"image", "cache", "prune"}, {"image", "cache", "limit"},
 		{"volume"}, {"volume", "export"}, {"volume", "restore"},
 		{"machine"}, {"machine", "init"}, {"machine", "start"}, {"machine", "stop"},
-		{"machine", "status"}, {"machine", "share"}, {"rootfs"},
+		{"machine", "status"}, {"machine", "share"}, {"machine", "resize"}, {"rootfs"},
 	} {
 		t.Run(strings.Join(topic, " "), func(t *testing.T) {
 			scoped := success(t, append(append([]string(nil), topic...), "--help")...)

@@ -4,7 +4,7 @@
 
 ## macOS client
 
-Install Go 1.27.1+, Make, and Lima 2.0+ on macOS 13.5+:
+Install Go 1.27.2+, Make, and Lima 2.0+ on macOS 13.5+:
 
 ```sh
 brew install lima
@@ -185,8 +185,10 @@ suite does not. Pull staging and caches live on the VM disk.
   VM creation, or `machine stop`, `machine share DIRECTORY`, and `machine start`
   for an existing VM. Stopping terminates workloads and preserves their files.
 - Initialization flags apply only to a new machine. To change an existing VM,
-  stop it, use Lima's configuration tools, then start it. Preserve the product's
-  dedicated loopback forwarding rules and writable home share.
+  use `machine stop`, `machine resize --cpus 6 --memory 8 --disk 40`, and
+  `machine start`. Omitted resources remain unchanged; disk shrinking is rejected.
+  Resize preserves dedicated loopback forwarding rules, shares, and existing data.
+  `machine status` reports configured resources; changes apply on the next start.
 - Guest diagnostics are available through `limactl shell casklet-runtime`.
   VM image download and Ubuntu package installation require internet access.
 - Engine installation enables `casklet-restarts.service` for automatic policies.
@@ -195,6 +197,16 @@ suite does not. Pull staging and caches live on the VM disk.
   upgrades replace this manager independently of active workload supervisors.
 - Report integration checks that could not run. Unit tests and cross-compilation
   alone do not establish terminal, networking, or resource-limit behavior.
+
+### Machine resize regression checks
+
+`TestMachineResizePreservesDataAndGrowsFilesystem` verifies resource changes and
+retained container, image, and volume data across disk growth. It is skipped in
+ordinary `make test-macos` runs because disk growth cannot be undone. Enable it
+only in a disposable, isolated VM environment with `CASKLET_MACOS_RESIZE_GROW=1`
+and an absolute non-default `LIMA_HOME`. The test rejects the default Lima home,
+requires no active containers, and adds 1 GiB to the isolated machine's disk.
+The runner must destroy that disposable VM after testing.
 
 ### Named network regression checks
 

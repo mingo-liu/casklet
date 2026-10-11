@@ -24,7 +24,7 @@ func TestCommandHelp(t *testing.T) {
 		{"rootfs", "--help"}, {"machine", "--help"},
 		{"machine", "init", "--cpus", "2", "--help"},
 		{"machine", "start", "--help"}, {"machine", "stop", "--help"},
-		{"machine", "status", "--help"},
+		{"machine", "status", "--help"}, {"machine", "resize", "--help"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out, diagnostic, code := command(t, args...)
@@ -44,7 +44,7 @@ func TestCommandArgumentErrors(t *testing.T) {
 		{"image", "rm", "invalid"}, {"rootfs"}, {"machine"},
 		{"machine", "init", "--cpus", "0"},
 		{"machine", "start", "unexpected"}, {"machine", "stop", "unexpected"},
-		{"machine", "status", "unexpected"},
+		{"machine", "status", "unexpected"}, {"machine", "resize"}, {"machine", "resize", "--disk", "3"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			out, diagnostic, code := command(t, args...)
