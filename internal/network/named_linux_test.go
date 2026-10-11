@@ -144,3 +144,27 @@ func TestAbandonedRunDoesNotRemainInDNS(t *testing.T) {
 		t.Fatalf("released lock visible: %t %v", live, err)
 	}
 }
+
+func TestNamedProjectReceiptRejectsAdoptionAndReplacement(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("network ownership requires root")
+	}
+	store := &Store{root: t.TempDir()}
+	record := Record{"demo", time.Now().UTC(), namedIdentity("demo"), "10.232.0.0/24", "10.232.0.1"}
+	if err := writeJSON(filepath.Join(store.root, "demo.json"), record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateExclusive(context.Background(), "demo"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("adopted existing network: %v", err)
+	}
+	check := func(context.Context, string) (bool, error) {
+		t.Fatal("identity comparison must precede reference scanning")
+		return false, nil
+	}
+	if err := store.RemoveIfCreated(context.Background(), "demo", record.CreatedAt.Add(time.Second), check); err == nil {
+		t.Fatal("removed replacement identity")
+	}
+	if _, err := store.Inspect(context.Background(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+}

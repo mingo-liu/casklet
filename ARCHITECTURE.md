@@ -99,6 +99,7 @@ while managed exec uses runtime resources and IPC.
 | --- | --- | --- |
 | `cmd/casklet` | Process entry and private re-exec modes | Parsing and lifecycle policy |
 | `cli` | Flags, privilege/delegation launch, signal contexts, presentation | Persistent state and Linux isolation |
+| `project` | Strict deployment graph, scoped resource names, effective-config identity, cancelable local project lock and resource receipts, bounded startup/rollback orchestration | Namespace setup, registry transport and guest lifecycle implementation |
 | `config` | Serializable execution values and validation | CLI output and resource allocation |
 | `container` | Records, generations, operation locks, systemd services, logs, health monitoring, inspection | Namespace setup and workload execution |
 | `runtime` | Startup handshake, PID 1, signals, exec sessions, run recovery and cleanup | User-facing command parsing and container records |
@@ -364,6 +365,26 @@ No persistent DNS daemon or new engine re-exec mode is required. Named bridge
 firewall drops restrict forwarding to other casklet networks without modifying
 unrelated host tables or policies. Published host ports retain the existing Lima
 address translation and forwarding path.
+
+## Project orchestration
+
+The CLI expands a project file on the invoking host before VM operations. `project`
+validates the bounded dependency DAG and owns operation sequencing, resource
+receipts and rollback. It calls the existing executable's command paths, preserving
+macOS Keychain preparation, path/share translation, host-port preflight, readiness,
+generation fencing and managed lifecycle policy. No long-lived project daemon is
+introduced. Config hashes include effective defaults and expanded environment but
+ownership state stores only network/volume names and creation times. Immutable
+container labels carry the project/service/config identity and one startup token.
+
+A stable cancelable lock serializes each project in the local machine state directory.
+Atomic synced receipt writes record successfully created resources. Private bounded
+host/guest resource commands use exclusive creation and timestamp-conditional
+removal, with the identity comparison under the existing network/volume metadata
+lock before lease/reference checks. This closes the inspect/remove name-reuse race.
+Rollback uses the current startup token and exact IDs, independent of caller
+cancellation, with a two-minute bound. Existing resumed services are preserved.
+Unverified creations after abrupt transport/process loss remain for inspection.
 
 ## Resource monitoring
 

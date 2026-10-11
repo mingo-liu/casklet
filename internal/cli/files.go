@@ -91,6 +91,10 @@ func configFileArguments(filename string, explicit map[string]bool) ([]string, [
 	if err != nil {
 		return nil, nil, err
 	}
+	return configDataArguments(data, filename, explicit)
+}
+
+func configDataArguments(data []byte, filename string, explicit map[string]bool) ([]string, []string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	// Decode each key separately to reject duplicates as well as unknown options.
 	token, err := decoder.Token()

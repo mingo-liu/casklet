@@ -40,6 +40,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		return 0
 	}
+	if r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
+		return executeProject(r, stdout, stderr)
+	}
 	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {
 		return code
 	}
@@ -59,6 +62,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		fmt.Fprintln(stderr, "casklet: registry login and logout are available only on macOS")
 		return 125
 	case "network-create", "network-ls", "network-inspect", "network-rm":
+		return executeManagement(r, stdout, stderr)
+	case "project-resource":
 		return executeManagement(r, stdout, stderr)
 	case "system-df":
 		return executeManagement(r, stdout, stderr)

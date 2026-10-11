@@ -191,6 +191,15 @@ func (s *Store) recover(ctx context.Context) error {
 	return syncDir(s.root)
 }
 func (s *Store) Create(ctx context.Context, name string) (Record, error) {
+	return s.create(ctx, name, false)
+}
+
+// CreateExclusive refuses to adopt an existing resource during project creation.
+func (s *Store) CreateExclusive(ctx context.Context, name string) (Record, error) {
+	return s.create(ctx, name, true)
+}
+
+func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record, error) {
 	if err := config.ValidateVolumeName(name); err != nil {
 		return Record{}, err
 	}
@@ -203,6 +212,9 @@ func (s *Store) Create(ctx context.Context, name string) (Record, error) {
 		return Record{}, err
 	}
 	if r, err := s.read(name); err == nil {
+		if exclusive {
+			return Record{}, os.ErrExist
+		}
 		return r, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Record{}, err
@@ -303,6 +315,18 @@ func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
 	return f, nil
 }
 func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
+	return s.remove(ctx, name, time.Time{}, referenced)
+}
+
+// RemoveIfCreated fences a project receipt under the same lock as deletion.
+func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
+	if created.IsZero() {
+		return errors.New("resource removal requires a creation identity")
+	}
+	return s.remove(ctx, name, created, referenced)
+}
+
+func (s *Store) remove(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
 	lock, err := s.lock(ctx)
 	if err != nil {
 		return err
@@ -311,9 +335,17 @@ func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceChe
 	if err := s.recover(ctx); err != nil {
 		return err
 	}
-	if _, err := s.read(name); err != nil {
+	record, err := s.read(name)
+	if !created.IsZero() && errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
+	if !created.IsZero() && !record.CreatedAt.Equal(created) {
+		return errors.New("volume creation identity changed; preserving replacement")
+	}
+
 	p := filepath.Join(s.root, name)
 	f, err := s.openLock(filepath.Join(p, ".lease"))
 	if err != nil {

@@ -8,9 +8,13 @@ import (
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/project"
 )
 
 type Request struct {
+	Project       project.Plan
+	ProjectConfig string
+	RemoveVolumes bool
 	Action        string
 	HelpTopic     string
 	Config        config.Config
@@ -68,6 +72,12 @@ func Parse(args []string) (request Request, err error) {
 	r := Request{Action: args[0]}
 	if r.Action == "login" || r.Action == "logout" {
 		return parseRegistryCommand(r, args[1:])
+	}
+	if r.Action == "project" {
+		return parseProject(r, args[1:])
+	}
+	if r.Action == "__project-resource" {
+		return parseProjectResource(args[1:])
 	}
 	if r.Action == "system" {
 		return parseSystem(r, args[1:])

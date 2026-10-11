@@ -6,6 +6,60 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-11: Declarative project deployment and bounded rollback
+
+Added local strict JSON `project up --config`, `project ps`, and `project down`.
+A bounded acyclic dependency graph supports started/healthy conditions, scoped
+networks/volumes and service DNS aliases. The host expands paths and env-files
+before VM changes and fingerprints effective explicit run values. Project-owned
+names, detach mode and reserved labels cannot be overridden. Overlapping ports,
+alias conflicts, disabled required health checks and configuration drift fail
+before deployment mutations. Matching running services are reused and stopped
+services resume through the existing lifecycle path.
+
+The orchestrator calls existing CLI paths, preserving Keychain authentication,
+Mac path/share translation, host-port checks, health waits and generation fencing.
+A cancelable local per-project lock serializes mutations; read-only status remains
+available during health waiting. Synced private ownership receipts contain resource
+names/timestamps only, not run arguments or environment values. Private guest
+resource operations refuse adopting existing names and compare creation receipts
+under the deletion metadata lock before reference/lease/mount checks.
+
+Startup failures/cancellation use a bounded independent cleanup context and
+transaction labels to remove only this invocation's new containers and verified
+resources. Existing resources and resumed services stay. Down pins container IDs,
+aggregates partial failures, removes owned networks and preserves data volumes
+unless --volumes is explicit. Replaced/unverified resources are preserved.
+Abrupt transport/process loss and lost local receipts require explicit inspection
+rather than inferred resource ownership. Schema, examples, help parity, architecture,
+and bilingual quick starts describe these boundaries.
+
+Regressions cover duplicate/unknown/null fields, graph cycles, logical resource
+validation, local file expansion, stable/drifted fingerprints, explicit image env
+overrides, aliases/ports, ownership mismatches, exclusive resource creation,
+conditional deletion, repeated startup, existing-service preservation, rollback,
+cancellation, receipt persistence, unsafe artifacts, lock cancellation and partial
+cleanup retries. Privileged Linux adds real project deployment/data retention;
+Mac adds DNS/readiness/reuse/drift, volume retention and failure/cancel cleanup.
+
+Validation:
+
+- macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
+  and project/CLI race checks passed.
+- After synchronizing the statistics feature from main, the complete disposable
+  macOS arm64 suite passed all 50 tests in 181.953 seconds, including project-label
+  metrics, pending-dependency status, cancellation cleanup, readiness/DNS, repeated
+  deployment and retained data. The runner deleted its isolated VM/host state;
+  the daily machine stayed running.
+- The network/volume receipt regressions also passed as root in that disposable
+  Linux arm64 VM using native cross-compiled test executables. They verify refusal
+  to adopt existing resources and preserve replacements with different creation
+  identities, including successful/idempotent removal of the verified volume.
+- Hosted CI passed full native Linux amd64/arm64 unit/vet/race/build checks,
+  vulnerability scanning and both complete privileged integration suites for the
+  initial project feature revision 08f16df. The synchronized PR retains the same
+  required gates. Intel Mac execution was not performed locally.
+
 ## 2026-10-11: Multi-container statistics and continuous monitoring
 
 Added multiple operands, retained-container all/filter selection, and `stats --watch`.
@@ -33,6 +87,10 @@ Validation:
 - Hosted PR CI passed full unit/vet/race/build checks on macOS and native Linux
   amd64/arm64, the four-target vulnerability scan, and both complete privileged
   Linux integration suites. Intel Mac execution was not performed locally.
+- A documentation-only rerun encountered existing log-rotation-follow and
+  supervisor-loss cleanup fixture failures on different runner architectures.
+  The failed jobs passed unchanged on retry; the new multi-sampling regression
+  passed in every run. No retention or cleanup assertion was weakened.
 
 ## 2026-10-11: Private OCI registry authentication
 

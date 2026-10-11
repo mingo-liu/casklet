@@ -16,6 +16,11 @@ func argumentError(args []string, err error) error {
 		switch args[0] {
 		case "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm":
 			topic = args[0]
+		case "project":
+			topic = "project"
+			if len(args) > 1 && (args[1] == "up" || args[1] == "down" || args[1] == "ps") {
+				topic += " " + args[1]
+			}
 		case "system":
 			topic = "system"
 			if len(args) > 1 && args[1] == "df" {

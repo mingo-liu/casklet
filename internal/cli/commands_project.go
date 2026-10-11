@@ -1,0 +1,102 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"syscall"
+	"time"
+
+	"github.com/mingo-liu/casklet/internal/project"
+)
+
+type boundedProjectOutput struct {
+	data     []byte
+	overflow bool
+	limit    int
+}
+
+func (output *boundedProjectOutput) Write(data []byte) (int, error) {
+	remaining := output.limit - len(output.data)
+	if len(data) > remaining {
+		output.overflow = true
+	}
+	output.data = append(output.data, data[:min(len(data), remaining)]...)
+	return len(data), nil
+}
+
+func projectCall(diagnostic io.Writer) (project.Call, error) {
+	binary, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, args ...string) ([]byte, error) {
+		output := &boundedProjectOutput{limit: 8 << 20}
+		cmd := exec.CommandContext(ctx, binary, args...)
+		// Allow each existing CLI to cancel its remote session and detached startup
+		// normally before the bounded fallback kills an unresponsive child.
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = 80 * time.Second
+		cmd.Stdout, cmd.Stderr = output, diagnostic
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("project operation %s failed: %w", args[0], err)
+		}
+		if output.overflow {
+			return nil, errors.New("project operation output exceeds 8 MiB")
+		}
+		return output.data, nil
+	}, nil
+}
+
+func executeProject(r Request, stdout, stderr io.Writer) int {
+	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {
+		name := r.Reference
+		if r.Action == "project-up" {
+			name = r.Project.Name
+		}
+		call, err := projectCall(stderr)
+		if err != nil {
+			return 125, err
+		}
+		// Read-only status must remain available while up waits for a dependency.
+		if r.Action == "project-ps" {
+			runner := project.Runner{Call: call}
+			records, err := runner.Records(ctx)
+			if err != nil {
+				return 125, err
+			}
+			return 0, writeRecords(stdout, project.Managed(records, name), r.JSON)
+		}
+		root, err := project.DefaultRoot()
+		if err != nil {
+			return 125, err
+		}
+		store, err := project.Open(ctx, root, name)
+		if err != nil {
+			return 125, err
+		}
+		defer store.Close()
+		state, err := store.Load()
+		if err != nil {
+			return 125, err
+		}
+		runner := project.Runner{Call: call, Save: store.Save, State: state}
+		switch r.Action {
+		case "project-up":
+			records, err := runner.Up(ctx, r.Project, r.WaitTimeout)
+			if err != nil {
+				return 125, err
+			}
+			return 0, writeRecords(stdout, records, r.JSON)
+		case "project-down":
+			return 0, runner.Down(ctx, name, r.RemoveVolumes)
+		}
+		return 125, errors.New("invalid project operation")
+	})
+}

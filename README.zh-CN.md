@@ -122,6 +122,24 @@ casklet image ls --json
 casklet image rm IMAGE_ID
 ```
 
+## 部署项目
+
+使用 `project up --config project.json` 部署多个服务，声明网络、数据卷及
+`started`/`healthy` 启动依赖。配置一致的服务会复用，配置变化会在部署修改前报错。
+资源名称为 `cp-PROJECT-LOGICAL`，服务别名按网络隔离。参见
+[项目配置示例](guides/usage.md#project-deployment)。
+
+```sh
+casklet project up --config project.json
+casklet project ps demo
+casklet project down demo
+# 同时删除项目拥有的数据卷：
+casklet project down --volumes demo
+```
+
+失败时仅清理本次新建且归属已验证的资源。已有服务和数据卷会保留；`down` 默认
+保留数据卷。本地归属记录用于防止接管或删除无关的同名资源。
+
 ## 常用操作
 
 ```sh
