@@ -30,8 +30,9 @@ Validation:
 - The complete disposable macOS arm64 suite passed in 164.937 seconds, including
   multi-container watch, VM lifecycle, storage, health and terminal regressions.
   The runner restored no daily state because its Lima/host state were isolated.
-- Privileged Linux and native amd64 execution are checked by PR CI; results will
-  be verified before merge.
+- Hosted PR CI passed full unit/vet/race/build checks on macOS and native Linux
+  amd64/arm64, the four-target vulnerability scan, and both complete privileged
+  Linux integration suites. Intel Mac execution was not performed locally.
 
 ## 2026-10-11: Private OCI registry authentication
 
