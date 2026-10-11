@@ -55,6 +55,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
 		return 0
+	case "login", "logout":
+		fmt.Fprintln(stderr, "casklet: registry login and logout are available only on macOS")
+		return 125
 	case "network-create", "network-ls", "network-inspect", "network-rm":
 		return executeManagement(r, stdout, stderr)
 	case "system-df":

@@ -6,6 +6,62 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-11: Private OCI registry authentication
+
+Added macOS `login --username USER --password-stdin [REGISTRY]` and idempotent
+`logout [REGISTRY]`, with focused help and Docker Hub alias normalization. Login
+saves credentials without claiming to validate access. Native Keychain entries
+are scoped by registry authority and port; native Security/CoreFoundation calls
+preserve static client builds without credential helper subprocesses. Locked or
+denied Keychain access fails explicitly; only absent entries allow anonymous pulls.
+
+A bounded, cancellable non-PTY host/guest preparation exchange resolves automatic
+runs from the cache before reading Keychain and supplies credentials only for
+an uncached pull. The resulting immutable image ID is passed to the normal
+workload session, preserving stdin, terminals, signals, and remote cleanup.
+Credentials stay out of arguments, files, container metadata, and environment.
+Explicit pulls refresh with scoped credentials. Authenticated errors are sanitized,
+including reflected server bodies and wrapped cancellation. Basic/Bearer support
+restricts credentials to the registry and its declared token endpoint; cross-port
+blob redirects strip authorization, and token POST redirects outside scope fail.
+Authenticated endpoints require HTTPS except loopback development HTTP. Only
+Bearer realms are interpreted as token URLs; Basic realms remain challenge labels.
+
+Regressions cover canonical scopes, password/envelope bounds, exact bounded JSON,
+fragmented protocol output, broken pipes, cancellation, native Keychain CRUD,
+Basic/Bearer pulls, credential reflection, redirect isolation, plaintext endpoint
+rejection, cached offline runs, guest preparation, help parity, and workload input.
+Usage, architecture, and both READMEs describe the feature and limitations.
+
+Validation:
+
+- Go 1.27.2 formatting, macOS unit tests/vet, native release build, and CLI/machine/
+  credential race tests passed. Native Keychain CRUD passed with temporary entries.
+  Darwin amd64 client/embedded engine cross-build and the four-target vulnerability
+  scan passed; Intel Mac execution was not performed locally.
+- Linux arm64 formatting, unit tests, vet, full race detection, and the complete
+  privileged integration suite passed in the shared VM. After the final realm
+  guards, image/credential race tests and credential preparation plus the pinned
+  `e470555` legacy supervisor integration regressions passed again.
+- The complete disposable macOS arm64 suite passed all 45 tests in 136.662
+  seconds with Go 1.27.2, including Keychain login/pull/automatic run/logout,
+  cached terminal operation, exact workload stdin, and health-wait cancellation.
+  The runner exited zero and deleted its isolated VM, Lima home, and host state.
+  Signal forwarding preserves the original interrupt without duplicate
+  context-driven SIGTERM delivery.
+- Daily engine, hash marker, restart service, and retained Redis/Tomcat metadata
+  were verified unchanged after the shared-VM tests. Full macOS verification uses
+  a disposable VM with separate Lima/host state directories and the real HOME,
+  preserving Keychain access and daily state.
+
+The minimum Go version and guest development archive pins now use Go 1.27.2 to
+resolve the existing four-target vulnerability gate findings. Guest tooling also
+installs GCC for race detection. The shared integration wrapper now inspects
+restart-manager LoadState before stopping it and enumerates loaded test units
+before cleanup, covering disposable VMs without a preinstalled manager. Eight
+fake-systemd scenarios verify success, test/inspection/stop failure propagation,
+and daily-data restoration, and run in ordinary CI.
+
 ## 2026-10-11: Resize existing stopped product machines
 
 Added `machine resize --cpus/--memory/--disk` with focused help and matching

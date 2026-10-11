@@ -18,7 +18,9 @@ import (
 func remoteMode(args []string) (bool, int) {
 	var code int
 	var err error
-	if len(args) == 1 && args[0] == "__ensure-template" {
+	if len(args) >= 1 && args[0] == "__credential-prepare" {
+		return true, cli.ExecuteCredentialPrepare(args[1:], os.Stdin, os.Stdout, os.Stderr)
+	} else if len(args) == 1 && args[0] == "__ensure-template" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		ctx, cancel := context.WithTimeout(ctx, time.Minute)

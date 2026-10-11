@@ -32,7 +32,7 @@ func progressRegistry(t *testing.T) []string {
 	return progressRegistryDetails(t).References
 }
 
-func progressRegistryDetails(t *testing.T) registryFixture {
+func progressRegistryDetails(t *testing.T, authenticated ...bool) registryFixture {
 	t.Helper()
 	success(t, "doctor")
 	binary := filepath.Join(hostDirectory(t), "image-registry")
@@ -44,6 +44,9 @@ func progressRegistryDetails(t *testing.T) registryFixture {
 		t.Fatalf("build registry helper: %v %s", err, output)
 	}
 	cmd := exec.CommandContext(ctx, "limactl", "shell", "casklet-runtime", "sudo", "-n", "--", binary)
+	if len(authenticated) > 0 && authenticated[0] {
+		cmd.Args = append(cmd.Args, "--auth")
+	}
 	output, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

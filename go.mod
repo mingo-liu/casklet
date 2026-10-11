@@ -3,6 +3,7 @@ module github.com/mingo-liu/casklet
 go 1.27.2
 
 require (
+	github.com/ebitengine/purego v0.9.1
 	github.com/google/go-containerregistry v0.22.1
 	golang.org/x/sys v0.47.0
 )

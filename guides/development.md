@@ -53,6 +53,12 @@ configuration under its own instance directory. The product instance is
 a second development VM. Development tools are optional guest packages; the
 installed product engine continues to be managed by the macOS client.
 
+Disposable macOS validation can pair a separate `LIMA_HOME` with an absolute
+`CASKLET_MACHINE_STATE_DIR` inside the VM's writable home share. This isolates
+host engine staging and VM state while preserving the real `HOME`, which native
+Keychain access requires. Set both variables together; overriding `HOME` can
+make the login Keychain unavailable.
+
 ## Internal Linux engine tests
 
 Linux remains an internal execution and test environment. The ordinary macOS

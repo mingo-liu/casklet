@@ -1,11 +1,13 @@
 package machine
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,10 +19,13 @@ import (
 )
 
 type Invocation struct {
-	Args        []string
-	TTY         bool
-	Interactive bool
-	Rootless    bool
+	Args           []string
+	TTY            bool
+	Interactive    bool
+	Rootless       bool
+	ImageReference string
+	RefreshImage   bool
+	Progress       string
 }
 
 // guestArguments maps host resources before the guest parser runs. Workload
@@ -168,12 +173,44 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	if err := checkPorts(invocation.Args); err != nil {
 		return 125, err
 	}
+	if invocation.ImageReference != "" {
+		mode := "resolve"
+		if invocation.RefreshImage {
+			mode = "pull"
+		}
+		input, response, err := os.Pipe()
+		if err != nil {
+			return 125, err
+		}
+		defer input.Close()
+		defer response.Close()
+		var resolved bytes.Buffer
+		output := io.Writer(&resolved)
+		if invocation.RefreshImage {
+			output = stdout
+		}
+		auth := &credentialOutput{reference: invocation.ImageReference, response: response, output: output}
+		preparation := Invocation{Args: []string{"__credential-prepare", mode, invocation.Progress, invocation.ImageReference}, Rootless: invocation.Rootless}
+		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth)
+		if err != nil || code != 0 || invocation.RefreshImage {
+			return code, err
+		}
+		id := strings.TrimSpace(resolved.String())
+		if !strings.HasPrefix(id, "sha256:") || len(id) != 71 {
+			return 125, errors.New("invalid prepared image identity")
+		}
+		args = preparedImageArguments(args, id)
+	}
+	return m.executeGuest(ctx, invocation, *instance, args, stdin, stdout, stderr, nil)
+}
+
+func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, instance Instance, args []string, stdin, stdout, stderr *os.File, authentication *credentialOutput) (int, error) {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return 125, err
 	}
 	token := hex.EncodeToString(random[:])
-	finishWatchdog, err := startWatchdog(*instance, token, invocation.Rootless)
+	finishWatchdog, err := startWatchdog(instance, token, invocation.Rootless)
 	if err != nil {
 		return 125, err
 	}
@@ -185,8 +222,11 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
 	// SSH owns terminal raw mode and resizing. Explicit control messages also
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
-	cmd := sshCommand(context.Background(), *instance, invocation.TTY, command...)
+	cmd := sshCommand(context.Background(), instance, invocation.TTY, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	if authentication != nil {
+		cmd.Stdout = authentication
+	}
 	if lifecycle {
 		input, response, err := os.Pipe()
 		if err != nil {
@@ -208,20 +248,31 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	if err := cmd.Start(); err != nil {
 		return 125, err
 	}
+	if authentication != nil {
+		// SSH inherited its own descriptor. Keeping this read end in the host
+		// would prevent EPIPE if SSH exits before consuming the credentials.
+		_ = stdin.Close()
+	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var shutdown <-chan time.Time
 	for {
 		select {
 		case err := <-done:
-			return guestResult(*instance, inspection, stdout, err)
+			if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
+				authentication.err = errors.New("incomplete registry preparation response")
+			}
+			if authentication != nil && authentication.err != nil {
+				return 125, authentication.err
+			}
+			return guestResult(instance, inspection, stdout, err)
 		case signal := <-signals:
 			if signal == syscall.SIGWINCH {
 				_ = cmd.Process.Signal(signal)
 				continue
 			}
 			controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, controlErr := m.output(controlCtx, *instance, engineCommand(invocation.Rootless, "__signal", token, strconv.Itoa(int(signal.(syscall.Signal))))...)
+			_, controlErr := m.output(controlCtx, instance, engineCommand(invocation.Rootless, "__signal", token, strconv.Itoa(int(signal.(syscall.Signal))))...)
 			cancel()
 			if controlErr != nil {
 				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)

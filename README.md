@@ -56,9 +56,20 @@ pulls the matching Linux architecture, verifies and unpacks its layers, and runs
 it with casklet's engine. Cached images work offline. Supply application
 settings with `--env`, persistent directories with `--mount`, and command arguments
 after `--`. Arguments replace image `Cmd` and retain `Entrypoint`; use `--entrypoint`
-to override it. Anonymous-access registries are supported; private-registry login
-and OCI rootless execution are not currently supported. See the
+to override it. Anonymous and private registries are supported. Save a registry
+password or access token with `casklet login --username USER --password-stdin REGISTRY`;
+credentials stay in macOS Keychain. `casklet logout REGISTRY` removes them without
+removing cached images. Login saves credentials; access is checked on pull. OCI
+rootless execution is not currently supported. See the
 [image guide](guides/usage.md#ocidocker-images).
+
+For example, read a token from a protected file without putting it in arguments:
+
+```sh
+casklet login --username alice --password-stdin ghcr.io < /path/to/registry-token
+casklet image pull ghcr.io/example/app:latest
+casklet logout ghcr.io
+```
 
 Detached containers inherit image `Healthcheck` metadata; `--health-cmd` overrides
 the probe, and `--no-healthcheck` disables it. `ps` and `inspect` show health separately

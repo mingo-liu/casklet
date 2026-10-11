@@ -17,7 +17,7 @@ const scopeEnvironment = "CASKLET_SCOPE_LAUNCHED"
 // prepareLaunch replaces the CLI process so terminal descriptors, signals, and
 // workload exit codes pass through the privilege and delegation setup.
 func prepareLaunch(args []string, request Request) error {
-	if request.Action == "help" {
+	if request.Action == "help" || request.Action == "login" || request.Action == "logout" {
 		return nil
 	}
 	executable, err := os.Executable()

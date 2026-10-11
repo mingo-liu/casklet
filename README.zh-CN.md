@@ -48,8 +48,18 @@ OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会
 校验并解包镜像各层，再通过 casklet 自身的引擎运行。缓存的镜像可以离线使用。
 使用 `--env` 提供应用配置、`--mount` 绑定持久化目录，在 `--` 后指定命令参数。
 这些参数会替换镜像的 `Cmd`，保留 `Entrypoint`；使用 `--entrypoint` 可以覆盖入口。
-目前支持允许匿名访问的仓库，暂不支持私有仓库登录和 OCI 镜像的 rootless 运行。
+支持匿名和私有仓库。使用 `casklet login --username USER --password-stdin REGISTRY`
+保存密码或访问令牌，凭据存放在 macOS 钥匙串中。`casklet logout REGISTRY`
+删除凭据并保留缓存镜像。登录只保存凭据，访问权限在拉取时验证。暂不支持 OCI 镜像的 rootless 运行。
 详细说明见[镜像指南](guides/usage.md#ocidocker-images)（英文）。
+
+例如从受保护的文件读取令牌，避免将其写入命令参数：
+
+```sh
+casklet login --username alice --password-stdin ghcr.io < /path/to/registry-token
+casklet image pull ghcr.io/example/app:latest
+casklet logout ghcr.io
+```
 
 后台容器继承镜像的 `Healthcheck` 配置，可用 `--health-cmd` 覆盖探针，
 或用 `--no-healthcheck` 禁用。`ps` 和 `inspect` 单独显示健康状态；探针失败

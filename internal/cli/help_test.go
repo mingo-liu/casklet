@@ -39,7 +39,7 @@ func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 		"volume", "volume create", "volume ls", "volume inspect", "volume rm", "volume export", "volume restore",
 		"system", "system df", "image prune",
 		"image cache", "image cache ls", "image cache prune", "image cache limit",
-		"image", "image pull", "image import", "image ls", "image rm", "help",
+		"image", "image pull", "image import", "image ls", "image rm", "help", "login", "logout",
 		"machine", "machine init", "machine start", "machine stop", "machine status", "machine share", "machine resize", "rootfs",
 	} {
 		t.Run(topic, func(t *testing.T) {
