@@ -4,7 +4,7 @@
 
 ## macOS client
 
-Install Go 1.27.1+, Make, and Lima 2.0+ on macOS 13.5+:
+Install Go 1.27.2+, Make, and Lima 2.0+ on macOS 13.5+:
 
 ```sh
 brew install lima
@@ -53,13 +53,19 @@ configuration under its own instance directory. The product instance is
 a second development VM. Development tools are optional guest packages; the
 installed product engine continues to be managed by the macOS client.
 
+Disposable macOS validation can pair a separate `LIMA_HOME` with an absolute
+`CASKLET_MACHINE_STATE_DIR` inside the VM's writable home share. This isolates
+host engine staging and VM state while preserving the real `HOME`, which native
+Keychain access requires. Set both variables together; overriding `HOME` can
+make the login Keychain unavailable.
+
 ## Internal Linux engine tests
 
 Linux remains an internal execution and test environment. The ordinary macOS
 unit suite excludes Linux-specific tests. Runtime changes must also pass the
 privileged suite in the same `casklet-runtime` VM.
 
-Add the guest build tools once, then transfer a fresh source snapshot onto the
+Add the guest build tools (including GCC for race detection) once, then transfer a fresh source snapshot onto the
 VM's Linux disk. Build there rather than on the shared Mac filesystem so Linux
 ownership, mounts, and extended attributes work correctly. Guest builds write
 only to the snapshot and do not replace `/usr/local/bin/casklet`:

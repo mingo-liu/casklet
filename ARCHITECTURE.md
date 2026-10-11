@@ -103,6 +103,7 @@ while managed exec uses runtime resources and IPC.
 | `container` | Records, generations, operation locks, systemd services, logs, health monitoring, inspection | Namespace setup and workload execution |
 | `runtime` | Startup handshake, PID 1, signals, exec sessions, run recovery and cleanup | User-facing command parsing and container records |
 | `template` | Directory/image selection, canonical validation, image lease ownership | Copies, mounts, and lifecycle state |
+| `registryauth` | Canonical registry scopes, native macOS Keychain entries, bounded credential envelopes, redirect authorization policy | Container configuration and durable guest secrets |
 | `image` | Registry resolution, platform selection, layer application, startup defaults, content identity, atomic publication and deletion leases | Runtime supervision |
 | `volume` | Private volume metadata, usage leases, tar streams, staged restore publication | Container lifecycle and host paths |
 | `rootfs` | Confined filesystem access, copying, mounts and DNS files | Image lookup and container management |
@@ -199,8 +200,20 @@ No new framework or global service registry is needed to add a command or adapte
 
 ## OCI images
 
+The macOS client owns login/logout and native Security/CoreFoundation Keychain
+access through purego, retaining CGO-disabled release builds. A separate non-PTY
+SSH preparation session resolves cached IDs before requesting credentials. On a
+miss the host responds through stdin with one bounded registry-scoped envelope;
+the guest attaches it only to that pull context and returns an immutable ID for
+normal execution. Workload stdin, TTY handling, retained configuration, and guest
+disk state never carry credentials. Authentication is lazy and missing Keychain
+entries preserve anonymous access. `image` uses the registry library's challenge
+handling with an additional redirect guard; registry-declared token endpoints are
+explicit credential targets while other redirects lose authorization headers.
+Authenticated pull errors are sanitized before presentation.
+
 The guest image adapter uses go-containerregistry for OCI/Docker registry transport,
-anonymous token challenges, manifest lists, and compression. It does not invoke
+anonymous and authenticated Basic/Bearer challenges, manifest lists, and compression. It does not invoke
 Docker Engine. Downloads select the native Linux platform and verify each layer's
 uncompressed digest before applying it to a private staging root. Whiteouts precede
 same-layer additions. Root-confined operations interpret absolute symlinks relative

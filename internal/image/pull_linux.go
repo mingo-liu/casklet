@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,8 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/partial"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/mingo-liu/casklet/internal/registryauth"
 	"github.com/mingo-liu/casklet/internal/rootfs"
 	"golang.org/x/sys/unix"
 )
@@ -105,7 +108,9 @@ func (store *Store) resolveLocked(ref string) (Record, error) {
 // extraction happen in a private transaction; publication is atomic. The store
 // lock covers only publication; leased staging protects active transactions.
 // Refreshes of the same reference serialize independently of other images.
-func (store *Store) Pull(ctx context.Context, reference string) (Record, error) {
+func (store *Store) Pull(ctx context.Context, reference string) (result Record, resultErr error) {
+	publicContext := ctx
+	defer func() { resultErr = registryauth.PublicError(publicContext, resultErr) }()
 	ref, err := NormalizeReference(reference)
 	if err != nil {
 		return Record{}, err
@@ -122,7 +127,33 @@ func (store *Store) Pull(ctx context.Context, reference string) (Record, error) 
 	}
 	defer refLock.Close()
 	reportProgress(ctx, Progress{Stage: ProgressResolving, Reference: ref})
-	img, err := remote.Image(parsed, remote.WithContext(ctx), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH}))
+	scope, err := registryauth.Registry(ref)
+	if err != nil {
+		return Record{}, err
+	}
+	auth := registryauth.Authenticator(ctx, scope)
+	options := []remote.Option{remote.WithContext(ctx), remote.WithAuth(auth), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: runtime.GOARCH})}
+	credential, _ := auth.Authorization()
+	if credential.Username != "" {
+		registry := parsed.Context().Registry
+		endpoint, _ := url.Parse(registry.Scheme() + "://" + registry.RegistryStr())
+		if err := registryauth.ValidateRegistryEndpoint(endpoint); err != nil {
+			return Record{}, err
+		}
+		challenge, err := transport.Ping(ctx, registry, remote.DefaultTransport)
+		if err != nil {
+			return Record{}, err
+		}
+		var realm *url.URL
+		if value := challenge.Parameters["realm"]; strings.EqualFold(challenge.Scheme, "bearer") && value != "" {
+			realm, err = registryauth.TokenRealm(value, endpoint)
+			if err != nil {
+				return Record{}, err
+			}
+		}
+		options = append(options, remote.WithTransport(registryauth.ScopedTransport{Base: remote.DefaultTransport, Registry: endpoint, Realm: realm}))
+	}
+	img, err := remote.Image(parsed, options...)
 	if err != nil {
 		return Record{}, fmt.Errorf("pull %s: %w", ref, err)
 	}

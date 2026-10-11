@@ -11,27 +11,29 @@ import (
 )
 
 type Request struct {
-	Action      string
-	HelpTopic   string
-	Config      config.Config
-	Exec        config.Exec
-	Detach      bool
-	Name        string
-	All         bool
-	JSON        bool
-	References  []string
-	Filters     []container.Filter
-	Reference   string
-	Tail        int
-	Follow      bool
-	StopTimeout *time.Duration
-	Healthy     bool
-	WaitTimeout time.Duration
-	Interval    time.Duration
-	Entrypoint  *string
-	DryRun      bool
-	Progress    string
-	CacheLimit  int64
+	Action        string
+	HelpTopic     string
+	Config        config.Config
+	Exec          config.Exec
+	Detach        bool
+	Name          string
+	All           bool
+	JSON          bool
+	References    []string
+	Filters       []container.Filter
+	Reference     string
+	Tail          int
+	Follow        bool
+	StopTimeout   *time.Duration
+	Healthy       bool
+	WaitTimeout   time.Duration
+	Interval      time.Duration
+	Entrypoint    *string
+	DryRun        bool
+	Progress      string
+	CacheLimit    int64
+	Username      string
+	PasswordStdin bool
 }
 
 func Parse(args []string) (request Request, err error) {
@@ -63,6 +65,9 @@ func Parse(args []string) (request Request, err error) {
 		return helpRequest(args[:len(args)-1])
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "login" || r.Action == "logout" {
+		return parseRegistryCommand(r, args[1:])
+	}
 	if r.Action == "system" {
 		return parseSystem(r, args[1:])
 	}

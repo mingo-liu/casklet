@@ -134,9 +134,46 @@ casklet run -d --name database --memory 512m --env POSTGRES_PASSWORD=example-pas
 unique hexadecimal ID prefix, optionally starting with `sha256:`.
 Docker Hub, its `library/` namespace, and the `latest` tag are defaults. An uncached
 name is pulled automatically inside the VM, selecting `linux/arm64` on Apple
-silicon or `linux/amd64` on Intel. Anonymous-access registries are supported;
-private-registry login and arbitrary insecure HTTP registries are not provided.
+silicon or `linux/amd64` on Intel. Anonymous and authenticated registries are supported;
+arbitrary insecure HTTP registries are not provided.
 Loopback HTTP registries are supported for local development and tests.
+
+### Registry credentials
+
+```sh
+casklet login --username alice --password-stdin ghcr.io < /path/to/registry-token
+casklet image pull ghcr.io/example/app:latest
+casklet run --image ghcr.io/example/app:latest
+casklet logout ghcr.io
+```
+
+`login` and `logout` are macOS client commands and do not start the VM. Omit
+REGISTRY for Docker Hub; `docker.io`, `index.docker.io`, and `registry-1.docker.io`
+share one entry. Other registry hosts and ports have distinct entries. Use a
+hostname with optional port, without a URL scheme or repository path. Login
+requires `--username` (or `-u`) and `--password-stdin`; passwords/access tokens
+must be one nonempty line of at most 16 KiB. A final LF or CRLF is stripped;
+other whitespace is retained. Password flags and interactive prompts are not
+provided. Never place real secrets directly in a shell command or commit them.
+
+Credentials use casklet-owned generic-password entries in the native macOS
+Keychain. Login saves/replaces an entry; it does **not** verify registry access.
+Authentication is checked when pulling. Only missing entries permit anonymous
+access; a locked Keychain or denied access is an explicit error. Unlock the login
+Keychain and allow the client access before retrying. No Docker config or external
+credential helper is used. Logout is idempotent and retains images/containers.
+
+Explicit pulls refresh using the selected registry's credentials. Automatic runs
+first resolve the guest cache: cached names and local IDs work offline without
+reading Keychain. On a miss, an operation-scoped, bounded non-PTY SSH exchange
+supplies credentials in memory before pulling; workload stdin and terminals stay
+independent. Credentials are never saved in the guest, passed as process arguments,
+or added to container environment/configuration. The registry library handles
+Basic/Bearer challenges and its declared token service; registry/CDN redirects do
+not receive unrelated credentials. Authenticated registry and token endpoints
+require HTTPS, except HTTP endpoints on loopback for local development.
+Authenticated failures use a sanitized message
+instead of registry response bodies. Failed pulls preserve existing cached images.
 
 The image store verifies downloaded blobs and uncompressed layer DiffIDs, applies
 layers in order (including whiteouts and opaque directories), preserves numeric

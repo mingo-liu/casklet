@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -80,7 +81,16 @@ func main() {
 	var mutex sync.Mutex
 	downloads := map[string]int{}
 	registryHandler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	var authentication atomic.Bool
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authentication.Load() {
+			user, password, ok := r.BasicAuth()
+			if !ok || user != "casklet-test" || password != "casklet-fixture-token" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="casklet-test"`)
+				http.Error(w, "casklet-fixture-token reflected by registry", http.StatusUnauthorized)
+				return
+			}
+		}
 		if r.URL.Path == "/casklet-test-downloads" {
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -117,6 +127,9 @@ func main() {
 	layers := make([]string, len(manifest.Layers))
 	for i, layer := range manifest.Layers {
 		layers[i] = layer.Digest.String()
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--auth" {
+		authentication.Store(true)
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(struct {
 		References []string

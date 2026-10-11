@@ -8,11 +8,13 @@ import (
 	"context"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +31,10 @@ import (
 // The registry fixture uses a relocated static toolbox instead of bin/busybox.
 // No network registry, Docker Engine, or external image is required by CI.
 func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) {
+	return ociRegistryFixtureWithAuth(t, false, healthTests...)
+}
+
+func ociRegistryFixtureWithAuth(t *testing.T, authenticated bool, healthTests ...[]string) (string, func()) {
 	t.Helper()
 	require(t)
 	source := executionTemplate(t)
@@ -135,7 +141,19 @@ func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	var authEnabled atomic.Bool
+	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authEnabled.Load() {
+			user, password, valid := r.BasicAuth()
+			if !valid || user != "casklet-test" || password != "casklet-fixture-token" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="casklet-test"`)
+				http.Error(w, "casklet-fixture-token reflected by registry", http.StatusUnauthorized)
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(server.Close)
 	ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + "/casklet/app:test")
 	if err != nil {
@@ -144,6 +162,7 @@ func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) 
 	if err := remote.Write(ref, img); err != nil {
 		t.Fatal(err)
 	}
+	authEnabled.Store(authenticated)
 	return ref.Name(), server.Close
 }
 

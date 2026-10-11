@@ -103,6 +103,32 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"login": `Usage: casklet login --username USER --password-stdin [REGISTRY]
+
+Options:
+  -u, --username    Registry username
+  --password-stdin Read a password or access token from stdin, up to 16 KiB
+
+Notes:
+  Available only on macOS. REGISTRY defaults to Docker Hub.
+  Use a hostname with optional port; omit schemes and repository paths.
+  Saves credentials in native macOS Keychain; access is checked on pull.
+  Explicit pulls and uncached image runs use credentials scoped to that registry.
+  Cached runs work offline and do not read Keychain. No Docker config is read.
+
+Examples:
+  casklet login -u alice --password-stdin ghcr.io < /path/to/registry-token
+`,
+	"logout": `Usage: casklet logout [REGISTRY]
+
+Notes:
+  Available only on macOS. REGISTRY defaults to Docker Hub.
+  Removes only casklet's credentials for that registry from macOS Keychain.
+  Missing entries are harmless. Cached images and containers are retained.
+
+Examples:
+  casklet logout ghcr.io
+`,
 	"system": `Usage: casklet system COMMAND
 
 Commands:
@@ -634,7 +660,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 	if topic == "" {
 		text := commandOverview
 		if macOS {
-			text += "  machine   Manage the product VM and shared directories\n  rootfs    Export the built-in BusyBox template to a Mac directory\n"
+			text += "  machine   Manage the product VM and shared directories\n  rootfs    Export the built-in BusyBox template to a Mac directory\n  login     Save registry credentials in macOS Keychain\n  logout    Remove saved registry credentials\n"
 		}
 		return text + "\nRun casklet COMMAND --help or casklet help COMMAND for syntax and examples.\n", nil
 	}
