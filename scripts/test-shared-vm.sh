@@ -30,6 +30,8 @@ case "$mounts" in *"$store"*) fail 'casklet storage still has mounted filesystem
 [ ! -L "$service" ] || fail 'the restart service must not be a symlink'
 
 manager_active=0
+manager_state=$(systemctl show --property=LoadState --value casklet-restarts.service) ||
+    fail 'cannot inspect the installed restart manager'
 systemctl is-active --quiet casklet-restarts.service && manager_active=1
 mkdir -m 0700 "$transaction"
 printf '%s\n' "$manager_active" > "$transaction/manager-active"
@@ -38,6 +40,16 @@ service_saved=0
 enable_saved=0
 test_started=0
 test_pid=
+stop_test_units() {
+    # A wildcard stop fails when a disposable VM has no loaded casklet units.
+    # Inspect first, and never turn an inspection or real stop failure into success.
+    test_unit_listing=$(systemctl list-units --all --no-legend --plain 'casklet-*') || return $?
+    test_unit_names=$(printf '%s\n' "$test_unit_listing" | awk '{ print $1 }') || return $?
+    if [ -n "$test_unit_names" ]; then
+        # Unit names cannot contain shell whitespace or glob characters.
+        systemctl stop $test_unit_names
+    fi
+}
 cleanup() {
     code=$?
     trap - EXIT HUP INT TERM
@@ -48,7 +60,7 @@ cleanup() {
     fi
     if [ "$test_started" = 1 ]; then
         # All matching units now belong to the exclusive test run.
-        if ! systemctl stop 'casklet-*'; then
+        if ! stop_test_units; then
             printf 'test-shared-vm: cannot stop test units; saved daily data remains at %s/store\n' "$transaction" >&2
             exit 1
         fi
@@ -98,7 +110,9 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-systemctl stop casklet-restarts.service
+if [ "$manager_state" != not-found ]; then
+    systemctl stop casklet-restarts.service
+fi
 units=$(systemctl list-units --no-legend --plain --state=active,activating,deactivating 'casklet-*' |
     awk '$1 != "casklet-restarts.service" { print $1 }')
 [ -z "$units" ] || fail "a workload started during preflight: $units"

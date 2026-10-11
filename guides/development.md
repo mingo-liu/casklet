@@ -59,6 +59,9 @@ Linux remains an internal execution and test environment. The ordinary macOS
 unit suite excludes Linux-specific tests. Runtime changes must also pass the
 privileged suite in the same `casklet-runtime` VM.
 
+Linux race tests require a C compiler; `scripts/prepare-development.sh` installs
+GCC alongside Go and Make.
+
 Add the guest build tools once, then transfer a fresh source snapshot onto the
 VM's Linux disk. Build there rather than on the shared Mac filesystem so Linux
 ownership, mounts, and extended attributes work correctly. Guest builds write

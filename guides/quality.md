@@ -25,7 +25,13 @@ and [the root growpart configuration](https://github.com/lima-vm/lima/blob/v2.0.
 
 The minimum Go version and guest development archive pins now use Go 1.27.2,
 which fixes standard-library vulnerabilities reported by the existing four-target
-`make vuln` gate with Go 1.27.1. Archive checksums match the official Go downloads.
+`make vuln` gate with Go 1.27.1. Archive checksums match the official Go downloads. Guest development setup
+installs GCC as required by Linux race tests. Hosted Linux integration initially
+failed before tests because a fresh VM has no restart manager unit. The shared
+runner now skips that stop only for an inspected `not-found` unit and cleans up
+only enumerated loaded test units; actual inspection/stop failures stay visible.
+Eight fake-runner scenarios verify absent/present units, failure propagation, and
+daily-store/manager preservation, and run in the ordinary CI check jobs.
 
 Regressions cover parser bounds, omitted values, reductions, fractional disk shrink,
 state/compatibility refusal, edit errors, lock cancellation, idempotence, focused
