@@ -116,7 +116,7 @@ func (m *Machine) ensure(ctx context.Context, options Options, initialize bool) 
 		return nil, err
 	}
 	if initialize && instance != nil {
-		return nil, errors.New("runtime machine already exists; initialization options apply only when creating it")
+		return nil, errors.New("runtime machine already exists; initialization options apply only when creating it; stop it and use casklet machine resize to change resources")
 	}
 	if instance == nil {
 		// Check the payload before creating a VM that cannot execute workloads.
@@ -261,7 +261,7 @@ func parseHostCommand(args []string) (Options, error) {
 		return options, fmt.Errorf("unknown host command %q", args[0])
 	}
 	if len(args) < 2 {
-		return options, errors.New("machine requires init, start, stop, status, or share")
+		return options, errors.New("machine requires init, start, stop, status, share, or resize")
 	}
 	switch args[1] {
 	case "init":
@@ -273,7 +273,7 @@ func parseHostCommand(args []string) (Options, error) {
 		fs.Func("mount", "additional shared directory", func(value string) error { options.Mounts = append(options.Mounts, value); return nil })
 		if err := fs.Parse(args[2:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				return options, initHelpResult(args[2:])
+				return options, resourceHelpResult("init", args[2:])
 			}
 			return options, err
 		}
@@ -282,6 +282,8 @@ func parseHostCommand(args []string) (Options, error) {
 		}
 		_, err := configData(options)
 		return options, err
+	case "resize":
+		return parseResize(args[2:])
 	case "share":
 		if len(args) != 3 || args[2] == "" {
 			return options, errors.New("machine share requires one existing directory")
@@ -335,6 +337,8 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return m.rootfs(ctx, *instance, args[1], stdout)
 	}
 	switch args[1] {
+	case "resize":
+		return m.resize(ctx, options, stdout)
 	case "share":
 		return m.share(ctx, options.Mounts[0], stdout)
 	case "init":
@@ -362,7 +366,7 @@ func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if instance == nil {
 			_, err = fmt.Fprintln(stdout, Name+"\tnot initialized")
 		} else {
-			_, err = fmt.Fprintf(stdout, "%s\t%s\t%s\n", instance.Name, instance.Status, instance.Arch)
+			_, err = writeStatus(stdout, *instance)
 		}
 		return err
 	default:

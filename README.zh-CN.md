@@ -189,6 +189,16 @@ casklet network rm demo
 casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
 ```
 
+已有虚拟机需先停机再调整资源。省略的资源保持原配置，磁盘只能扩容。下次启动时
+会应用配置并扩展原磁盘，保留容器、镜像、数据卷、共享目录和其他设置。
+`machine status` 显示配置的资源。
+
+```sh
+casklet machine stop
+casklet machine resize --cpus 6 --memory 8 --disk 40
+casklet machine start
+```
+
 命名数据卷将数据保存在 VM 磁盘上，独立于容器：
 
 ```sh

@@ -29,9 +29,14 @@ type Instance struct {
 	Name          string `json:"name"`
 	Status        string `json:"status"`
 	Arch          string `json:"arch"`
+	VMType        string `json:"vmType"`
+	CPUs          int    `json:"cpus"`
+	Memory        int64  `json:"memory"`
+	Disk          int64  `json:"disk"`
 	SSHConfigFile string `json:"sshConfigFile"`
 	Config        struct {
-		Plain  bool `json:"plain"`
+		Plain  bool   `json:"plain"`
+		OS     string `json:"os"`
 		Mounts []struct {
 			Location   string `json:"location"`
 			MountPoint string `json:"mountPoint"`

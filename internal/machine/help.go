@@ -1,7 +1,6 @@
 package machine
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -16,6 +15,7 @@ Commands:
   stop    Stop the VM, terminating workloads and preserving files
   status  Show VM status without creating or starting it
   share   Add a writable share while the VM is stopped
+  resize  Change CPU/memory or grow the disk while the VM is stopped
 
 Notes:
   Run as your regular Mac user. Requires macOS 13.5+ and Lima 2.0+.
@@ -36,6 +36,7 @@ Options:
 
 Notes:
   Creates the product VM; options apply only before it exists.
+  To change existing resources, stop it and use casklet machine resize.
   The home directory is already shared. Shares cannot overlap or cover /.
   To add a share to an existing VM, stop it and use casklet machine share DIRECTORY.
   Run as your regular Mac user; requires macOS 13.5+ and Lima 2.0+.
@@ -77,7 +78,8 @@ Options:
   -h, --help  Show this help
 
 Notes:
-  Shows the product VM's name, state, and architecture.
+  Shows the product VM's name, state, architecture, and configured CPU/memory/disk.
+  Configured resources apply on the next start after machine resize.
   Does not create or start a VM. A missing VM appears as not initialized.
 
 Examples:
@@ -98,6 +100,26 @@ Notes:
 Examples:
   casklet machine stop
   casklet machine share /Volumes/ContainerData
+  casklet machine start
+`,
+	"machine resize": `Usage: casklet machine resize [--cpus N] [--memory GiB] [--disk GiB]
+
+Options:
+  --cpus    CPU count, 1-64; omitted values keep the current configuration
+  --memory  Memory in GiB, 1-128
+  --disk    Disk in GiB, 4-1024; growth only, shrinking is rejected
+
+Notes:
+  Requires an existing stopped product VM and at least one resource option.
+  Saves resource configuration; the next machine start applies it and grows the disk.
+  Preserves VM storage, containers, images, volumes, shares, and unrelated settings.
+  Repeating the current values is a no-op. Never stops or starts the VM implicitly.
+  Stop running workloads before machine stop; stopping terminates them and preserves files.
+
+Examples:
+  casklet machine stop
+  casklet machine resize --cpus 6 --memory 8 --disk 40
+  casklet machine status
   casklet machine start
 `,
 	"rootfs": `Usage: casklet rootfs DIRECTORY
@@ -147,17 +169,17 @@ func directHostHelp(args []string) (bool, error) {
 	return true, flag.ErrHelp
 }
 
-func initHelpResult(options []string) error {
+func resourceHelpResult(command string, options []string) error {
 	for i := 0; i < len(options); i++ {
 		if isHelpOption(options[i]) {
 			if i != len(options)-1 {
-				return errors.New("machine init help accepts no additional arguments; use casklet help machine init")
+				return fmt.Errorf("machine %s help accepts no additional arguments; use casklet help machine %s", command, command)
 			}
 			return flag.ErrHelp
 		}
 		_, _, inline := strings.Cut(options[i], "=")
 		if !inline {
-			i++ // All machine init options take exactly one value.
+			i++ // All machine init/resize options take exactly one value.
 		}
 	}
 	return flag.ErrHelp
