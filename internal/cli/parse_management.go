@@ -15,7 +15,7 @@ import (
 func parseManagement(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	if r.Action == "ps" || r.Action == "stop" || r.Action == "rm" {
+	if r.Action == "ps" || r.Action == "stop" || r.Action == "rm" || r.Action == "stats" {
 		fs.Func("filter", "repeatable container selector", func(value string) error {
 			filter, err := container.ParseFilter(value)
 			if err == nil {
@@ -24,7 +24,7 @@ func parseManagement(r Request, args []string) (Request, error) {
 			return err
 		})
 	}
-	if r.Action == "stop" || r.Action == "rm" {
+	if r.Action == "stop" || r.Action == "rm" || r.Action == "stats" {
 		fs.BoolVar(&r.All, "all", false, "select all retained containers")
 	}
 	switch r.Action {
@@ -48,6 +48,7 @@ func parseManagement(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.All, "a", false, "include completed containers")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
 	case "stats":
+		fs.BoolVar(&r.Watch, "watch", false, "continuously sample the selected containers")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON statistics")
 		fs.DurationVar(&r.Interval, "interval", time.Second, "CPU sampling interval")
 	case "logs":
@@ -80,7 +81,12 @@ func parseManagement(r Request, args []string) (Request, error) {
 		}
 		return r, nil
 	}
-	if r.Action == "stop" || r.Action == "rm" {
+	if r.Action == "stats" {
+		if err := container.ValidateStatsInterval(r.Interval); err != nil {
+			return r, err
+		}
+	}
+	if r.Action == "stop" || r.Action == "rm" || r.Action == "stats" {
 		if fs.NArg() > 0 && (r.All || len(r.Filters) > 0) {
 			return r, errors.New("container operands cannot be combined with --all or --filter")
 		}

@@ -24,6 +24,7 @@ type Request struct {
 	Reference     string
 	Tail          int
 	Follow        bool
+	Watch         bool
 	StopTimeout   *time.Duration
 	Healthy       bool
 	WaitTimeout   time.Duration

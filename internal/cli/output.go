@@ -57,19 +57,25 @@ func writeStats(out io.Writer, stats container.Statistics, asJSON bool) error {
 	if asJSON {
 		return json.NewEncoder(out).Encode(stats)
 	}
-	memory, cpu := "N/A", "N/A"
-	if stats.MemoryBytes != nil {
-		memory = strconv.FormatUint(*stats.MemoryBytes, 10)
-	}
-	if stats.CPUPercent != nil {
-		cpu = fmt.Sprintf("%.2f%%", *stats.CPUPercent)
-	}
+	return writeStatsRows(out, []container.Statistics{stats})
+}
+
+func writeStatsRows(out io.Writer, values []container.Statistics) error {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tMEMORY (BYTES)\tLIMIT (BYTES)\tCPU"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", displayID(stats.ID), stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
-		return err
+	for _, stats := range values {
+		memory, cpu := "N/A", "N/A"
+		if stats.MemoryBytes != nil {
+			memory = strconv.FormatUint(*stats.MemoryBytes, 10)
+		}
+		if stats.CPUPercent != nil {
+			cpu = fmt.Sprintf("%.2f%%", *stats.CPUPercent)
+		}
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", displayID(stats.ID), stats.Name, stats.State, memory, stats.MemoryLimitBytes, cpu); err != nil {
+			return err
+		}
 	}
 	return w.Flush()
 }

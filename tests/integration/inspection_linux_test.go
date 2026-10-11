@@ -277,3 +277,24 @@ func waitStatsSampling(t *testing.T, cmd *exec.Cmd, id string) {
 	}
 	t.Fatal("statistics request did not pin its workload cgroup")
 }
+
+func TestStatsMultipleShareSamplingWindow(t *testing.T) {
+	first := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
+	second := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
+	started := time.Now()
+	output := backgroundSuccess(t, "stats", "--json", "--interval", "2s", first, second)
+	elapsed := time.Since(started)
+	var rows []container.Statistics
+	if err := json.Unmarshal([]byte(output), &rows); err != nil || len(rows) != 2 || rows[0].ID != first || rows[1].ID != second || rows[0].MemoryBytes == nil || rows[1].CPUPercent == nil {
+		t.Fatalf("multi sample: %s %v", output, err)
+	}
+	if elapsed < 2*time.Second || elapsed > 3500*time.Millisecond {
+		t.Fatalf("serial or skipped sampling window: %v", elapsed)
+	}
+	for _, row := range rows {
+		interval, err := time.ParseDuration(row.Interval)
+		if err != nil || interval < 2*time.Second {
+			t.Fatalf("interval: %s %v", row.Interval, err)
+		}
+	}
+}

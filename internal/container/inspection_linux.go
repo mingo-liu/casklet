@@ -59,6 +59,7 @@ func Inspect(ctx context.Context, ref string) (Inspection, error) {
 	return inspectRecord(record, cfg), nil
 }
 
+// Stats retains the single-reference error contract.
 func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics, error) {
 	if err := ValidateStatsInterval(interval); err != nil {
 		return Statistics{}, err
@@ -67,59 +68,134 @@ func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics,
 	if err != nil {
 		return Statistics{}, err
 	}
-	record, cfg, err := refreshedSnapshot(ctx, store, ref)
+	record, _, err := refreshedSnapshot(ctx, store, ref)
 	if err != nil {
 		return Statistics{}, err
 	}
-	result := Statistics{ID: record.ID, Name: record.Name, State: record.State, SampledAt: time.Now().UTC(),
-		Interval: "0s", MemoryLimitBytes: cfg.Memory}
-	unavailable := func(reason string) (Statistics, error) {
-		result.MemoryUnavailable, result.CPUUnavailable = reason, reason
-		return result, nil
-	}
-	if record.Terminal() {
-		return unavailable("container is completed; live metrics are not retained")
-	}
-	if record.Cgroup == "" {
-		return unavailable("workload cgroup is not available")
-	}
-	// Refuse unrelated cgroups even if private metadata has been corrupted.
-	if filepath.Clean(record.Cgroup) != record.Cgroup || !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") ||
-		filepath.Base(filepath.Dir(record.Cgroup)) != unitName(record.ID, record.Generation) ||
-		!workloadName.MatchString(filepath.Base(record.Cgroup)) {
-		return unavailable("invalid workload cgroup identity")
-	}
-	reader, err := cgroup.OpenMetrics(record.Cgroup)
-	if err != nil {
-		return unavailable("workload cgroup is not available")
-	}
-	defer reader.Close()
-	first := reader.Sample()
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return Statistics{}, ctx.Err()
-	case <-timer.C:
-	}
-	second := reader.Sample()
-	// Recheck by immutable ID after sampling, covering exit and concurrent removal.
-	latest, err := store.Get(ctx, record.ID)
+	results, err := sampleStatistics(ctx, store, []string{record.ID}, interval)
 	if err != nil {
 		return Statistics{}, err
 	}
-	result.State, result.SampledAt = latest.State, second.At.UTC()
-	result.Interval = second.At.Sub(first.At).String()
-	if latest.Terminal() || latest.Generation != record.Generation {
-		return unavailable("container is completed; live metrics are not retained")
+	return results[0], nil
+}
+
+// StatsMany samples pinned container IDs within one shared waiting window.
+// A removed container produces unavailable metrics without hiding other rows.
+func StatsMany(ctx context.Context, ids []string, interval time.Duration) ([]Statistics, error) {
+	store, err := managementStore()
+	if err != nil {
+		return nil, err
 	}
-	result.MemoryBytes, result.CPUUsageUsec = second.MemoryBytes, second.CPUUsageUsec
-	result.CPUPercent = cpuPercent(first.CPUUsageUsec, second.CPUUsageUsec, second.At.Sub(first.At))
-	if result.MemoryBytes == nil {
-		result.MemoryUnavailable = "memory counter is unavailable or invalid"
+	return sampleStatistics(ctx, store, ids, interval)
+}
+
+type statsSample struct {
+	result     Statistics
+	generation uint64
+	reader     *cgroup.MetricsReader
+	first      cgroup.Metrics
+}
+
+func (sample *statsSample) unavailable(reason string) {
+	sample.result.MemoryBytes, sample.result.CPUPercent, sample.result.CPUUsageUsec = nil, nil, nil
+	sample.result.MemoryUnavailable, sample.result.CPUUnavailable = reason, reason
+}
+
+func sampleStatistics(ctx context.Context, store *Store, ids []string, interval time.Duration) ([]Statistics, error) {
+	if err := ValidateStatsInterval(interval); err != nil {
+		return nil, err
 	}
-	if result.CPUPercent == nil {
-		result.CPUUnavailable = "CPU counters are unavailable, invalid, or reset"
+	samples := make([]statsSample, len(ids))
+	defer func() {
+		for i := range samples {
+			if samples[i].reader != nil {
+				samples[i].reader.Close()
+			}
+		}
+	}()
+	active := false
+	for i, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sample := &samples[i]
+		sample.result = Statistics{ID: id, State: "removed", SampledAt: time.Now().UTC(), Interval: "0s"}
+		record, cfg, err := refreshedSnapshot(ctx, store, id)
+		if errors.Is(err, ErrNotFound) {
+			sample.unavailable("container was removed")
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sample.generation = record.Generation
+		sample.result.ID, sample.result.Name, sample.result.State = record.ID, record.Name, record.State
+		sample.result.MemoryLimitBytes = cfg.Memory
+		if record.Terminal() {
+			sample.unavailable("container is completed; live metrics are not retained")
+			continue
+		}
+		if record.Cgroup == "" {
+			sample.unavailable("workload cgroup is not available")
+			continue
+		}
+		if filepath.Clean(record.Cgroup) != record.Cgroup || !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") ||
+			filepath.Base(filepath.Dir(record.Cgroup)) != unitName(record.ID, record.Generation) ||
+			!workloadName.MatchString(filepath.Base(record.Cgroup)) {
+			sample.unavailable("invalid workload cgroup identity")
+			continue
+		}
+		sample.reader, err = cgroup.OpenMetrics(record.Cgroup)
+		if err != nil {
+			sample.unavailable("workload cgroup is not available")
+			continue
+		}
+		sample.first = sample.reader.Sample()
+		active = true
 	}
-	return result, nil
+	if active {
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	results := make([]Statistics, len(samples))
+	for i := range samples {
+		sample := &samples[i]
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if sample.reader != nil {
+			second := sample.reader.Sample()
+			latest, err := store.Get(ctx, sample.result.ID)
+			sample.result.SampledAt, sample.result.Interval = second.At.UTC(), second.At.Sub(sample.first.At).String()
+			if errors.Is(err, ErrNotFound) {
+				sample.result.State = "removed"
+				sample.unavailable("container was removed")
+			} else if err != nil {
+				return nil, err
+			} else {
+				sample.result.State = latest.State
+				if latest.Terminal() {
+					sample.unavailable("container is completed; live metrics are not retained")
+				} else if latest.Generation != sample.generation {
+					sample.unavailable("container execution changed during sampling")
+				} else {
+					sample.result.MemoryBytes, sample.result.CPUUsageUsec = second.MemoryBytes, second.CPUUsageUsec
+					sample.result.CPUPercent = cpuPercent(sample.first.CPUUsageUsec, second.CPUUsageUsec, second.At.Sub(sample.first.At))
+					if sample.result.MemoryBytes == nil {
+						sample.result.MemoryUnavailable = "memory counter is unavailable or invalid"
+					}
+					if sample.result.CPUPercent == nil {
+						sample.result.CPUUnavailable = "CPU counters are unavailable, invalid, or reset"
+					}
+				}
+			}
+		}
+		results[i] = sample.result
+	}
+	return results, nil
 }

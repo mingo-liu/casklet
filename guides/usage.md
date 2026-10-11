@@ -927,3 +927,28 @@ Plain `wait ID|NAME` still waits for process exit and prints/returns its exit co
 Temporary files under `/tmp` are reset on each execution, so readiness probes must
 account for that lifecycle. See the [Docker HEALTHCHECK reference](https://docs.docker.com/reference/dockerfile/#healthcheck)
 for the source image configuration semantics.
+
+## Multi-container resource monitoring
+
+`stats` accepts multiple container references, `--all`, or repeatable `--filter`
+selectors using the same AND semantics as `ps`. Operands cannot be mixed with
+selectors. Selectors include completed retained containers, whose metrics are
+unavailable. Explicit references are resolved before sampling; duplicate IDs are
+sampled once. Multiple containers share one sampling wait rather than serial waits.
+
+```sh
+casklet stats --interval 250ms worker database
+casklet stats --watch --filter label=project=demo
+casklet stats --watch --json --interval 1s --all
+```
+
+The default is one sample. `--watch` streams successive tables, or newline-delimited
+JSON, over one guest session. One explicit operand keeps the existing JSON object;
+multiple operands/selectors emit arrays, including `[]` for an empty selection.
+No ANSI cursor controls are emitted, so redirected output stays readable.
+Selection pins full IDs once; later containers and reused names are excluded.
+A removed selected ID stays as an unavailable row. Each frame acquires fresh
+execution metrics after restart; a generation change during sampling reports
+unavailable metrics rather than combining different executions. CPU 100% means one
+fully used core. Missing metrics are N/A/JSON null rather than zero. Empty selections
+exit after one frame. Interrupting monitoring leaves workloads running.

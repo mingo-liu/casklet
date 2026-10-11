@@ -364,3 +364,13 @@ No persistent DNS daemon or new engine re-exec mode is required. Named bridge
 firewall drops restrict forwarding to other casklet networks without modifying
 unrelated host tables or policies. Published host ports retain the existing Lima
 address translation and forwarding path.
+
+## Resource monitoring
+
+The CLI resolves and deduplicates a statistics selection to immutable IDs once.
+Container multi-sampling pins each execution cgroup, reads starting counters,
+waits once for the entire set, reads final counters, and rechecks ID/generation.
+Removed or changed executions expose unavailable values. Each watch frame obtains
+fresh readers, so restarts never share counters. Readers close before output and
+between frames. The CLI throttles unavailable frames, owns cancellation/output,
+and streams table frames or newline-delimited JSON through the existing guest session.
