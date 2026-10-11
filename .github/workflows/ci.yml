@@ -27,6 +27,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make fmt-check test vet test-race
+      - name: Check disposable macOS runner cleanup
+        if: runner.os == 'macOS'
+        run: python3 -B -m unittest discover -s scripts -p '*_test.py' -v
       - name: Build macOS clients with bundled Linux engines
         if: runner.os == 'macOS'
         run: |

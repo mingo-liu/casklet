@@ -4,7 +4,7 @@
 
 ## macOS client
 
-Install Go 1.27.1+, Make, and Lima 2.0+ on macOS 13.5+:
+Install Go 1.27.2+, Make, and Lima 2.0+ on macOS 13.5+:
 
 ```sh
 brew install lima
@@ -113,8 +113,84 @@ the test bridge through existing forwarding rules, and prepares rootless user
 delegation. Do not use that provisioning script on a shared self-hosted runner.
 All jobs run for pushes, pull requests, and manual dispatch; integration failures
 fail CI rather than being ignored. Configure these checks as required in the
-repository's branch/release rules. macOS end-to-end tests still run locally
-through the same Lima VM with `make test-macos`.
+repository's branch/release rules. Local macOS end-to-end tests run through the
+same Lima VM with `make test-macos`; dedicated CI uses the isolation described below.
+
+## Dedicated macOS end-to-end CI
+
+`.github/workflows/macos-e2e.yml` runs the complete `make test-macos` client/VM
+suite weekly, when a release is published, or by manual dispatch from `main`.
+It is opt-in because GitHub-hosted Mac runners cannot be assumed to support the
+product's Virtualization.framework VM. Before enabling it:
+
+1. Register a dedicated self-hosted Mac runner with labels `self-hosted`, `macOS`,
+   and `casklet-e2e`. Use macOS 13.5+ with working Virtualization.framework,
+   Lima 2.0+, Make, Python 3.9+, and network access to Ubuntu images and packages.
+   The job installs the Go version in `go.mod` through `setup-go`.
+2. Run the agent as a regular dedicated Mac account with no personal files,
+   credentials, everyday containers, or other jobs. Product provisioning mounts
+   this account's home writable. The test suite uses free host ports but requires
+   exclusive use of this runner. Do not attach a personal workstation runner.
+3. Create the GitHub environment `macos-e2e`, restrict it to `main` and protected
+   release tags, and configure reviewer approval if required by your release
+   policy. Limit runner-group access to this repository where supported.
+4. Set repository Actions variable `CASKLET_MACOS_E2E_ENABLED` to `1`. Until a
+   capable runner and environment exist, leave it unset; the job skips instead
+   of queuing indefinitely. Neither runner registration nor environment creation
+   is performed by the workflow.
+
+The workflow never runs for pull requests or ordinary pushes. A GitHub-hosted
+gate verifies that the selected immutable revision is an ancestor of `main`
+before any code reaches the persistent Mac. Manual dispatch from another branch
+is refused, release tags must already be merged into `main`, checkout does not
+persist its token, and concurrency queues runs rather than canceling cleanup.
+Protect `main`, release tags, and workflow changes: trusted repository code can
+execute with the runner account's permissions. The environment policy is an
+additional administrative gate, not a substitute for protecting those refs.
+
+`scripts/test-macos-ci.py` creates a fresh short path under `/private/tmp` for
+`LIMA_HOME` and a private temporary directory inside the ordinary shared home for
+`CASKLET_MACHINE_STATE_DIR`. The latter changes the host initialization lock,
+generated configuration, and engine staging directory. It requires an absolute
+path within a configured writable share so the installer can transfer its payload.
+Always pair the two when testing an independent machine: changing host state alone
+does not isolate the VM. The ordinary home share remains available for live-bind tests.
+This is a disposable product VM, not a second permanent development VM; the
+runner never adopts or stops an inherited Lima home or daily product VM.
+The runner enables `CASKLET_MACOS_RESIZE_GROW=1` so the opt-in disk-growth
+regression can exercise real expansion once available, only on this temporary VM.
+
+The suite has a 35-minute outer deadline, retains the existing Go test timeout,
+and terminates its command group on timeout or catchable signals. Bounded
+diagnostics collect suite output, the instance listing, recent guest journal,
+and up to 20 Lima logs (last 4 MiB each). Cleanup forcibly stops and deletes only
+the isolated `casklet-runtime`, then removes both temporary directories. Logs upload
+even when tests fail and are retained for 14 days; disks, SSH keys, and credential
+files are excluded. Inspect artifacts before publishing them externally.
+
+If teardown fails, the job fails and preserves the temporary directory recorded
+in `run-directory.txt` and `state-directory.txt`. An uncatchable kill, host shutdown, or job cancellation
+can also leave a VM behind. Before reusing the runner, verify the recorded path
+belongs to this run, then use `LIMA_HOME=/private/tmp/ck-e2e-EXAMPLE/lima limactl
+delete --force casklet-runtime` and remove only those run and state directories after the VM
+has stopped. Never run recovery against the default Lima home. Runner operators
+must check for abandoned runs after a host interruption; the script does not
+delete unknown old directories automatically.
+
+To run the same disposable suite manually on a dedicated Mac account:
+
+```sh
+./scripts/test-macos-ci.py
+python3 -B -m unittest discover -s scripts -p '*_test.py' -v
+```
+
+Artifacts default to `bin/macos-e2e-artifacts`; set `CASKLET_MACOS_CI_ARTIFACTS`
+to a separate directory per run when retaining multiple runs. Set
+`CASKLET_MACOS_CI_TIMEOUT_SECONDS` (60–3600) to adjust the outer deadline.
+The fake-runner checks cover success, launch/bootstrap/test failure, deadline, SIGTERM, cleanup
+failure, preservation of inherited daily state, and exclusion of SSH keys. They
+run in ordinary macOS CI without virtualization. A passing fake/unit check does
+not establish that the real workflow or VM suite passed.
 
 ## OCI regression tests
 
