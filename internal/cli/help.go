@@ -12,7 +12,7 @@ Commands:
   exec      Run a command in a running container
   ps        List containers
   inspect   Show a container's configuration and lifecycle as JSON
-  stats     Sample a container's memory and CPU usage
+  stats     Sample or monitor container memory and CPU usage
   logs      Read or follow retained container output
   stop      Stop a container gracefully
   wait      Wait for container exit or health
@@ -420,21 +420,31 @@ Examples:
   casklet inspect worker
   casklet ps -a
 `,
-	"stats": `Usage: casklet stats [--json] [--interval DURATION] ID|NAME
+	"stats": `Usage: casklet stats [--json] [--watch] [--interval DURATION] ID|NAME [ID|NAME ...]
+       casklet stats [--json] [--watch] [--interval DURATION] (--all | --filter FILTER ...)
 
 Options:
-  --json      Print JSON statistics with the full container ID
-  --interval  CPU sampling interval, 10ms-1m (default: 1s)
+  --json      Print JSON; one operand uses an object, otherwise an array
+  --watch     Stream repeated samples until interrupted
+  --all       Select all retained containers, including completed containers
+  --filter    Repeatable selector, same AND semantics as ps
+  --interval  CPU sampling and refresh interval, 10ms-1m (default: 1s)
 
 Notes:
-  Flags must precede ID|NAME. Prints one sample; CPU 100% means one fully used core.
+  Flags precede operands. Operands cannot be mixed with selectors.
+  Selection pins full IDs once; new containers and reused names are not followed.
+  Watch prints successive tables or one JSON object/array per line; no ANSI controls.
+  Empty selections print once and exit. Removed rows remain unavailable.
+  Restarted containers are sampled afresh; changes during a sample report N/A.
+  CPU 100% means one fully used core. Missing metrics appear as N/A (JSON null).
   Table IDs show the first 12 hexadecimal characters; --json retains the full ID.
-  Missing live metrics appear as N/A (JSON null).
 
 Examples:
   casklet stats worker
-  casklet stats --json --interval 250ms worker
+  casklet stats --watch --json --interval 250ms worker database
+  casklet stats --watch --filter label=project=demo
 `,
+
 	"logs": `Usage: casklet logs [--tail N] [-f|--follow] ID|NAME
 
 Options:
