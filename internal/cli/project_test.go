@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
@@ -93,6 +99,168 @@ func TestProjectEnvironmentFingerprintKeepsImageOverridesDistinct(t *testing.T) 
 	}
 	if fingerprint(`["B=two","A=old","A=one"]`) != fingerprint(`["A=one","B=two"]`) {
 		t.Fatal("equivalent explicit environment has different identity")
+	}
+}
+
+func TestProjectAliasFingerprintIgnoresOrderAndDetectsChanges(t *testing.T) {
+	service := func(aliases string) project.Service {
+		t.Helper()
+		file := projectConfigFile(t, `{"name":"demo","services":{"app":{"run":{"image":"app:1","network-alias":`+aliases+`}}}}`)
+		request, err := Parse([]string{"project", "up", "--config", file})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return request.Project.Services[0]
+	}
+	first := service(`["web","backend"]`)
+	for _, aliases := range []string{`["backend","web"]`, `["app","web","backend"]`} {
+		if other := service(aliases); other.Fingerprint != first.Fingerprint {
+			t.Fatalf("equivalent aliases %s have different fingerprints", aliases)
+		}
+	}
+	for _, aliases := range []string{`["web"]`, `["web","backend","extra"]`} {
+		if other := service(aliases); other.Fingerprint == first.Fingerprint {
+			t.Fatalf("changed aliases %s have the same fingerprint", aliases)
+		}
+	}
+	// Fingerprint normalization must leave the generated run arguments intact.
+	request, err := Parse(first.Args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(request.Config.NetworkAliases, []string{"web", "backend", "app"}) {
+		t.Fatalf("run alias order changed: %v", request.Config.NetworkAliases)
+	}
+}
+
+func TestProjectLegacyAliasFingerprintReusesServicesAndRejectsDrift(t *testing.T) {
+	// This hash was generated before alias order was normalized, with explicit
+	// aliases web/backend followed by the automatically added service alias app.
+	const legacyFingerprint = "eb2ce534958b53f25d0e707e930104a3fcb722e8133cc7ad94678b90b28b8d61"
+	for _, test := range []struct {
+		name         string
+		fields       string
+		owner        string
+		inspectionID string
+		inspectError bool
+		canonical    bool
+		stopped      bool
+		wantError    bool
+	}{
+		{name: "unchanged", fields: `"network-alias":["web","backend"]`},
+		{name: "reordered", fields: `"network-alias":["backend","web"]`},
+		{name: "service alias reordered", fields: `"network-alias":["app","backend","web"]`},
+		{name: "canonical fast path", fields: `"network-alias":["backend","web"]`, canonical: true},
+		{name: "stopped", fields: `"network-alias":["backend","web"]`, stopped: true},
+		{name: "added alias", fields: `"network-alias":["backend","web","extra"]`, wantError: true},
+		{name: "removed alias", fields: `"network-alias":["web"]`, wantError: true},
+		{name: "changed environment", fields: `"network-alias":["backend","web"],"env":["MODE=changed"]`, wantError: true},
+		{name: "changed command", fields: `"network-alias":["backend","web"],"command":["/bin/true"]`, wantError: true},
+		{name: "wrong ownership", fields: `"network-alias":["backend","web"]`, owner: "other", wantError: true},
+		{name: "wrong inspected identity", fields: `"network-alias":["backend","web"]`, inspectionID: "other", wantError: true},
+		{name: "inspection failure", fields: `"network-alias":["backend","web"]`, inspectError: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := projectConfigFile(t, `{"name":"demo","services":{"app":{"run":{"image":"app:1",`+test.fields+`}}}}`)
+			request, err := Parse([]string{"project", "up", "--config", file})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := container.Record{ID: strings.Repeat("1", 32), Name: "cp-demo-app", State: container.StateRunning,
+				Labels: map[string]string{project.LabelName: "demo", project.LabelService: "app", project.LabelSpec: legacyFingerprint}}
+			if test.canonical {
+				record.Labels[project.LabelSpec] = request.Project.Services[0].Fingerprint
+			}
+			savedFingerprint := record.Labels[project.LabelSpec]
+			if test.owner != "" {
+				record.Labels[project.LabelName] = test.owner
+			}
+			if test.stopped {
+				record.State = container.StateExited
+			}
+			network := project.Resource{Kind: "network", Name: "cp-demo-default", CreatedAt: time.Unix(100, 0).UTC()}
+			var mutations []string
+			call := func(ctx context.Context, args ...string) ([]byte, error) {
+				switch args[0] {
+				case "ps":
+					return json.Marshal([]container.Record{record})
+				case "inspect":
+					if test.canonical || test.owner != "" || args[1] != record.ID {
+						t.Fatalf("inspected unowned or wrong container: %v", args)
+					}
+					if test.inspectError {
+						return nil, errors.New("inspection failed")
+					}
+					id := record.ID
+					if test.inspectionID != "" {
+						id = test.inspectionID
+					}
+					return json.Marshal(container.Inspection{ID: id, Config: container.InspectionConfig{
+						NetworkAliases: []string{"web", "backend", "app", "cp-demo-app"}}})
+				case "network":
+					return json.Marshal([]project.Resource{network})
+				case "volume":
+					return []byte("[]"), nil
+				case "start":
+					mutations = append(mutations, "start")
+					if !test.stopped || args[1] != record.ID {
+						t.Fatalf("unexpected start: %v", args)
+					}
+					record.State = container.StateRunning
+					return []byte(record.ID), nil
+				default:
+					mutations = append(mutations, args[0])
+					return nil, errors.New("unexpected mutation")
+				}
+			}
+			runner := project.Runner{Call: call, State: project.State{Version: 1, Name: "demo",
+				Resources: map[string]project.Resource{"network:cp-demo-default": network}}, Save: func(project.State) error {
+				t.Fatal("reused resources must not rewrite ownership state")
+				return nil
+			}}
+			records, err := runner.Up(context.Background(), request.Project, time.Second)
+			if (err != nil) != test.wantError {
+				t.Fatalf("up returned %v, want error %v", err, test.wantError)
+			}
+			if !test.wantError && (len(records) != 1 || records[0].ID != record.ID || records[0].Labels[project.LabelSpec] != savedFingerprint) {
+				t.Fatalf("legacy service was not preserved: %v", records)
+			}
+			if test.stopped {
+				if !reflect.DeepEqual(mutations, []string{"start"}) {
+					t.Fatalf("stopped service was not resumed: %v", mutations)
+				}
+			} else if len(mutations) != 0 {
+				t.Fatalf("existing service or resources mutated: %v", mutations)
+			}
+		})
+	}
+}
+
+func TestProjectLegacyAliasFingerprintPreservesExplicitContainerNameAlias(t *testing.T) {
+	for _, aliases := range []string{`["cp-demo-app","web","backend"]`, `["web","backend","app","cp-demo-app"]`} {
+		t.Run(aliases, func(t *testing.T) {
+			file := projectConfigFile(t, `{"name":"demo","services":{"app":{"run":{"image":"app:1","network-alias":`+aliases+`}}}}`)
+			request, err := Parse([]string{"project", "up", "--config", file})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := request.Project.Services[0]
+			original, err := Parse(service.Args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, label := range []string{project.LabelName, project.LabelService, project.LabelSpec} {
+				delete(original.Config.Labels, label)
+			}
+			legacy := projectFingerprint(original.Config, original.Entrypoint)
+			savedAliases := slices.Clone(original.Config.NetworkAliases)
+			if !service.MatchLegacyFingerprint(legacy, savedAliases) {
+				t.Fatal("explicit container name alias was treated as an implicit store alias")
+			}
+			if !reflect.DeepEqual(savedAliases, original.Config.NetworkAliases) {
+				t.Fatal("legacy verification modified saved aliases")
+			}
+		})
 	}
 }
 

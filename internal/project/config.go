@@ -49,6 +49,9 @@ type Service struct {
 	Fingerprint string
 	Args        []string
 	DependsOn   map[string]string
+	// MatchLegacyFingerprint verifies an old ordered-alias hash using the
+	// desired configuration and the inspected container's saved alias order.
+	MatchLegacyFingerprint func(string, []string) bool
 }
 
 type Plan struct {

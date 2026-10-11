@@ -82,8 +82,21 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) 
 		desired[service.Key] = true
 		for _, record := range all {
 			if record.Name == service.Name {
-				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key || record.Labels[LabelSpec] != service.Fingerprint {
+				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key {
 					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+				}
+				if record.Labels[LabelSpec] != service.Fingerprint {
+					if service.MatchLegacyFingerprint == nil {
+						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+					}
+					data, err := runner.Call(ctx, "inspect", record.ID)
+					if err != nil {
+						return nil, err
+					}
+					var inspection container.Inspection
+					if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || !service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases) {
+						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+					}
 				}
 				existing[service.Key] = record
 			}

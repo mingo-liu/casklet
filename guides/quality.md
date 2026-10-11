@@ -6,6 +6,38 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-11: Order-independent project network alias fingerprints
+
+Project service fingerprints sort a copy of network aliases so equivalent alias
+sets retain the same identity. Generated run arguments keep their original order;
+adding/removing aliases and changing other execution settings still count as drift.
+
+Existing services retain their immutable labels and ordered-alias hashes. On a
+hash mismatch, matching project/service ownership permits inspection of the exact
+container ID. The desired full configuration is hashed with the saved alias order
+only after its alias set matches, excluding a store-appended container name when
+it was not explicit. This supports running reuse and stopped-service resumption
+without recreation while preserving ownership and configuration drift checks.
+No environment values are obtained from inspection or added to ownership state.
+
+Regressions cover reordered and automatically added service aliases, added/removed
+aliases, unchanged run arguments, a pinned pre-fix hash, legacy running/stopped
+reuse, environment/command drift, wrong ownership/inspection identity, inspection
+errors, and explicit container-name aliases. The macOS deployment regression also
+reorders aliases and checks unchanged container IDs/generations plus all DNS names.
+Focused help, usage, architecture, and bilingual quick starts describe the behavior.
+
+Validation:
+
+- The alias-order regression failed against the original implementation.
+- macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
+  and CLI/project race checks passed.
+- The complete disposable macOS arm64 suite passed all 50 tests, including
+  unchanged IDs/generations after alias reorder, DNS resolution, project rollback,
+  cancellation, storage, health, machine resize and terminals. The runner deleted
+  its isolated VM and host state. Intel Mac execution was not performed locally;
+  privileged Linux validation is provided by the PR's disposable hosted CI suites.
+
 ## 2026-10-11: Declarative project deployment and bounded rollback
 
 Added local strict JSON `project up --config`, `project ps`, and `project down`.

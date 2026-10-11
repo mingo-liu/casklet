@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -204,12 +205,9 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				aliasesInUse[reservation] = key
 			}
 		}
-		canonical, _ := json.Marshal(struct {
-			Config     config.Config
-			Entrypoint *string
-		}{request.Config, request.Entrypoint})
-		digest := sha256.Sum256(canonical)
-		fingerprint := hex.EncodeToString(digest[:])
+		request.Config.NetworkAliases = slices.Clone(request.Config.NetworkAliases)
+		sort.Strings(request.Config.NetworkAliases)
+		fingerprint := projectFingerprint(request.Config, request.Entrypoint)
 		labels := []string{"--label", project.LabelName + "=" + doc.Name, "--label", project.LabelService + "=" + key, "--label", project.LabelSpec + "=" + fingerprint}
 		args = append(append([]string{args[0]}, labels...), args[1:]...)
 		// Validate the final label budget and all generated options before starting a VM.
@@ -217,9 +215,33 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		if _, err := Parse(validationArgs); err != nil {
 			return plan, fmt.Errorf("invalid generated configuration for service %q", key)
 		}
-		plan.Services = append(plan.Services, project.Service{Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn})
+		plan.Services = append(plan.Services, project.Service{Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
+			MatchLegacyFingerprint: func(saved string, aliases []string) bool {
+				// The store appends the container name if it is not already an
+				// explicit alias. It was absent from that legacy config hash.
+				if !slices.Contains(request.Config.NetworkAliases, name) && len(aliases) > 0 && aliases[len(aliases)-1] == name {
+					aliases = aliases[:len(aliases)-1]
+				}
+				sorted := slices.Clone(aliases)
+				sort.Strings(sorted)
+				if !slices.Equal(sorted, request.Config.NetworkAliases) {
+					return false
+				}
+				legacy := request.Config
+				legacy.NetworkAliases = aliases
+				return projectFingerprint(legacy, request.Entrypoint) == saved
+			}})
 	}
 	return plan, nil
+}
+
+func projectFingerprint(cfg config.Config, entrypoint *string) string {
+	canonical, _ := json.Marshal(struct {
+		Config     config.Config
+		Entrypoint *string
+	}{cfg, entrypoint})
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:])
 }
 
 func containsProjectAlias(aliases []string, name string) bool {

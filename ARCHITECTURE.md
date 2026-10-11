@@ -373,9 +373,12 @@ validates the bounded dependency DAG and owns operation sequencing, resource
 receipts and rollback. It calls the existing executable's command paths, preserving
 macOS Keychain preparation, path/share translation, host-port preflight, readiness,
 generation fencing and managed lifecycle policy. No long-lived project daemon is
-introduced. Config hashes include effective defaults and expanded environment but
-ownership state stores only network/volume names and creation times. Immutable
-container labels carry the project/service/config identity and one startup token.
+introduced. Config hashes include effective defaults and expanded environment,
+with network aliases sorted only for hashing. Legacy hash reuse inspects the
+pinned container ID and verifies the desired configuration against its saved alias
+order before any deployment mutations. Ownership state stores only network/volume
+names and creation times. Immutable container labels carry the project/service/config
+identity and one startup token.
 
 A stable cancelable lock serializes each project in the local machine state directory.
 Atomic synced receipt writes record successfully created resources. Private bounded
