@@ -6,7 +6,7 @@ fail() { printf 'prepare-development: %s\n' "$*" >&2; exit 1; }
 [ -f /usr/local/lib/casklet/provisioned-v1 ] || fail 'start the VM with casklet machine start first'
 sudo -n true || fail 'passwordless sudo is required'
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl make gcc
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gcc make
 version=1.27.2
 if command -v go >/dev/null 2>&1; then
     go version
