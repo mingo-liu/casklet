@@ -46,13 +46,19 @@ Validation:
 
 - macOS arm64 full unit tests, vet, formatting, native client/embedded engine build,
   and project/CLI race checks passed.
-- The complete disposable macOS arm64 suite passed in 180.811 seconds after the
-  final cancellation/configuration checks, including status during a pending
-  dependency, cancellation cleanup, readiness/DNS, reuse and retained data. The
-  runner deleted its isolated VM and state without changing the daily machine.
-- Hosted PR CI validates native Linux unit/race/build checks, vulnerability scans
-  and privileged integration before merge. Intel Mac execution was not performed
-  locally.
+- After synchronizing the statistics feature from main, the complete disposable
+  macOS arm64 suite passed all 50 tests in 181.953 seconds, including project-label
+  metrics, pending-dependency status, cancellation cleanup, readiness/DNS, repeated
+  deployment and retained data. The runner deleted its isolated VM/host state;
+  the daily machine stayed running.
+- The network/volume receipt regressions also passed as root in that disposable
+  Linux arm64 VM using native cross-compiled test executables. They verify refusal
+  to adopt existing resources and preserve replacements with different creation
+  identities, including successful/idempotent removal of the verified volume.
+- Hosted CI passed full native Linux amd64/arm64 unit/vet/race/build checks,
+  vulnerability scanning and both complete privileged integration suites for the
+  initial project feature revision 08f16df. The synchronized PR retains the same
+  required gates. Intel Mac execution was not performed locally.
 
 ## 2026-10-11: Multi-container statistics and continuous monitoring
 
@@ -81,6 +87,10 @@ Validation:
 - Hosted PR CI passed full unit/vet/race/build checks on macOS and native Linux
   amd64/arm64, the four-target vulnerability scan, and both complete privileged
   Linux integration suites. Intel Mac execution was not performed locally.
+- A documentation-only rerun encountered existing log-rotation-follow and
+  supervisor-loss cleanup fixture failures on different runner architectures.
+  The failed jobs passed unchanged on retry; the new multi-sampling regression
+  passed in every run. No retention or cleanup assertion was weakened.
 
 ## 2026-10-11: Private OCI registry authentication
 
