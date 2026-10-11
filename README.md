@@ -148,7 +148,8 @@ casklet image rm IMAGE_ID
 
 Use `project up --config project.json` to deploy multiple services with declared
 networks, data volumes and `started`/`healthy` startup dependencies. Matching services
-are reused; changed configuration fails before deployment mutations. Resources use
+are reused; reordering network aliases keeps service identity, including after an
+upgrade. Changed configuration fails before deployment mutations. Resources use
 `cp-PROJECT-LOGICAL` names and scoped service aliases. See the
 [project configuration example](guides/usage.md#project-deployment).
 

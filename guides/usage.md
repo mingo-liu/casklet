@@ -997,10 +997,13 @@ rejected before startup; live port availability uses the existing Mac preflight.
 
 Repeated `up` keeps matching running containers and starts matching stopped ones.
 Identity includes effective run defaults, expanded env values, source paths and
-entrypoint selection. Environment/config changes fail before deployment mutations;
-use `down`, edit the configuration and run `up` again. Image tags retain their cached
-version; pin a digest for reproducibility. A retained service keeps its immutable
-image across reuse. Services removed from the file require `down` before deploying
+entrypoint selection. Network alias order does not affect identity; adding or
+removing aliases still changes it. Existing services with older ordered-alias
+hashes are verified against their saved alias order and can be reused after an
+upgrade without recreation. Environment/config changes fail before deployment
+mutations; use `down`, edit the configuration and run `up` again. Image tags retain
+their cached version; pin a digest for reproducibility. A retained service keeps its
+immutable image across reuse. Services removed from the file require `down` before deploying
 again. Existing resources are reused only when their creation receipts match local
 project ownership; manually created same-name resources are never adopted.
 

@@ -92,6 +92,10 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 		if err != nil || !strings.Contains(stats, "12 hexadecimal") || !strings.Contains(stats, "--json retains the full ID") || !strings.Contains(stats, "--watch") || !strings.Contains(stats, "--filter") {
 			t.Fatalf("stats help lacks ID display guidance: %q %v", stats, err)
 		}
+		projectUp, err := scopedUsage("project up", macOS)
+		if err != nil || !strings.Contains(projectUp, "Reordering network aliases keeps service identity") || !strings.Contains(projectUp, "older deployments") {
+			t.Fatalf("project up help lacks alias identity guidance: %q %v", projectUp, err)
+		}
 		images, err := scopedUsage("image ls", macOS)
 		for _, detail := range []string{"IMAGE", "one row per reference", "<none>", "12 hexadecimal", "decimal B/kB/MB/GB", "full sha256: IDs", "exact byte sizes"} {
 			if err != nil || !strings.Contains(images, detail) {

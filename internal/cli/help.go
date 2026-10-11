@@ -413,6 +413,7 @@ Notes:
   Default network is default; volume/network references use declared logical names.
   Config-relative paths and env-files are read locally before VM operations.
   Reuses matching running services and starts matching stopped services.
+  Reordering network aliases keeps service identity, including older deployments.
   Changed configs or unowned resource names fail before deployment changes.
   On failure, only this invocation's new verified containers/resources are removed.
   Existing services resumed by up remain running. Image caches are preserved.

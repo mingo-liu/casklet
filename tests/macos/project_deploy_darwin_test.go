@@ -25,7 +25,7 @@ func macProjectConfig(t *testing.T, name string, ready bool) string {
 	document := map[string]any{
 		"name": name, "volumes": []string{"data"},
 		"services": map[string]any{
-			"db":  map[string]any{"run": map[string]any{"mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
+			"db":  map[string]any{"run": map[string]any{"network-alias": []string{"database", "primary"}, "mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
 			"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"command": []string{"/bin/sleep", "300"}}},
 		},
 	}
@@ -63,13 +63,32 @@ func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 		t.Fatal("no db service")
 	}
 	success(t, "exec", db, "--", "/bin/sh", "-c", "printf saved > /data/message")
+	// Reordering equivalent aliases must reuse the existing executions.
+	original, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reordered map[string]any
+	if err := json.Unmarshal(original, &reordered); err != nil {
+		t.Fatal(err)
+	}
+	reordered["services"].(map[string]any)["db"].(map[string]any)["run"].(map[string]any)["network-alias"] = []string{"primary", "database"}
+	updated, err := json.Marshal(reordered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, updated, 0600); err != nil {
+		t.Fatal(err)
+	}
 	var second []container.Record
-	if err := json.Unmarshal([]byte(success(t, "project", "up", "--config", file, "--json")), &second); err != nil || len(second) != 2 || second[0].ID != first[0].ID || second[1].ID != first[1].ID {
+	if err := json.Unmarshal([]byte(success(t, "project", "up", "--config", file, "--json")), &second); err != nil || len(second) != 2 || second[0].ID != first[0].ID || second[1].ID != first[1].ID || second[0].Generation != first[0].Generation || second[1].Generation != first[1].Generation {
 		t.Fatalf("duplicate deployment %v %v", second, err)
 	}
 	api := "cp-" + name + "-api"
-	if output := success(t, "exec", api, "--", "wget", "-T", "1", "-qO-", "http://db:8080"); output != "ready" {
-		t.Fatalf("scoped DNS %q", output)
+	for _, alias := range []string{"db", "database", "primary"} {
+		if output := success(t, "exec", api, "--", "wget", "-T", "1", "-qO-", "http://"+alias+":8080"); output != "ready" {
+			t.Fatalf("scoped DNS for %s: %q", alias, output)
+		}
 	}
 	success(t, "stop", db)
 	success(t, "project", "up", "--config", file)
