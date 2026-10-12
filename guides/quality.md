@@ -6,6 +6,27 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-12: Read only requested initial log tails
+
+Initial `logs --tail` selection now happens under the existing log snapshot lock,
+before payload allocation and reads. All retained artifacts are still opened and
+validated. A backward 32 KiB scan handles rotated segments, empty current files,
+partial and long lines, and terminal newlines. Only the selected suffix is copied;
+zero tails pin the current end without reading historical content. The existing
+incremental follow cursor, inode pin, retention-overrun behavior, legacy lock
+compatibility and generation fences remain unchanged.
+
+Regressions cover rotated/empty/split-line tails, zero/full/oversized requests,
+large retained payloads with small returned allocations, zero-tail follow through
+rotation, skipped unsafe artifacts, cancellation and changed generations. A real
+macOS regression verifies rotated and empty tails. Separate full-snapshot and
+initial-tail benchmarks use four 4 MiB segments.
+
+Validation:
+
+- macOS arm64 formatting, full unit tests, vet, full race checks and native
+  client/embedded engine build passed.
+
 ## 2026-10-11: Order-independent project network alias fingerprints
 
 Project service fingerprints sort a copy of network aliases so equivalent alias

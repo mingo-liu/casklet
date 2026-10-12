@@ -477,6 +477,10 @@ casklet stop 406e742c72ac
 casklet rm 406e742c72ac
 ```
 
+`logs --tail N` reads only the selected suffix after validating retained log files;
+`--tail 0 -f` starts following at the current end without reading historical output.
+Rotated segments, partial lines and execution-generation boundaries are preserved.
+
 `ps` lists active containers; `-a` includes completed ones. `stop` sends the configured stop signal
 and forces shutdown after the grace period. `wait` prints and returns the exit
 code for the execution it observed. `start` and `restart` keep the private rootfs
