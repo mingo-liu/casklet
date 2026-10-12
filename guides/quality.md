@@ -26,6 +26,17 @@ Validation:
 
 - macOS arm64 formatting, full unit tests, vet, full race checks and native
   client/embedded engine build passed.
+- The complete disposable macOS arm64 suite passed all 51 tests in 193.728
+  seconds, including rotated/zero-tail output, VM stop/start, resize, repair,
+  health, projects, storage and terminals. The runner deleted its isolated VM
+  and host state; the daily VM was not used.
+- Linux arm64 log regressions passed as root in that disposable VM, three runs.
+  Three ten-iteration samples of the four-4-MiB fixture measured approximately
+  16.78 MB of heap allocation for a full snapshot (including the original main
+  implementation), 5.36 kB for an initial 20-line tail and 5.04 kB for a zero tail.
+  These are fixture allocations, not total process memory or general throughput.
+  Tail benchmarks omit byte-throughput reporting because historical bytes are
+  deliberately skipped. Intel Mac execution was not performed locally.
 
 ## 2026-10-11: Order-independent project network alias fingerprints
 
