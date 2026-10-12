@@ -65,3 +65,44 @@ func TestProjectDeploymentThroughLinuxEngine(t *testing.T) {
 		t.Fatalf("retained records %q", output)
 	}
 }
+
+func TestProjectWaitCoversLeafReadinessAndRollback(t *testing.T) {
+	require(t)
+	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
+	for _, ready := range []bool{true, false} {
+		name := fmt.Sprintf("wait-%x", time.Now().UnixNano())
+		probe := "test -e /ready"
+		if !ready {
+			probe = "exit 1"
+		}
+		document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{
+			"leaf":   map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "health-cmd": probe, "health-interval": "50ms", "command": []string{"/bin/sh", "-c", "sleep .3; touch /ready; exec sleep 30"}}},
+			"worker": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sleep", "30"}}},
+		}}
+		data, _ := json.Marshal(document)
+		file := filepath.Join(t.TempDir(), "project.json")
+		if err := os.WriteFile(file, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { backgroundCLI(t, "project", "down", "--volumes", name) })
+		code, out, diagnostic := backgroundCLI(t, "project", "up", "--wait", "--timeout", "2s", "--config", file, "--json")
+		if !ready {
+			if code != 124 || out != "" {
+				t.Fatalf("deadline code=%d output=%s diagnostic=%s", code, out, diagnostic)
+			}
+			if got := backgroundSuccess(t, "project", "ps", "--json", name); got != "[]\n" {
+				t.Fatalf("rollback left %s", got)
+			}
+			continue
+		}
+		var records []container.Record
+		if code != 0 || json.Unmarshal([]byte(out), &records) != nil || len(records) != 2 {
+			t.Fatalf("ready code=%d output=%s diagnostic=%s", code, out, diagnostic)
+		}
+		for _, record := range records {
+			if record.State != container.StateRunning || record.Labels[project.LabelService] == "leaf" && (record.Health == nil || record.Health.Status != container.HealthHealthy) {
+				t.Fatalf("unready service %+v", record)
+			}
+		}
+	}
+}

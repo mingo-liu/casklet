@@ -148,11 +148,39 @@ func TestProjectHealthFailureRollsBackThroughMacClient(t *testing.T) {
 }
 
 func TestProjectCancellationCleansOnlyNewResources(t *testing.T) {
+	for _, wait := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wait-%v", wait), func(t *testing.T) { projectCancellation(t, wait) })
+	}
+}
+
+func projectCancellation(t *testing.T, wait bool) {
 	binary := client(t)
 	name := fmt.Sprintf("cancel-%x", time.Now().UnixNano())
 	file := macProjectConfig(t, name, false)
 	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
-	cmd := exec.Command(binary, "project", "up", "--config", file, "--timeout", "30s")
+	args := []string{"project", "up", "--config", file, "--timeout", "30s"}
+	expected := 1
+	if wait {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(data, &document); err != nil {
+			t.Fatal(err)
+		}
+		delete(document["services"].(map[string]any)["api"].(map[string]any), "depends-on")
+		data, err = json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		args = append(args, "--wait")
+		expected = 2
+	}
+	cmd := exec.Command(binary, args...)
 	var output, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
 	if err := cmd.Start(); err != nil {
@@ -172,7 +200,7 @@ func TestProjectCancellationCleansOnlyNewResources(t *testing.T) {
 	for time.Now().Before(deadline) {
 		var records []container.Record
 		data, _, code := command(t, "project", "ps", "--json", name)
-		if code == 0 && json.Unmarshal([]byte(data), &records) == nil && len(records) == 1 && records[0].State == container.StateRunning {
+		if code == 0 && json.Unmarshal([]byte(data), &records) == nil && len(records) == expected && records[0].State == container.StateRunning && records[len(records)-1].State == container.StateRunning {
 			ready = true
 			break
 		}

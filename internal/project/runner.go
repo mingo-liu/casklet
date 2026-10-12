@@ -71,7 +71,33 @@ func sameResource(a, b Resource) bool {
 	return a.Kind == b.Kind && a.Name == b.Name && a.CreatedAt.Equal(b.CreatedAt)
 }
 
-func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) (records []container.Record, err error) {
+type UpOptions struct {
+	Timeout time.Duration
+	Wait    bool
+	// Deadline shares the CLI's budget with local project lock acquisition.
+	Deadline time.Time
+}
+
+func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (records []container.Record, err error) {
+	parent := ctx
+	failureCaptured, deadlineFailure := false, false
+	if options.Wait {
+		var cancel context.CancelFunc
+		if options.Deadline.IsZero() {
+			ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		} else {
+			ctx, cancel = context.WithDeadline(ctx, options.Deadline)
+		}
+		defer cancel()
+		defer func() {
+			if !failureCaptured {
+				deadlineFailure = parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
+			}
+			if err != nil && deadlineFailure {
+				err = errors.Join(ErrWaitTimeout, err)
+			}
+		}()
+	}
 	all, err := runner.Records(ctx)
 	if err != nil {
 		return nil, err
@@ -149,6 +175,8 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) 
 	var created []Resource
 	defer func() {
 		if err != nil {
+			failureCaptured = true
+			deadlineFailure = parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			err = errors.Join(err, runner.rollback(cleanupCtx, plan.Name, token, created))
@@ -171,6 +199,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) 
 	}
 
 	ids := map[string]string{}
+	executions := map[string]serviceExecution{}
 	for _, service := range plan.Services {
 		dependencies := make([]string, 0, len(service.DependsOn))
 		for dep := range service.DependsOn {
@@ -179,7 +208,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) 
 		sort.Strings(dependencies)
 		for _, dep := range dependencies {
 			if service.DependsOn[dep] == "healthy" {
-				if _, err = runner.Call(ctx, "wait", "--healthy", "--timeout", timeout.String(), ids[dep]); err != nil {
+				if _, err = runner.Call(ctx, "wait", "--healthy", "--timeout", options.Timeout.String(), ids[dep]); err != nil {
 					return nil, fmt.Errorf("service %q dependency %q did not become healthy: %w", service.Key, dep, err)
 				}
 			} else {
@@ -215,15 +244,41 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, timeout time.Duration) 
 			}
 			ids[service.Key] = id
 		}
+		if options.Wait {
+			inspection, e := runner.inspectService(ctx, service.Key, ids[service.Key])
+			if e != nil {
+				return nil, e
+			}
+			if record, reused := existing[service.Key]; reused && record.State == container.StateRunning && record.Generation != inspection.Generation {
+				return nil, fmt.Errorf("service %q execution changed during startup", service.Key)
+			}
+			health := inspection.Config.Healthcheck
+			executions[service.Key] = serviceExecution{ID: inspection.ID, Generation: inspection.Generation,
+				Healthcheck: health != nil && len(health.Test) > 0 && health.Test[0] != "NONE"}
+		}
+	}
+	if options.Wait {
+		if err = runner.waitServices(ctx, plan, executions); err != nil {
+			return nil, err
+		}
 	}
 	all, err = runner.Records(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if options.Wait && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	records = Managed(all, plan.Name)
 	for _, record := range records {
 		if ids[record.Labels[LabelService]] != record.ID {
 			return nil, errors.New("project service identity changed during startup")
+		}
+		if options.Wait {
+			execution := executions[record.Labels[LabelService]]
+			if record.Generation != execution.Generation || !execution.ready(record.State, record.Health) {
+				return nil, errors.New("project service readiness changed during startup")
+			}
 		}
 	}
 	if len(records) != len(plan.Services) {

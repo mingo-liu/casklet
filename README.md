@@ -154,12 +154,16 @@ upgrade. Changed configuration fails before deployment mutations. Resources use
 [project configuration example](guides/usage.md#project-deployment).
 
 ```sh
-casklet project up --config project.json
+casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo
 # Also delete project-owned data volumes:
 casklet project down --volumes demo
 ```
+
+`--wait` requires all healthchecked services to be healthy and other services to
+be running. Its timeout covers the whole deployment after parsing; a deadline
+returns 124 after bounded cleanup. Increase it for cold VM/image preparation.
 
 Failures clean only this invocation's newly created verified resources. Existing
 services and volumes remain; `down` preserves data volumes by default. Local

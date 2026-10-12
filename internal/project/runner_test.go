@@ -75,7 +75,7 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 			}
 		}
 		id := fmt.Sprintf("%032x", len(fake.records)+1)
-		fake.records = append(fake.records, container.Record{ID: id, Name: name, State: container.StateRunning, Labels: labels})
+		fake.records = append(fake.records, container.Record{ID: id, Name: name, State: container.StateRunning, Generation: 1, Labels: labels})
 		fake.mutations = append(fake.mutations, "run "+name)
 		if fake.failRun == name {
 			fake.records[len(fake.records)-1].State = container.StateFailed
@@ -91,7 +91,7 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 	case "inspect":
 		for _, record := range fake.records {
 			if record.ID == args[1] {
-				return encode(container.Inspection{ID: record.ID, State: record.State})
+				return encode(container.Inspection{ID: record.ID, State: record.State, Generation: record.Generation, Health: record.Health})
 			}
 		}
 		return nil, errors.New("missing")
@@ -135,13 +135,13 @@ func TestProjectRepeatableUpAndDownPreserveDataVolumes(t *testing.T) {
 	fake := newFakeProject()
 	runner := fakeRunner(fake)
 	plan := fakePlan()
-	first, err := runner.Up(context.Background(), plan, time.Second)
+	first, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
 	if err != nil || len(first) != 2 || len(fake.waits) != 1 {
 		t.Fatalf("up %v %v", first, err)
 	}
 	ids := []string{first[0].ID, first[1].ID}
 	mutations := len(fake.mutations)
-	second, err := runner.Up(context.Background(), plan, time.Second)
+	second, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
 	if err != nil || !reflect.DeepEqual(ids, []string{second[0].ID, second[1].ID}) || len(fake.mutations) != mutations {
 		t.Fatalf("repeat up %v %v", second, err)
 	}
@@ -151,7 +151,7 @@ func TestProjectRepeatableUpAndDownPreserveDataVolumes(t *testing.T) {
 	if len(fake.records) != 0 || len(fake.resources) != 1 || fake.resources["volume:cp-demo-data"].Name == "" {
 		t.Fatalf("data not preserved %v %v", fake.records, fake.resources)
 	}
-	if _, err := runner.Up(context.Background(), plan, time.Second); err != nil {
+	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runner.Down(context.Background(), "demo", true); err != nil || len(fake.resources) != 0 {
@@ -175,7 +175,7 @@ func TestProjectRejectsDriftAndUnownedResourcesBeforeMutation(t *testing.T) {
 			case "extra-service":
 				fake.records = []container.Record{{ID: "old", Name: "cp-demo-extra", Labels: map[string]string{LabelName: "demo", LabelService: "extra", LabelSpec: "old"}}}
 			}
-			if _, err := runner.Up(context.Background(), plan, time.Second); err == nil || len(fake.mutations) != 0 {
+			if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err == nil || len(fake.mutations) != 0 {
 				t.Fatalf("drift mutated resources: %v %v", err, fake.mutations)
 			}
 		})
@@ -195,7 +195,7 @@ func TestProjectFailureCleansOnlyCurrentTransaction(t *testing.T) {
 			}
 			unrelated := container.Record{ID: "manual", Name: "manual", State: container.StateRunning}
 			fake.records = append(fake.records, unrelated)
-			if _, err := runner.Up(context.Background(), plan, time.Millisecond); err == nil {
+			if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Millisecond}); err == nil {
 				t.Fatal("expected failure")
 			}
 			if !reflect.DeepEqual(fake.records, []container.Record{unrelated}) || len(fake.resources) != 0 || len(runner.State.Resources) != 0 {
@@ -211,12 +211,12 @@ func TestProjectFailurePreservesReusedServicesAndResources(t *testing.T) {
 	plan := fakePlan()
 	initial := plan
 	initial.Services = initial.Services[:1]
-	if _, err := runner.Up(context.Background(), initial, time.Second); err != nil {
+	if _, err := runner.Up(context.Background(), initial, UpOptions{Timeout: time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	original := fake.records[0].ID
 	fake.failRun = "cp-demo-api"
-	if _, err := runner.Up(context.Background(), plan, time.Second); err == nil {
+	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err == nil {
 		t.Fatal("expected failed service")
 	}
 	if len(fake.records) != 1 || fake.records[0].ID != original || fake.records[0].State != container.StateRunning || len(fake.resources) != 2 {
@@ -241,7 +241,7 @@ func TestProjectSaveFailureRollsBackNewResources(t *testing.T) {
 	fake := newFakeProject()
 	runner := fakeRunner(fake)
 	runner.Save = func(State) error { return errors.New("disk full") }
-	if _, err := runner.Up(context.Background(), fakePlan(), time.Second); err == nil || len(fake.resources) != 0 {
+	if _, err := runner.Up(context.Background(), fakePlan(), UpOptions{Timeout: time.Second}); err == nil || len(fake.resources) != 0 {
 		t.Fatalf("save failure cleanup: %v %v", err, fake.resources)
 	}
 }
@@ -258,7 +258,7 @@ func TestProjectCancelledWaitUsesIndependentCleanupContext(t *testing.T) {
 		}
 		return fake.call(operationCtx, args...)
 	}
-	if _, err := runner.Up(ctx, fakePlan(), time.Second); !errors.Is(err, context.Canceled) || len(fake.records) != 0 || len(fake.resources) != 0 {
+	if _, err := runner.Up(ctx, fakePlan(), UpOptions{Timeout: time.Second}); !errors.Is(err, context.Canceled) || len(fake.records) != 0 || len(fake.resources) != 0 {
 		t.Fatalf("cancel cleanup %v %v %v", err, fake.records, fake.resources)
 	}
 }
@@ -268,7 +268,7 @@ func TestProjectIgnoresUnrelatedVolumeNamingStyles(t *testing.T) {
 	runner := fakeRunner(fake)
 	unrelated := Resource{Kind: "volume", Name: "Other_Data", CreatedAt: time.Now()}
 	fake.resources["volume:"+unrelated.Name] = unrelated
-	if _, err := runner.Up(context.Background(), fakePlan(), time.Second); err != nil {
+	if _, err := runner.Up(context.Background(), fakePlan(), UpOptions{Timeout: time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runner.Down(context.Background(), "demo", true); err != nil || !sameResource(fake.resources["volume:"+unrelated.Name], unrelated) {
@@ -279,7 +279,7 @@ func TestProjectIgnoresUnrelatedVolumeNamingStyles(t *testing.T) {
 func TestProjectDownContinuesAfterPartialFailure(t *testing.T) {
 	fake := newFakeProject()
 	runner := fakeRunner(fake)
-	if _, err := runner.Up(context.Background(), fakePlan(), time.Second); err != nil {
+	if _, err := runner.Up(context.Background(), fakePlan(), UpOptions{Timeout: time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	retained := fake.records[0].ID

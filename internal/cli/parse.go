@@ -31,6 +31,7 @@ type Request struct {
 	Watch         bool
 	StopTimeout   *time.Duration
 	Healthy       bool
+	Wait          bool
 	WaitTimeout   time.Duration
 	Interval      time.Duration
 	Entrypoint    *string

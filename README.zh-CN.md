@@ -131,12 +131,16 @@ casklet image rm IMAGE_ID
 [项目配置示例](guides/usage.md#project-deployment)。
 
 ```sh
-casklet project up --config project.json
+casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo
 # 同时删除项目拥有的数据卷：
 casklet project down --volumes demo
 ```
+
+`--wait` 要求所有配置健康检查的服务健康，其他服务处于运行状态。超时覆盖配置解析
+后的整个部署；超时后完成有时限的清理并返回 124。首次准备 VM 或拉取镜像时应适当
+增加超时时间。
 
 失败时仅清理本次新建且归属已验证的资源。已有服务和数据卷会保留；`down` 默认
 保留数据卷。本地归属记录用于防止接管或删除无关的同名资源。

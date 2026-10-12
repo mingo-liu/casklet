@@ -963,7 +963,7 @@ volume references inside each service use the declared logical names.
 ```
 
 ```sh
-casklet project up --config project.json --timeout 30s
+casklet project up --config project.json --wait --timeout 30s
 casklet project ps --json demo
 casklet stats --watch --filter label=io.casklet.project.name=demo
 casklet exec cp-demo-worker -- redis-cli -h redis GET example
@@ -994,6 +994,23 @@ stops or execution changes fail the wait. `--timeout` applies to each health wai
 startup; later health changes do not stop downstream services. There are at most
 64 services and 16 declared networks/volumes each. Overlapping host ports are
 rejected before startup; live port availability uses the existing Mac preflight.
+
+Add `--wait` to require readiness of every service, including services with no
+consumers. Enabled healthchecks, including image defaults, must report healthy;
+services without a healthcheck (or with `NONE`) must be running. Starting/unhealthy
+services may recover. Each service pins its full ID and execution generation after
+startup; removal, exit, stop or a generation change fails the deployment. All
+services are rechecked while waiting and before returning records.
+
+With `--wait`, `--timeout` is one deadline for the whole deployment after local
+configuration parsing, including the project lock, VM preparation, dependency
+waits, service startup and final readiness. The default is 30s; use a longer timeout
+for first-time VM creation or cold image pulls. A deadline returns 124; service or
+infrastructure failures return 125, and interrupts retain their signal exit status.
+Failure/deadline/cancellation uses the existing bounded rollback, which may take
+additional time after the deadline to stop/remove this invocation's new resources.
+Existing and resumed services remain. Without `--wait`, the existing per-dependency
+timeouts and startup behavior are unchanged.
 
 Repeated `up` keeps matching running containers and starts matching stopped ones.
 Identity includes effective run defaults, expanded env values, source paths and
