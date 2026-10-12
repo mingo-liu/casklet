@@ -218,7 +218,7 @@ func TestProjectLegacyAliasFingerprintReusesServicesAndRejectsDrift(t *testing.T
 				t.Fatal("reused resources must not rewrite ownership state")
 				return nil
 			}}
-			records, err := runner.Up(context.Background(), request.Project, time.Second)
+			records, err := runner.Up(context.Background(), request.Project, project.UpOptions{Timeout: time.Second})
 			if (err != nil) != test.wantError {
 				t.Fatalf("up returned %v, want error %v", err, test.wantError)
 			}
@@ -273,5 +273,73 @@ func TestProjectRejectsAliasConflictsAndImpossibleHealthDependencies(t *testing.
 		if _, err := Parse([]string{"project", "up", "--config", projectConfigFile(t, body)}); err == nil {
 			t.Fatalf("accepted %s", body)
 		}
+	}
+}
+
+func TestProjectWaitOptionsAndHelp(t *testing.T) {
+	file := projectConfigFile(t, `{"name":"demo","services":{"api":{"run":{"image":"app:1"}}}}`)
+	for _, wait := range []bool{false, true} {
+		args := []string{"project", "up", "--config", file, "--timeout", "2s"}
+		if wait {
+			args = append(args, "--wait")
+		}
+		request, err := Parse(args)
+		if err != nil || request.Wait != wait || request.WaitTimeout != 2*time.Second {
+			t.Fatalf("parse=%+v err=%v", request, err)
+		}
+	}
+	for _, args := range [][]string{{"project", "down", "--wait", "demo"}, {"project", "ps", "--wait", "demo"}, {"project", "up", "--wait", "--timeout", "0s", "--config", file}} {
+		if _, err := Parse(args); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+	for _, mac := range []bool{false, true} {
+		text, err := scopedUsage("project up", mac)
+		for _, want := range []string{"--wait", "whole deployment", "124", "without a healthcheck", "generation"} {
+			if err != nil || !strings.Contains(text, want) {
+				t.Fatalf("help missing %q: %v %s", want, err, text)
+			}
+		}
+	}
+	out, diagnostic, code := helpExecution(t, []string{"project", "up", "--wait", "--help"})
+	equivalent, _, other := helpExecution(t, []string{"help", "project", "up"})
+	if code != 0 || other != 0 || out != equivalent || diagnostic != "" {
+		t.Fatalf("help mismatch %d %d %s", code, other, diagnostic)
+	}
+}
+
+func TestProjectWaitTimeoutExitStatus(t *testing.T) {
+	for _, tt := range []struct {
+		wait bool
+		err  error
+		code int
+	}{
+		{true, project.ErrWaitTimeout, 124},
+		{false, project.ErrWaitTimeout, 125},
+		{true, context.DeadlineExceeded, 125},
+	} {
+		var diagnostic strings.Builder
+		code := manageOperation(Request{Action: "project-up", Wait: tt.wait}, &diagnostic, func(context.Context) (int, error) { return 0, tt.err })
+		if code != tt.code {
+			t.Fatalf("wait=%v err=%v code=%d", tt.wait, tt.err, code)
+		}
+	}
+}
+
+func TestProjectWaitDeadlineIncludesLocalProjectLock(t *testing.T) {
+	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
+	root, err := project.DefaultRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, err := project.Open(context.Background(), root, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locked.Close()
+	var out, diagnostic strings.Builder
+	code := executeProject(Request{Action: "project-up", Project: project.Plan{Name: "demo"}, Wait: true, WaitTimeout: 20 * time.Millisecond}, &out, &diagnostic)
+	if code != 124 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "project readiness") {
+		t.Fatalf("lock deadline code=%d output=%s diagnostic=%s", code, out.String(), diagnostic.String())
 	}
 }

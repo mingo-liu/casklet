@@ -33,6 +33,7 @@ func parseProject(r Request, args []string) (Request, error) {
 	fs.SetOutput(io.Discard)
 	switch args[0] {
 	case "up":
+		fs.BoolVar(&r.Wait, "wait", false, "wait for all services within the deployment deadline")
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
 		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "dependency health wait deadline")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")

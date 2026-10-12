@@ -384,6 +384,14 @@ order before any deployment mutations. Ownership state stores only network/volum
 names and creation times. Immutable container labels carry the project/service/config
 identity and one startup token.
 
+`project up --wait` applies one deadline after parsing to local lock acquisition,
+VM preparation, startup and readiness. The runner pins each service ID/generation
+after startup and samples existing health state through sanitized inspection,
+including image-inherited checks. Services without enabled checks require running
+state. Each pass revisits all services; stopped or changed executions fail. Final
+records recheck the pinned executions and readiness. Timeout returns 124 after the
+existing independent bounded rollback; reused/resumed services remain.
+
 A stable cancelable lock serializes each project in the local machine state directory.
 Atomic synced receipt writes record successfully created resources. Private bounded
 host/guest resource commands use exclusive creation and timestamp-conditional

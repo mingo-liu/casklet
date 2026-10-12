@@ -56,47 +56,65 @@ func projectCall(diagnostic io.Writer) (project.Call, error) {
 
 func executeProject(r Request, stdout, stderr io.Writer) int {
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {
-		name := r.Reference
-		if r.Action == "project-up" {
-			name = r.Project.Name
-		}
-		call, err := projectCall(stderr)
-		if err != nil {
-			return 125, err
-		}
-		// Read-only status must remain available while up waits for a dependency.
-		if r.Action == "project-ps" {
-			runner := project.Runner{Call: call}
-			records, err := runner.Records(ctx)
-			if err != nil {
-				return 125, err
-			}
-			return 0, writeRecords(stdout, project.Managed(records, name), r.JSON)
-		}
-		root, err := project.DefaultRoot()
-		if err != nil {
-			return 125, err
-		}
-		store, err := project.Open(ctx, root, name)
-		if err != nil {
-			return 125, err
-		}
-		defer store.Close()
-		state, err := store.Load()
-		if err != nil {
-			return 125, err
-		}
-		runner := project.Runner{Call: call, Save: store.Save, State: state}
-		switch r.Action {
-		case "project-up":
-			records, err := runner.Up(ctx, r.Project, r.WaitTimeout)
-			if err != nil {
-				return 125, err
-			}
-			return 0, writeRecords(stdout, records, r.JSON)
-		case "project-down":
-			return 0, runner.Down(ctx, name, r.RemoveVolumes)
-		}
-		return 125, errors.New("invalid project operation")
+		return executeProjectContext(ctx, r, stdout, stderr)
 	})
+}
+
+func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Writer) (int, error) {
+	parent := ctx
+	var deadline time.Time
+	if r.Action == "project-up" && r.Wait {
+		deadline = time.Now().Add(r.WaitTimeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+	preparationError := func(err error) error {
+		if err != nil && !deadline.IsZero() && parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return errors.Join(project.ErrWaitTimeout, err)
+		}
+		return err
+	}
+	name := r.Reference
+	if r.Action == "project-up" {
+		name = r.Project.Name
+	}
+	call, err := projectCall(stderr)
+	if err != nil {
+		return 125, preparationError(err)
+	}
+	// Read-only status must remain available while up waits for a dependency.
+	if r.Action == "project-ps" {
+		runner := project.Runner{Call: call}
+		records, err := runner.Records(ctx)
+		if err != nil {
+			return 125, preparationError(err)
+		}
+		return 0, writeRecords(stdout, project.Managed(records, name), r.JSON)
+	}
+	root, err := project.DefaultRoot()
+	if err != nil {
+		return 125, preparationError(err)
+	}
+	store, err := project.Open(ctx, root, name)
+	if err != nil {
+		return 125, preparationError(err)
+	}
+	defer store.Close()
+	state, err := store.Load()
+	if err != nil {
+		return 125, preparationError(err)
+	}
+	runner := project.Runner{Call: call, Save: store.Save, State: state}
+	switch r.Action {
+	case "project-up":
+		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline})
+		if err != nil {
+			return 125, err
+		}
+		return 0, writeRecords(stdout, records, r.JSON)
+	case "project-down":
+		return 0, runner.Down(ctx, name, r.RemoveVolumes)
+	}
+	return 125, errors.New("invalid project operation")
 }

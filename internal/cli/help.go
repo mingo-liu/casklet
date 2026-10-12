@@ -400,11 +400,13 @@ Examples:
   casklet project ps demo
   casklet project down demo
 `,
-	"project up": `Usage: casklet project up --config FILE [--timeout DURATION] [--json]
+	"project up": `Usage: casklet project up --config FILE [--wait] [--timeout DURATION] [--json]
 
 Options:
   --config   Local strict JSON project file, at most 1 MiB
-  --timeout  Each dependency health wait, greater than 0s up to 24h (default: 30s)
+  --wait     Wait for all services to become ready within the whole deployment deadline
+  --timeout  Each dependency health wait, or whole deployment with --wait (default: 30s)
+             Greater than 0s up to 24h
   --json     Print managed container records as a JSON array
 
 Notes:
@@ -417,10 +419,14 @@ Notes:
   Changed configs or unowned resource names fail before deployment changes.
   On failure, only this invocation's new verified containers/resources are removed.
   Existing services resumed by up remain running. Image caches are preserved.
+  --wait requires healthy services, or running services without a healthcheck.
+  Wait pins each service ID/generation; exit, removal or restart fails readiness.
+  Its deadline covers the local project lock, startup and readiness after parsing.
+  A deployment deadline returns 124 after bounded rollback; other failures return 125.
 
 Examples:
   casklet project up --config project.json
-  casklet project up --config project.json --timeout 1m --json
+  casklet project up --config project.json --wait --timeout 1m --json
 `,
 	"project down": `Usage: casklet project down [--volumes] NAME
 

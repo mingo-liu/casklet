@@ -6,6 +6,48 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-12: Whole-project readiness with a shared deployment deadline
+
+Added opt-in `project up --wait`. Every service must become healthy when its saved
+configuration enables a healthcheck (including image defaults), or running when
+checks are absent/disabled. Each startup pins the full container ID and execution
+generation. Readiness passes revisit all services, and final records recheck those
+identities and health. Stop, exit, removal and changed executions fail rather than
+following a replacement. Existing per-dependency behavior remains without the flag.
+
+One absolute deadline covers local project lock acquisition, guest preparation,
+startup, dependency waits and final readiness after parsing. Deadline failures
+return 124; service/infrastructure failures remain 125, and signal cancellation
+retains its original status. Existing bounded independent rollback removes only
+this invocation's new verified resources; reused/resumed services remain. Failure
+classification is captured before cleanup so slow rollback does not turn an earlier
+service failure into a timeout. Focused help, usage, architecture and bilingual
+quick starts describe the opt-in behavior and cold-start timeout sizing.
+
+Regressions cover inherited leaf healthchecks, unhealthy recovery, absent/disabled
+checks, unchanged default startup, startup/local-lock deadlines, a shared absolute
+budget, caller cancellation/deadlines, identity/generation/lifecycle changes, final
+state changes, reused-service preservation, rollback failures and slow cleanup.
+Linux and macOS suites add real leaf readiness and deadline rollback; the macOS
+cancellation regression covers both dependency-only and whole-project waiting.
+
+Validation:
+
+- macOS arm64 formatting, full unit tests, vet, full race checks and native
+  client/embedded engine build passed.
+- After synchronizing the log-tail feature from main, the complete disposable
+  macOS arm64 suite passed all 53 tests in 209.023 seconds. It includes real leaf
+  readiness, timeout rollback, reused-service preservation, both cancellation
+  modes, rotated tails, VM stop/start/resize, health, storage and terminals.
+  The runner exited zero and deleted its isolated VM and host state; the daily
+  machine remained running. An earlier run rejected a numeric health-retries
+  value in two new test fixtures before deployment; correcting it to the existing
+  string schema allowed both tests and the complete suite to pass.
+- Hosted CI passed macOS and native Linux amd64/arm64 unit/vet/race/build checks,
+  the four-target vulnerability scan and both complete privileged Linux suites
+  on combined feature revision 7c7b6b4. Intel Mac execution was not performed
+  locally. This final validation-record update retains the same PR gates.
+
 ## 2026-10-12: Read only requested initial log tails
 
 Initial `logs --tail` selection now happens under the existing log snapshot lock,
