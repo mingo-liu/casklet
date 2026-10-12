@@ -168,6 +168,10 @@ claims the log lock before hiding a record. A bounded lock timeout discards only
 the current capture chunk, records truncation and a diagnostic, then continues
 capturing later output. Permanent storage errors still drain the pipe so output
 failure cannot indefinitely block the workload.
+Initial log tails validate and pin every retained segment before searching backward
+with one 32 KiB buffer. Only the selected suffix is allocated and read; a zero tail
+pins the current end without reading history. The same locked snapshot establishes
+the follow cursor, preserving rotation and generation fencing.
 Active supervisors from an older engine keep using the metadata lock; readers
 honor that protocol until completion or a new supervisor enables log locking.
 

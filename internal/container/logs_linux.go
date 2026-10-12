@@ -202,6 +202,12 @@ type logSegment struct {
 }
 
 func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64) ([]byte, logCursor, error) {
+	return store.logSnapshotTail(ctx, id, cfg, cursor, generation, -1)
+}
+
+// logSnapshotTail selects an initial suffix before allocating or reading its
+// payload. All retained artifacts are still validated, including skipped files.
+func (store *Store) logSnapshotTail(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64, tail int) ([]byte, logCursor, error) {
 	if cursor.offset < 0 {
 		return nil, cursor, errors.New("invalid log cursor offset")
 	}
@@ -254,6 +260,12 @@ func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Confi
 		}
 		segments = append(segments, logSegment{file: file, inode: stat.Ino, size: stat.Size, offset: offset})
 	}
+	if tail >= 0 {
+		start, err = logTailStart(ctx, segments, tail)
+		if err != nil {
+			return nil, cursor, err
+		}
+	}
 	// Sizes are validated under the log lock. Allocate only the unread bytes
 	// once, avoiding per-file growth buffers and repeated concatenation copies.
 	if err := ctx.Err(); err != nil {
@@ -290,6 +302,42 @@ func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Confi
 			cursor.pin.Close()
 		}
 		cursor.pin = os.NewFile(uintptr(fd), last.file.Name())
+		cursor.inode, cursor.offset = last.inode, last.size
 	}
 	return data, cursor, nil
+}
+
+// Search backwards across segment boundaries with one bounded buffer. A final
+// newline terminates the last line rather than introducing an empty extra line.
+func logTailStart(ctx context.Context, segments []logSegment, tail int) (int, error) {
+	if tail == 0 {
+		return len(segments), ctx.Err()
+	}
+	buffer := make([]byte, 32*1024)
+	finalByte := true
+	for index := len(segments) - 1; index >= 0; index-- {
+		segment := &segments[index]
+		for end := segment.size; end > 0; {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			begin := max(int64(0), end-int64(len(buffer)))
+			chunk := buffer[:end-begin]
+			if _, err := segment.file.ReadAt(chunk, begin); err != nil {
+				return 0, err
+			}
+			for i := len(chunk) - 1; i >= 0; i-- {
+				if chunk[i] == '\n' && !finalByte {
+					tail--
+					if tail == 0 {
+						segment.offset = begin + int64(i) + 1
+						return index, nil
+					}
+				}
+				finalByte = false
+			}
+			end = begin
+		}
+	}
+	return 0, ctx.Err()
 }
