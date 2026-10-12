@@ -372,7 +372,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 	if err != nil {
 		return err
 	}
-	data, cursor, err := store.logSnapshot(ctx, record.ID, cfg, logCursor{}, generation)
+	data, cursor, err := store.logSnapshotTail(ctx, record.ID, cfg, logCursor{}, generation, tail)
 	if err != nil {
 		return err
 	}
@@ -381,7 +381,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 			cursor.pin.Close()
 		}
 	}()
-	if err := copyInitialLog(bytes.NewReader(data), int64(len(data)), tail, out); err != nil || !follow {
+	if _, err := io.Copy(out, bytes.NewReader(data)); err != nil || !follow {
 		return err
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
