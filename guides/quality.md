@@ -35,6 +35,18 @@ Validation:
 
 - macOS arm64 formatting, full unit tests, vet, full race checks and native
   client/embedded engine build passed.
+- After synchronizing the log-tail feature from main, the complete disposable
+  macOS arm64 suite passed all 53 tests in 209.023 seconds. It includes real leaf
+  readiness, timeout rollback, reused-service preservation, both cancellation
+  modes, rotated tails, VM stop/start/resize, health, storage and terminals.
+  The runner exited zero and deleted its isolated VM and host state; the daily
+  machine remained running. An earlier run rejected a numeric health-retries
+  value in two new test fixtures before deployment; correcting it to the existing
+  string schema allowed both tests and the complete suite to pass.
+- Hosted CI passed macOS and native Linux amd64/arm64 unit/vet/race/build checks,
+  the four-target vulnerability scan and both complete privileged Linux suites
+  on combined feature revision 7c7b6b4. Intel Mac execution was not performed
+  locally. This final validation-record update retains the same PR gates.
 
 ## 2026-10-12: Read only requested initial log tails
 
