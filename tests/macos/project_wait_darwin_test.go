@@ -21,7 +21,7 @@ func macWaitConfig(t *testing.T, name string, ready bool) string {
 		probe = "exit 1"
 	}
 	document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{
-		"leaf":   map[string]any{"run": map[string]any{"network": "none", "health-cmd": probe, "health-interval": "50ms", "health-retries": 1, "command": []string{"/bin/sh", "-c", "sleep .5; touch /ready; exec sleep 300"}}},
+		"leaf":   map[string]any{"run": map[string]any{"network": "none", "health-cmd": probe, "health-interval": "50ms", "health-retries": "1", "command": []string{"/bin/sh", "-c", "sleep .5; touch /ready; exec sleep 300"}}},
 		"worker": map[string]any{"run": map[string]any{"network": "none", "command": []string{"/bin/sleep", "300"}}},
 	}}
 	data, err := json.Marshal(document)
