@@ -252,3 +252,23 @@ func TestExecExitStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestExecConfigurationPreservesLargeInheritedEnvironment(t *testing.T) {
+	base := config.Config{Command: []string{"/bin/sleep", "30"}, Env: []string{"VALUE=" + strings.Repeat("x", 70<<10)}}
+	cfg := (config.Exec{Command: []string{"/bin/true"}, Env: []string{"EXTRA=" + strings.Repeat("y", 70<<10)}}).Apply(base)
+	if err := cfg.ValidateExecution(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := sealExecConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if os.Geteuid() != 0 {
+		return
+	}
+	decoded, err := readExecConfig(int(file.Fd()))
+	if err != nil || len(decoded.Env) != 2 || decoded.Env[0] != cfg.Env[0] || decoded.Env[1] != cfg.Env[1] {
+		t.Fatalf("large inherited configuration did not round trip: %v", err)
+	}
+}

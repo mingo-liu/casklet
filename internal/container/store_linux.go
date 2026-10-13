@@ -26,7 +26,7 @@ import (
 const (
 	storeRoot            = "/var/lib/casklet/containers"
 	maxRecordBytes int64 = 64 * 1024
-	maxConfigBytes int64 = 1024 * 1024
+	maxConfigBytes int64 = config.MaxExecutionConfigBytes
 )
 
 // Store coordinates metadata updates across independent CLI and supervisor processes.

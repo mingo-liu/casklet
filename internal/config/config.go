@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,9 @@ import (
 )
 
 const (
+	// MaxExecutionConfigBytes bounds the complete serialized execution config.
+	// Container storage and sealed exec/probe configuration share this limit.
+	MaxExecutionConfigBytes = 1 << 20
 	// CPUPeriod is the cgroups v2 CPU bandwidth period, in microseconds.
 	CPUPeriod int64 = 100000
 	// MinCPUQuota is the minimum nonzero quota accepted by cgroups v2.
@@ -151,7 +155,17 @@ func (c Config) ValidateExecution() error {
 	if err := ValidateNetwork(c.Network, c.DNS, c.Publish, c.Mounts); err != nil {
 		return err
 	}
-	return ValidateMounts(c.Mounts, c.RootFS)
+	if err := ValidateMounts(c.Mounts, c.RootFS); err != nil {
+		return err
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return errors.New("encode execution configuration failed")
+	}
+	if len(data) > MaxExecutionConfigBytes {
+		return errors.New("execution configuration exceeds 1 MiB")
+	}
+	return nil
 }
 
 // WorkingDirectory supplies the default and normalizes a container path.

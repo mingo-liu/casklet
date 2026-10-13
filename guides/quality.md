@@ -6,6 +6,40 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-13: Align inherited exec and probe configuration limits
+
+Sealed exec/probe configurations now use the same 1 MiB serialized JSON limit
+as retained container configurations, through a shared config constant. Execution
+validation rejects oversized fully merged values before resource allocation or
+publication. Root ownership, immutable memfd seals, exact decoding and bounded
+reads remain enforced. The independent command/override request retains its
+64 KiB transport bound; running supervisors keep their pinned helper until restart.
+
+Regressions cover exact-size and escaped JSON limits, sanitized oversize errors,
+immutable sealed round trips with 140 KiB of inherited/override environment, and
+real execution with a 70 KiB inherited value plus a valid 4 KiB override. Linux
+and macOS cases verify healthy probes, exec output and restart. Focused help,
+usage and both READMEs describe the merged limit and existing transport/OS bounds.
+
+Validation:
+
+- The sealed-config regression failed against the pre-fix Linux test executable.
+- macOS arm64 formatting, complete unit/vet/race checks, native client/embedded
+  engine build, four-target vulnerability scanning and diff checks passed.
+  Complete unit/vet and focused config/CLI race checks passed again after updating
+  this branch to the merged relative-bind fix from main.
+- The complete combined disposable macOS arm64 suite passed all 55 tests in
+  213.823 seconds, including both new regressions. Root-only sealed-config tests
+  and the complete privileged Linux arm64 suite passed in the same disposable VM
+  through the shared-store preservation wrapper. The optional pinned legacy-engine
+  case was not configured. The runner exited zero and deleted its isolated VM and
+  host state; daily VM state was not used. Intel Mac execution was not performed.
+- An initial macOS fixture exceeded the separate 64 KiB request bound; the final
+  fixture uses a valid request while retaining the large inherited configuration.
+  An initial Linux wrapper used a private root-owned executable parent and blocked
+  rootless cases. Making that disposable fixture directory searchable allowed
+  the complete suite to pass; no product assertion was weakened.
+
 ## 2026-10-13: Resolve config-relative bind sources before validation
 
 Run and project JSON files now resolve relative bind sources against the absolute

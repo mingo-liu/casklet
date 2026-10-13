@@ -183,3 +183,12 @@ func TestConfigHelpDescribesRelativeBindSources(t *testing.T) {
 		}
 	}
 }
+
+func TestExecutionHelpDescribesMergedConfigurationSize(t *testing.T) {
+	for _, topic := range []string{"run", "exec"} {
+		text, err := scopedUsage(topic, true)
+		if err != nil || !strings.Contains(text, "1 MiB of JSON after merging") {
+			t.Fatalf("size guidance %s: %q %v", topic, text, err)
+		}
+	}
+}
