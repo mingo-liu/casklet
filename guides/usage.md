@@ -140,6 +140,13 @@ casklet run --rootfs ./rootfs/busybox \
 The default environment is `PATH=/bin:/usr/bin`, `HOME=/`, `LANG=C`. A numeric
 non-root user needs access to the configured working directory and executables.
 Init, commands, descendants, and managed exec sessions share aggregate limits.
+The complete execution configuration is limited to 1 MiB of serialized JSON,
+including inherited image/container values and explicit overrides. The same bound
+applies to retained configurations, exec commands, and health probes; operating-system
+argument/environment limits may be lower. The separate exec request (command and
+explicit overrides) retains its 64 KiB transport bound. Running containers retain
+their pinned supervisor/helper version; restart them to use an upgraded exec/probe
+limit.
 
 ## OCI/Docker images
 

@@ -47,6 +47,7 @@ const runOptions = `Options:
                  Relative rootfs, bind sources, and env-files use the file directory
   --env-file     Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
+                 Complete execution config is limited to 1 MiB of JSON after merging
   --label        Immutable detached metadata KEY=VALUE; repeat; last key wins
                  Up to 64 keys, 16 KiB total; values are independent of environment
   --workdir      Absolute working directory (image default, otherwise /)
@@ -377,6 +378,7 @@ Options:
 Notes:
   Flags must precede ID|NAME; put -- before the command.
   The container must be running. Exec inherits its user, isolation, and limits.
+  Complete execution config is limited to 1 MiB of JSON after merging overrides.
   Output goes to the invoking terminal, outside the retained container log.
   Terminal output merges stdout and stderr; -it requires a terminal on stdin.
 

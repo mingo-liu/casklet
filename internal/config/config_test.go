@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -125,5 +127,28 @@ func TestLogRetentionDefaultsAndValidation(t *testing.T) {
 		if err := cfg.ValidateLogs(); err != nil {
 			t.Errorf("rejected %+v: %v", cfg, err)
 		}
+	}
+}
+
+func TestExecutionConfigurationSizeBoundary(t *testing.T) {
+	cfg := Config{Command: []string{"/bin/true"}, Env: []string{"VALUE="}}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Env[0] += strings.Repeat("x", MaxExecutionConfigBytes-len(data))
+	if err := cfg.ValidateExecution(); err != nil {
+		t.Fatalf("exact limit rejected: %v", err)
+	}
+	cfg.Env[0] += "x"
+	if err := cfg.ValidateExecution(); err == nil || strings.Contains(err.Error(), cfg.Env[0]) {
+		t.Fatal("oversized configuration was accepted or exposed its environment")
+	}
+	cfg.Env[0] = "VALUE=" + strings.Repeat("<", MaxExecutionConfigBytes/6)
+	if err := cfg.ValidateExecution(); err == nil {
+		t.Fatal("JSON-escaped payload bypassed the size bound")
+	}
+	if err := cfg.ValidateRunRequest(); err == nil {
+		t.Fatal("run request ignored the size bound")
 	}
 }

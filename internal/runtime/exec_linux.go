@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const execConfigLimit = 64 << 10
+const execConfigLimit = config.MaxExecutionConfigBytes
 
 const execConfigSeals = unix.F_SEAL_SEAL | unix.F_SEAL_WRITE | unix.F_SEAL_GROW | unix.F_SEAL_SHRINK
 
@@ -233,7 +233,7 @@ func sealExecConfig(cfg config.Config) (*os.File, error) {
 		return nil, err
 	}
 	if len(data) > execConfigLimit {
-		return nil, errors.New("exec configuration exceeds 64 KiB")
+		return nil, errors.New("exec configuration exceeds 1 MiB")
 	}
 	fd, err := unix.MemfdCreate("casklet-exec", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
@@ -258,7 +258,7 @@ func readExecConfig(fd int) (config.Config, error) {
 	}
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil || stat.Size <= 0 || stat.Size > execConfigLimit || stat.Uid != 0 {
-		return cfg, errors.New("exec configuration must be root-owned and at most 64 KiB")
+		return cfg, errors.New("exec configuration must be root-owned and at most 1 MiB")
 	}
 	data := make([]byte, stat.Size)
 	n, err := unix.Pread(fd, data, 0)
