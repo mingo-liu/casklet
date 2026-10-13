@@ -70,7 +70,8 @@ casklet logout ghcr.io
 
 应用配置也可以通过 `run --config redis.json` 和 `run`/`exec` 的可重复
 `--env-file application.env` 读取。JSON 使用长选项名称，命令行标量覆盖配置文件，
-显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。详见
+显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。JSON 中的相对 rootfs、
+bind 源和 env-file 路径以配置文件目录为基准；数据卷源仍是名称。详见
 [部署配置](guides/usage.md#repeatable-deployment-configuration)（英文）。
 
 使用不可修改的标签为后台容器分组，再筛选和批量管理。标签在重启后保留，

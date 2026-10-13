@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-13: Resolve config-relative bind sources before validation
+
+Run and project JSON files now resolve relative bind sources against the absolute
+configuration-file directory before mount validation. Direct CLI mount parsing
+keeps its absolute-source requirement. Volume sources remain logical names, and
+all existing target, protected-path, duplicate-field and rootfs-overlap checks
+still apply. Invalid source bytes are rejected before path normalization.
+
+Regressions cover relative config filenames, a different current directory,
+parent-relative sources with spaces, absolute sources, readonly mounts, scoped
+volumes, protected sources/targets, empty/duplicate fields and rootfs overlap.
+The real macOS regression reads a relative bind through both run and project up,
+checks readonly enforcement, and verifies access after restart. Focused help,
+usage examples and both READMEs describe the path base.
+
+Validation:
+
+- The config-relative regression failed before the fix.
+- macOS arm64 formatting, complete unit/vet/race checks, native client/embedded
+  engine build and diff checks passed.
+- The complete disposable macOS arm64 suite passed all 54 tests in 212.514
+  seconds, including the new run/project relative-bind regression. The runner
+  exited zero and deleted its isolated VM and host state; daily VM state was
+  not used. Intel Mac execution was not performed locally.
+
 ## 2026-10-12: Whole-project readiness with a shared deployment deadline
 
 Added opt-in `project up --wait`. Every service must become healthy when its saved

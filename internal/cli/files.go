@@ -95,6 +95,10 @@ func configFileArguments(filename string, explicit map[string]bool) ([]string, [
 }
 
 func configDataArguments(data []byte, filename string, explicit map[string]bool) ([]string, []string, error) {
+	filename, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, nil, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	// Decode each key separately to reject duplicates as well as unknown options.
 	token, err := decoder.Token()
@@ -177,12 +181,11 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 				}
 			}
 			if name == "mount" {
-				mount, err := config.ParseMount(value)
+				mount, err := config.ParseMountFrom(value, filepath.Dir(filename))
 				if err != nil {
 					return nil, nil, err
 				}
-				if mount.Type != "volume" && !filepath.IsAbs(mount.Source) {
-					mount.Source = filepath.Join(filepath.Dir(filename), mount.Source)
+				if mount.Type != "volume" {
 					value = "type=bind,source=" + mount.Source + ",target=" + mount.Target
 					if mount.ReadOnly {
 						value += ",readonly"

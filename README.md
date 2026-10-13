@@ -82,7 +82,8 @@ and leave the workload running. They fail if the observed execution stops or cha
 Application settings can also come from `run --config redis.json` and repeatable
 `--env-file application.env` on `run` or `exec`. JSON uses long option names; CLI
 scalars override the file, and explicit `--env` overrides env-files. Files are read
-on the Mac. See [deployment configuration](guides/usage.md#repeatable-deployment-configuration).
+on the Mac. Relative rootfs, bind sources, and env-file paths in JSON use the
+configuration file directory; volume sources remain names. See [deployment configuration](guides/usage.md#repeatable-deployment-configuration).
 
 Group detached containers with immutable labels, then filter and manage them in
 batches. Labels survive restart and are independent of workload environment;
