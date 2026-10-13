@@ -44,6 +44,7 @@ const runOptions = `Options:
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
   --config       Strict JSON run options; CLI scalars override config values
+                 Relative rootfs, bind sources, and env-files use the file directory
   --env-file     Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
   --label        Immutable detached metadata KEY=VALUE; repeat; last key wins
@@ -413,7 +414,8 @@ Notes:
   Define name, services, optional networks and volumes in the file.
   Each service has a run object and optional depends-on conditions: started/healthy.
   Default network is default; volume/network references use declared logical names.
-  Config-relative paths and env-files are read locally before VM operations.
+  Relative rootfs, bind sources, and env-files use the project file directory.
+  Local files are expanded before VM operations; volume sources remain names.
   Reuses matching running services and starts matching stopped services.
   Reordering network aliases keeps service identity, including older deployments.
   Changed configs or unowned resource names fail before deployment changes.

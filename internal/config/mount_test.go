@@ -84,3 +84,24 @@ func TestMountRejectsMappedRuntimeStorage(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMountFromResolvesOnlyBindSources(t *testing.T) {
+	for _, source := range []string{"data", "./data", "../config/data"} {
+		mount, err := ParseMountFrom("type=bind,source="+source+",target=/data,readonly", "/work/config")
+		if err != nil || mount.Source != "/work/config/data" || mount.Target != "/data" || !mount.ReadOnly {
+			t.Fatalf("source %q: %+v %v", source, mount, err)
+		}
+	}
+	volume, err := ParseMountFrom("type=volume,source=saved,target=/data", "/work/config")
+	if err != nil || volume.Source != "saved" || volume.Type != "volume" {
+		t.Fatalf("volume: %+v %v", volume, err)
+	}
+	for _, source := range []string{"", "../../proc", "./bad\x00/../data", "./bad\n/../data", "/work/config/../data"} {
+		if _, err := ParseMountFrom("type=bind,source="+source+",target=/data", "/work/config"); err == nil {
+			t.Fatalf("accepted unsafe source %q", source)
+		}
+	}
+	if _, err := ParseMountFrom("type=bind,source=data,target=/data", "relative"); err == nil {
+		t.Fatal("accepted relative base")
+	}
+}

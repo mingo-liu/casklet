@@ -19,6 +19,13 @@ type BindMount struct {
 
 // ParseMount parses the repeatable --mount option without filesystem access.
 func ParseMount(value string) (BindMount, error) {
+	return ParseMountFrom(value, "")
+}
+
+// ParseMountFrom resolves relative bind sources against an absolute config-file
+// directory before validation. Targets remain absolute and volumes remain names.
+// An empty base preserves ParseMount's absolute-source requirement.
+func ParseMountFrom(value, base string) (BindMount, error) {
 	var mount BindMount
 	seen := make(map[string]bool)
 	for _, field := range strings.Split(value, ",") {
@@ -56,6 +63,15 @@ func ParseMount(value string) (BindMount, error) {
 	}
 	if !seen["type"] {
 		return mount, errors.New("mount requires type=bind or type=volume")
+	}
+	if base != "" && mount.Type != "volume" && mount.Source != "" && !path.IsAbs(mount.Source) {
+		if strings.ContainsAny(mount.Source, "\x00\n\r") {
+			return mount, errors.New("mount source cannot contain NUL or newlines")
+		}
+		if !path.IsAbs(base) {
+			return mount, errors.New("mount source base must be an absolute directory")
+		}
+		mount.Source = path.Join(base, mount.Source)
 	}
 	return mount, ValidateMounts([]BindMount{mount}, "")
 }

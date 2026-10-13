@@ -810,7 +810,8 @@ casklet exec --env-file application.env redis -- /bin/sh -c 'echo "$MODE"'
 CLI scalar options override file options, including explicit `false` booleans;
 either CLI source option replaces the configured image/rootfs. Repeated options
 append to the configuration. An explicit command after `--` replaces `command`.
-Config rootfs, bind sources, and env-file paths resolve relative to the JSON file;
+Config rootfs, bind sources (for example `source=./data`), and env-file paths
+resolve relative to the JSON file; volume sources remain names.
 CLI paths resolve against the current directory. On macOS, omitting both sources
 uses the builtin BusyBox rootfs. Files are read locally before transport; config
 and environment files do not need a VM share. Bind sources and rootfs still do.

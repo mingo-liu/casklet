@@ -137,7 +137,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				return plan, errors.New("service mount must be a string array")
 			}
 			for i, value := range mounts {
-				mount, err := config.ParseMount(value)
+				mount, err := config.ParseMountFrom(value, filepath.Dir(filename))
 				if err != nil {
 					return plan, fmt.Errorf("service %q has an invalid mount", key)
 				}

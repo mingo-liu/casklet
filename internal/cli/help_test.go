@@ -174,3 +174,12 @@ func TestHelpPreservesWorkloadAndOptionValues(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigHelpDescribesRelativeBindSources(t *testing.T) {
+	for _, topic := range []string{"run", "project up"} {
+		text, err := scopedUsage(topic, true)
+		if err != nil || !strings.Contains(text, "bind sources, and env-files use") || !strings.Contains(text, "file directory") {
+			t.Fatalf("config path help %s: %q %v", topic, text, err)
+		}
+	}
+}
