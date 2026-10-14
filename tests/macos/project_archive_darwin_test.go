@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -68,14 +69,35 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 	success(t, "exec", writer.ID, "--", "/bin/sh", "-c", "printf archived-project-data > /data/message")
 	imageRun["env"] = []string{"UPGRADE=selected"}
 	save()
-	before := success(t, "project", "ps", "--json", name)
+	type deploymentIdentity struct {
+		ID, Name, State string
+		Generation      uint64
+		Labels          map[string]string
+	}
+	identities := func() map[string]deploymentIdentity {
+		t.Helper()
+		var records []container.Record
+		data := success(t, "project", "ps", "--json", name)
+		if err := json.Unmarshal([]byte(data), &records); err != nil {
+			t.Fatal(err)
+		}
+		result := map[string]deploymentIdentity{}
+		for _, record := range records {
+			result[record.Labels[project.LabelService]] = deploymentIdentity{record.ID, record.Name, record.State, record.Generation, record.Labels}
+		}
+		return result
+	}
+	before := identities()
 	var changes []project.Change
 	previewOutput := success(t, "project", "up", "--config", file, "--recreate", "app", "--dry-run", "--json")
 	if json.Unmarshal([]byte(previewOutput), &changes) != nil || len(changes) != 2 || changes[0].Action != "recreate" || changes[0].ID != old.ID || changes[1].Action != "reuse" || changes[1].ID != writer.ID {
 		t.Fatalf("preview actions %s", previewOutput)
 	}
-	if after := success(t, "project", "ps", "--json", name); after != before {
-		t.Fatalf("offline preview changed project: %s", after)
+	if after := identities(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("offline preview changed deployment identities: before=%+v after=%+v", before, after)
+	}
+	if previewed := inspect("app"); previewed.Health == nil || previewed.Health.Status != container.HealthHealthy {
+		t.Fatalf("offline preview readiness: %+v", previewed.Health)
 	}
 	success(t, "project", "up", "--config", file, "--recreate", "app", "--wait", "--timeout", "30s")
 	replaced, unchanged := inspect("app"), inspect("writer")

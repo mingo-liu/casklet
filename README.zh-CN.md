@@ -143,7 +143,7 @@ casklet image save "$image_id" > app-copy.tar
 ## 部署项目
 
 使用 `project up --config project.json` 部署多个服务，声明网络、数据卷及
-`started`/`healthy` 启动依赖。配置一致的服务会复用，配置变化会在部署修改前报错。
+`started`/`healthy` 启动依赖。配置一致的服务会复用，未选中的服务配置变化会在部署修改前报错。
 调整网络别名顺序不会改变服务标识，升级后已有服务也可以继续复用。
 资源名称为 `cp-PROJECT-LOGICAL`，服务别名按网络隔离。参见
 [项目配置示例](guides/usage.md#project-deployment)。
