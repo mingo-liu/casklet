@@ -347,7 +347,7 @@ func TestProjectWaitDeadlineIncludesLocalProjectLock(t *testing.T) {
 func TestProjectExternalVolumeMountsUseActualNameAndStableFingerprint(t *testing.T) {
 	plan := func(logical, actual string) project.Plan {
 		t.Helper()
-		body := `{"name":"demo","external-volumes":{"` + logical + `":"` + actual + `"},"services":{"app":{"run":{"mount":["type=volume,source=` + logical + `,target=/data,readonly"],"command":["/bin/sleep","30"]}}}}`
+		body := `{"name":"demo","external-volumes":{"` + logical + `":"` + actual + `"},"services":{"app":{"run":{"image":"app:1","mount":["type=volume,source=` + logical + `,target=/data,readonly"],"command":["/bin/sleep","30"]}}}}`
 		request, err := Parse([]string{"project", "up", "--config", projectConfigFile(t, body)})
 		if err != nil {
 			t.Fatal(err)
