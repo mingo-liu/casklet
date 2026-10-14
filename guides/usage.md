@@ -321,6 +321,76 @@ retained container.
 Remove referencing containers first; deleting a cached target makes its name a
 cache miss on the next run.
 
+### Offline OCI image archives
+
+```sh
+image_id=$(casklet image load < app.tar)
+casklet run --image "$image_id"
+casklet image save "$image_id" > app-copy.tar
+# Stream directly between stores or create an identity-preserving local copy:
+casklet image save "$image_id" | casklet image load
+```
+
+`image load` reads an uncompressed outer tar containing the standard OCI image
+layout (`oci-layout`, `index.json`, and `blobs/sha256/…`). OCI layout tar archives
+from external build/CI tools need no Docker Engine or registry connection.
+Docker `save` format and compressed outer tar streams are unsupported. Layers
+inside the layout may be uncompressed tar, gzip or zstd. Descriptors must refer
+to archive-local SHA-256 blobs; remote URLs and embedded descriptor data fail.
+Indexes may be nested up to four levels; loading selects exactly one distinct
+native `linux/arm64` or `linux/amd64` image. Zero or multiple matching images fail.
+A selected descriptor's declared platform must agree with its config.
+
+Loading checks every included blob digest, selected descriptor sizes, DiffIDs,
+ordered whiteouts, startup configuration and confined layer paths. It preserves
+Entrypoint, Cmd, Env, WorkingDir, User, StopSignal, Shell and the supported
+Healthcheck extension (including StartInterval). The immutable local identity
+covers the normalized filesystem, numeric ownership and these defaults, as for
+registry pulls. Only successful atomic publication prints one full local ID.
+Existing identical images are reused with their existing metadata intact.
+Failure/cancellation removes private staging, leaves existing images and cached
+registry names unchanged, and does not populate the compressed download cache.
+Archive reference annotations do not create cached registry tag mappings; use
+`run --image ID` after loading.
+
+Loading limits are 32 GiB of outer tar (including padding), 4096 outer entries,
+1 MiB per JSON/auxiliary metadata file, 256 layers, 4 GiB per unpacked tar layer,
+16 GiB unpacked total and one million entries per layer. Each included blob is
+limited to 4 GiB. Additional bounded top-level layout files are ignored. Unsafe
+paths, duplicate names/JSON fields, links/special outer entries, sparse outer
+entries, bad sizes/digests, missing tar terminators and nonzero trailing bytes
+fail. Conventional zero tar block padding is accepted. Loading needs temporary
+VM disk space for the outer blobs, current uncompressed layer and resulting
+filesystem; size limits are validation bounds, not disk reservations.
+
+`image save ID` accepts full local OCI image IDs or unique prefixes, and holds
+a shared image usage lease through output. Removal and prune cannot delete the
+image during export; other image metadata operations proceed. It verifies the
+cached image, writes a new uncompressed flattened layer and standard OCI
+config/manifest/index, then streams only binary tar on stdout. Diagnostics use
+stderr. The exported layer is limited to 4 GiB including tar headers/padding
+and one million entries; images within the larger pull/load limits may exceed
+this export limit. Export also needs temporary VM disk space for that layer.
+
+The exported archive preserves numeric ownership, supported copied modes,
+symlink targets, and execution defaults, so reloading preserves the local
+content ID. It exports the immutable image rather than container writes, data
+volumes or host bind contents. Original layer boundaries, registry manifest
+identity, history, labels, exposed-port/volume declarations and cached tag
+mappings are not retained. The synthesized source manifest digest changes.
+When an identical image already exists, its prior source manifest metadata is
+retained. No registry or download cache is accessed. Directory-imported images
+cannot be saved: loading them as OCI would change ownership-sensitive identity
+and workload capability policy. Keep using directory import for those sources.
+
+Both commands forward cancellation over the Mac SSH transport and close blocked
+standard-input/output descriptors in the guest. Output failure can leave a
+partial host file; write a temporary file and rename it only after success:
+
+```sh
+casklet image save "$image_id" > app.tar.tmp && mv app.tar.tmp app.tar
+```
+
 ### Copy-on-write image containers
 
 New privileged containers using `--image`, including directory-imported images,
