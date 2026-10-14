@@ -36,9 +36,26 @@ Validation:
 
 - macOS arm64 formatting, complete unit/vet/race checks and native client with
   embedded Linux engine build passed.
-- Linux arm64 integration test executable cross-compilation passed. Privileged
-  Linux and real macOS suites are pending the coordinated disposable VM run;
-  neither was invoked from this worktree. Intel Mac execution was not performed.
+- Linux arm64 cross-vet and test executable compilation passed. The combined
+  tree also passed complete macOS unit/vet/race and formatting checks after
+  synchronizing restored-volume support; the later main synchronization preserved
+  the exact source tree.
+- The complete combined disposable macOS arm64 suite passed all 58 tests in
+  248.910 seconds without skips, including VM stop/start, disk growth, custom
+  capacities, health/exec, retained start/restart, ENOSPC and restored-volume
+  deployments using custom temporary mounts.
+- Native Linux arm64 package test executables passed as the guest user, with
+  rootfs/image/volume/network/container/runtime suites also passing as root.
+  The complete privileged Linux suite passed through the shared-store preservation
+  wrapper in the same disposable VM, including copy/overlay mounts, rootless
+  capacities, memory accounting, OOM, page rounding and the combined restored-data
+  regression. The optional pinned legacy supervisor case was not configured.
+  The runner exited zero and deleted its isolated VM and host state; the daily VM
+  remained stopped.
+- Initial feature revision 0b71dfb passed hosted macOS and native Linux
+  amd64/arm64 unit/vet/race/build checks, the four-target vulnerability scan and
+  both complete privileged Linux suites. Intel Mac execution was not performed
+  locally.
 
 ## 2026-10-14: Reuse restored and migrated volumes in projects
 
