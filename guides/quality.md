@@ -102,6 +102,12 @@ Validation:
 - macOS arm64 formatting, complete unit/vet/race checks and native client with
   embedded Linux engine build passed.
 - Linux arm64 cross-vet and image/integration test executable compilation passed.
+- Initial hosted Linux amd64/arm64 integration identified an extra separator in
+  the default-command fixture and cancellation of inherited blocking standard
+  descriptors. The fixture now invokes the image defaults directly. Image and
+  volume streams use a nonblocking duplicate registered with Go's poller,
+  restoring original status flags on return. Real exec-inherited pipe regressions
+  verify both blocked read/write cancellation and caller descriptor preservation.
 - Privileged Linux and real macOS execution are pending the coordinated
   disposable VM validation; no daily VM was used by this feature worktree.
 

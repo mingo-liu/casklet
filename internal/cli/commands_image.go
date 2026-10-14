@@ -16,25 +16,26 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer, input ...io.
 	if err != nil {
 		return 125, err
 	}
-	if r.Action == "image-load" || r.Action == "image-save" {
-		done := make(chan struct{})
-		defer close(done)
-		go func() {
-			select {
-			case <-ctx.Done():
-				if r.Action == "image-save" {
-					if f, ok := stdout.(*os.File); ok {
-						f.Close()
-					}
-				}
-				if r.Action == "image-load" && len(input) > 0 {
-					if f, ok := input[0].(*os.File); ok {
-						f.Close()
-					}
-				}
-			case <-done:
+	if r.Action == "image-save" {
+		if file, ok := stdout.(*os.File); ok {
+			stream, finish, err := cancelableArchiveFile(ctx, file)
+			if err != nil {
+				return 125, err
 			}
-		}()
+			defer finish()
+			stdout = stream
+		}
+	}
+	if r.Action == "image-load" && len(input) > 0 {
+		if file, ok := input[0].(*os.File); ok {
+			stream, finish, err := cancelableArchiveFile(ctx, file)
+			if err != nil {
+				return 125, err
+			}
+			defer finish()
+			input = append([]io.Reader(nil), input...)
+			input[0] = stream
+		}
 	}
 	switch r.Action {
 	case "image-load":
