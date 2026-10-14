@@ -125,6 +125,21 @@ casklet image ls --json
 casklet image rm IMAGE_ID
 ```
 
+标准 OCI layout tar 归档可以离线交付原生架构的 Linux 应用：
+
+```sh
+image_id=$(casklet image load < app.tar)
+casklet run --image "$image_id"
+casklet image save "$image_id" > app-copy.tar
+```
+
+加载会校验唯一的原生架构镜像，保留启动默认值和数值所有权，不访问仓库或改变
+缓存标签。保存会把文件系统合成为一个 OCI 层，再次加载后保持本地镜像 ID，
+但生成新的 manifest 摘要。保存接受 OCI 镜像（包括加载的镜像）；目录导入镜像
+因所有权和 capability 策略不同而不能保存。保存限制为包含 tar 元数据的 4 GiB 层；
+加载支持最多 32 GiB 归档，解包后每层最多 4 GiB、总计最多 16 GiB。
+不支持 Docker save 归档或外层压缩的 tar。参见[归档限制与语义](guides/usage.md#offline-oci-image-archives)。
+
 ## 部署项目
 
 使用 `project up --config project.json` 部署多个服务，声明网络、数据卷及

@@ -52,6 +52,39 @@ Validation:
 - Real macOS and privileged Linux execution is coordinated separately on an
   isolated VM; no VM was started or used during this worktree's implementation.
 
+## 2026-10-14: Deliver native images through standard OCI archives
+
+Added streaming `image load`/`image save` using the existing Mac binary SSH
+transport. Loads validate bounded OCI layout tar framing/paths/types, every
+included SHA-256 blob, native selection, descriptor sizes, supported configs,
+DiffIDs and ordered confined extraction. Private leased transactions publish
+atomically without registry tag or compressed-cache writes. Save holds a shared
+image usage lease, verifies content and synthesizes one uncompressed OCI layer
+with supported launch/health defaults and numeric ownership. Reload preserves
+local identity, while original manifest digest/layer boundaries/tags are not
+exported. OCI-only save and its explicit 4 GiB flattened-layer ceiling preserve
+directory imports' existing ownership/capability semantics. Preparation and
+output do not hold the image metadata lock. Focused help, usage, architecture
+and both READMEs describe transport, limits, disk needs and partial output.
+
+Regressions include an independently produced third-party OCI layout, exported
+layout readability by the pinned primary reader, ownership/default/StartInterval
+round trips, whiteouts, existing-image deduplication/reference preservation,
+malformed/duplicate/traversal/special entries, digest/size/platform/JSON failures,
+missing terminators, nonzero trailing bytes, sparse logical expansion before
+filesystem allocation, discarded auxiliary layout files, cancellation, rollback, cache
+preservation, directory-policy rejection and save lease/deletion fencing.
+Linux/macOS integration cases cover actual binary transport, disconnected
+registry execution, retained restart and blocked input/output cancellation.
+
+Validation:
+
+- macOS arm64 formatting, complete unit/vet/race checks and native client with
+  embedded Linux engine build passed.
+- Linux arm64 cross-vet and image/integration test executable compilation passed.
+- Privileged Linux and real macOS execution are pending the coordinated
+  disposable VM validation; no daily VM was used by this feature worktree.
+
 ## 2026-10-14: Configure temporary and shared-memory capacities
 
 Added `run --tmp-size` and `--shm-size`, with positive byte or binary k/m/g

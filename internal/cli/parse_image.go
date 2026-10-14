@@ -11,7 +11,7 @@ import (
 
 func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("image requires pull, import, ls, rm, prune, or cache")
+		return r, errors.New("image requires pull, import, load, save, ls, rm, prune, or cache")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -32,7 +32,7 @@ func parseImage(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
 	case "prune":
 		fs.BoolVar(&r.DryRun, "dry-run", false, "preview unused images without deleting them")
-	case "import", "rm":
+	case "import", "rm", "save", "load":
 	default:
 		return r, fmt.Errorf("unknown image command %q", args[0])
 	}
@@ -42,14 +42,14 @@ func parseImage(r Request, args []string) (Request, error) {
 		}
 		return r, err
 	}
-	if args[0] == "ls" || args[0] == "prune" {
+	if args[0] == "ls" || args[0] == "prune" || args[0] == "load" {
 		if fs.NArg() != 0 {
-			return r, errors.New("image ls and prune do not accept positional arguments")
+			return r, errors.New("image ls, prune, and load do not accept positional arguments")
 		}
 		return r, nil
 	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		return r, errors.New("image pull, import, and rm require exactly one argument")
+		return r, errors.New("image pull, import, save, and rm require exactly one argument")
 	}
 	r.Reference = fs.Arg(0)
 	if args[0] == "pull" {
@@ -60,7 +60,7 @@ func parseImage(r Request, args []string) (Request, error) {
 			return r, err
 		}
 	}
-	if args[0] == "rm" {
+	if args[0] == "rm" || args[0] == "save" {
 		if err := image.ValidateIDReference(r.Reference); err != nil {
 			return r, err
 		}

@@ -69,6 +69,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
 		return executeManagement(r, stdout, stderr, stdin)
+	case "image-load", "image-save":
+		return executeManagement(r, stdout, stderr, stdin)
 	case "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":

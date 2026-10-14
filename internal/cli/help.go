@@ -662,6 +662,8 @@ Examples:
 Commands:
   pull REFERENCE    Download or refresh a native Linux OCI/Docker image
   import DIRECTORY  Copy a Linux rootfs into the local image store
+  load              Load one native OCI layout image from tar on stdin
+  save ID           Write an OCI image layout tar to stdout
   ls [--json]       List cached images and registry references
   rm ID             Remove an unused image
   prune [--dry-run]  Remove unused images and idle compressed download blobs
@@ -708,6 +710,46 @@ Notes:
 Examples:
   casklet image import ./rootfs/busybox
   casklet image ls --json
+`,
+	"image load": `Usage: casklet image load < ARCHIVE.tar
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Loads exactly one distinct native Linux image from a standard OCI layout tar.
+  Selects the native platform from indexes; incompatible or ambiguous images fail.
+  Checks sha256 digests, descriptor sizes, ordered layers, and startup defaults.
+  Publishes atomically and prints one local immutable ID. No registry access,
+  cached tag changes, or compressed download-cache writes occur.
+  Limits: 32 GiB archive, 4096 outer entries, 1 MiB metadata, 256 layers,
+  4 GiB per unpacked layer and 16 GiB total. External blob URLs are unsupported.
+  Docker save archives and compressed outer tar archives are unsupported.
+
+Examples:
+  image_id=$(casklet image load < app.tar)
+  casklet run --image "$image_id"
+`,
+	"image save": `Usage: casklet image save ID > ARCHIVE.tar
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Accepts a full local OCI image ID or unique hexadecimal prefix.
+  Writes only binary tar to stdout; diagnostics use stderr. No registry access.
+  Synthesizes one uncompressed OCI layer from the cached immutable filesystem.
+  Preserves startup defaults, numeric ownership and local content identity;
+  original layers, source manifest digest and cached registry tags are not exported.
+  The new manifest digest differs; loading does not restore registry tag mappings.
+  Limit: 4 GiB flattened layer including tar metadata, 1 million layer entries.
+  Directory imports cannot be saved: their ownership/capability policy differs.
+  Saving holds a usage lease through output; concurrent removal/pruning skips it.
+  Use a temporary output file and rename after success; failed output may be partial.
+
+Examples:
+  casklet image save IMAGE_ID > app.tar
+  casklet image save IMAGE_ID | casklet image load
 `,
 	"image ls": `Usage: casklet image ls [--json]
 

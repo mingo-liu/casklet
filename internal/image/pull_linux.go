@@ -416,7 +416,7 @@ func unpackCachedLayer(ctx context.Context, root *os.Root, archive *os.File, blo
 	return unpackPreparedLayer(ctx, root, archive, layer, expected, remaining, progress, false)
 }
 
-func unpackPreparedLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64, progress *streamProgress, downloading bool) (count int64, resultErr error) {
+func unpackPreparedLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64, progress *streamProgress, downloading bool, validators ...func(context.Context, *os.File) error) (count int64, resultErr error) {
 	r, err := layer.Uncompressed()
 	if err != nil {
 		return 0, err
@@ -437,6 +437,11 @@ func unpackPreparedLayer(ctx context.Context, root *os.Root, archive *os.File, l
 	progress.finish(ProgressVerifying)
 	if expected.Algorithm != "sha256" || hex.EncodeToString(digest.Sum(nil)) != expected.Hex {
 		return count, errors.New("image layer DiffID mismatch")
+	}
+	for _, validate := range validators {
+		if err := validate(ctx, archive); err != nil {
+			return count, err
+		}
 	}
 	progress.event.Stage = ProgressExtracting
 	progress.event.Current, progress.event.Total = 0, 2*count

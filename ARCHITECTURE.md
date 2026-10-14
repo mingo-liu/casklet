@@ -270,6 +270,26 @@ compressed streams and archive reads. The CLI owns rendering on stderr, preservi
 stdout results. The Mac resolves automatic progress mode before SSH dispatch; no
 PTY or output-stream merging is needed for detached runs or explicit image pulls.
 
+OCI archive loading stages a bounded standard layout as private data in a leased
+image transaction. It validates outer tar framing/types/names and all SHA-256
+blobs, traverses bounded indexes to one native image, checks selected descriptor
+sizes/config, and applies verified DiffIDs and whiteouts with the existing
+root-confined extractor. Publication shares registry pull's normalization,
+identity, fsync and atomic deduplication without creating registry references or
+compressed cache blobs. Preparation never holds the metadata lock across input
+or extraction. Existing image records remain authoritative on deduplication.
+
+Archive saving acquires and verifies the shared immutable-image usage lease,
+then stages one bounded uncompressed layer outside the metadata lock and emits
+a standard layout directly through the Mac non-PTY binary stdout transport.
+Synthesized OCI config carries supported launch/health defaults and numeric
+ownership; the local identity survives a reload while manifest identity and
+layer boundaries change. Directory imports are rejected to preserve their
+separate identity/capability policy. Both stream commands close blocked guest
+standard descriptors on cancellation, using management signal handling and
+existing remote signal sessions. Temporary export preparation uses the same
+recoverable transaction lifecycle as imports.
+
 Template resolution holds an image lease while merging defaults and publishing a
 durable reference or acquiring the runtime source. Container records store the local
 ID and fully merged configuration. New privileged image roots use a private

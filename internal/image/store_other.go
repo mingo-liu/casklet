@@ -5,6 +5,7 @@ package image
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 )
 
@@ -23,3 +24,6 @@ func (*Store) Acquire(context.Context, string) (Record, string, *os.File, error)
 func (*Store) Remove(context.Context, string, ReferenceCheck) error { return errUnsupported }
 
 func (*Store) remove(context.Context, string, ReferenceCheck, bool) error { return errUnsupported }
+
+func (*Store) Load(context.Context, io.Reader) (Record, error) { return Record{}, errUnsupported }
+func (*Store) Save(context.Context, string, io.Writer) error   { return errUnsupported }
