@@ -52,6 +52,8 @@ type Config struct {
 	Mounts         []BindMount       `json:"mounts,omitempty"`
 	RootFS         string            `json:"rootfs"`
 	Hostname       string            `json:"hostname"`
+	TmpSize        int64             `json:"tmp_size,omitempty"`
+	ShmSize        int64             `json:"shm_size,omitempty"`
 	Memory         int64             `json:"memory"`
 	PidsLimit      int64             `json:"pids_limit"`
 	CPUQuota       int64             `json:"cpu_quota"`
@@ -101,6 +103,9 @@ func (c Config) ValidateExecution() error {
 	}
 	if c.OCI && (c.Image == "" || c.UserNS || c.Rootless) {
 		return errors.New("OCI execution requires a pinned image without user namespaces")
+	}
+	if err := c.ValidateTmpfs(); err != nil {
+		return err
 	}
 	if err := c.ValidateLogs(); err != nil {
 		return err
@@ -238,6 +243,27 @@ func (c Config) ValidateLogs() error {
 	size, files := c.LogRetention()
 	if size < 1024 || size > 64<<20 || files < 1 || files > 16 || size > (64<<20)/int64(files) {
 		return errors.New("log retention requires 1 KiB-64 MiB per file, 1-16 files, and at most 64 MiB total")
+	}
+	return nil
+}
+
+// TmpfsSizes supplies byte capacities, including defaults for legacy saved configs.
+// These are ceilings, not reservations; allocated pages count against Memory.
+func (c Config) TmpfsSizes() (tmp, shm int64) {
+	tmp, shm = c.TmpSize, c.ShmSize
+	if tmp == 0 {
+		tmp = 16 << 20
+	}
+	if shm == 0 {
+		shm = 64 << 20
+	}
+	return tmp, shm
+}
+
+func (c Config) ValidateTmpfs() error {
+	tmp, shm := c.TmpfsSizes()
+	if tmp < 1 || tmp > 128<<30 || shm < 1 || shm > 128<<30 {
+		return errors.New("tmpfs capacities must be positive and at most 128 GiB each")
 	}
 	return nil
 }

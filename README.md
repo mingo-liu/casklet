@@ -191,6 +191,14 @@ casklet stop worker
 casklet rm worker
 ```
 
+Configure temporary storage with `casklet run --tmp-size 32m --shm-size 96m
+--memory 256m -- /bin/sleep 300`. `/tmp` defaults to 16 MiB and `/dev/shm` to
+64 MiB. Each accepts positive bytes or binary `k`/`m`/`g` units up to `128g`;
+Linux rounds capacities to pages. Sizes also work as string fields in run JSON
+and project service `run` objects, and persist across start/restart while their
+contents are cleared. `inspect` reports configured byte capacities with defaults.
+Allocated pages count against `--memory`; sizes do not reserve memory.
+
 Monitor several containers or a labeled project with `casklet stats --watch worker database`
 or `casklet stats --watch --filter label=project=demo`. Add `--json` for one JSON frame
 per line; selection pins existing IDs and interruption leaves workloads running.

@@ -220,6 +220,7 @@ func TestSecurityRootless(t *testing.T) {
 	}{
 		{"identity", nil, []string{"/bin/sh", "-c", "id -u; cat /proc/self/uid_map; cat /proc/self/gid_map; /bin/integration-helper security"}, 0, "security-ok"},
 		{"read-only", []string{"--read-only"}, []string{"/bin/sh", "-c", "echo tmp > /tmp/probe; ! touch /root-probe; cat /tmp/probe"}, 0, "tmp"},
+		{"tmpfs", []string{"--tmp-size", "32m", "--shm-size", "96m"}, []string{"/bin/sh", "-c", tmpfsCapacityProbe + " && echo tmpfs-ok"}, 0, "tmpfs-ok"},
 		{"tty", []string{"--tty"}, []string{"/bin/integration-helper", "security"}, 0, "security-ok"},
 		{"pids", []string{"--pids-limit", "32"}, []string{"/bin/integration-helper", "pids"}, 0, "process creation denied"},
 		{"memory", []string{"--memory", "32m"}, []string{"/bin/integration-helper", "memory"}, 137, "OOM"},

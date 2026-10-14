@@ -106,6 +106,16 @@ func parseRun(r Request, args []string) (Request, error) {
 		})
 		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
 		fs.StringVar(&memory, "memory", "128m", "memory limit")
+		for name, target := range map[string]*int64{"tmp-size": &r.Config.TmpSize, "shm-size": &r.Config.ShmSize} {
+			fs.Func(name, "tmpfs byte capacity", func(value string) error {
+				size, err := ParseMemory(value)
+				if err != nil {
+					return errors.New("tmpfs capacity requires positive bytes or binary k/m/g units")
+				}
+				*target = size
+				return r.Config.ValidateTmpfs()
+			})
+		}
 		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
 		fs.Func("restart", "detached restart policy", func(value string) error {
 			if value == "" {

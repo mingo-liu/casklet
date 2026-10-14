@@ -283,10 +283,19 @@ Overlay metadata copy and directory redirects are disabled. Legacy copied roots,
 directory sources, and user-namespace modes retain their copy path. Init inherits
 the lower image usage lease so supervisor loss cannot authorize deletion while its
 namespace survives. Runtime preserves image ownership, creates a missing working
-directory, mounts private shared memory, and applies
+directory, mounts private `/tmp` and `/dev/shm` tmpfs filesystems, and applies
 the bounded OCI root capability policy needed by application entrypoints. Builtin
 BusyBox health checks remain strict; generic filesystem validation requires neither
 BusyBox nor static linking. Restart uses the retained root and saved configuration.
+The saved execution config carries optional `tmp_size` and `shm_size` byte capacities;
+zero values preserve legacy defaults of 16 MiB and 64 MiB. Run/config/project
+options accept positive values up to 128 GiB, and public inspection applies the
+same defaults. Init validates sizes before namespace filesystem mutation and mounts
+them with `nosuid,nodev,noexec,mode=1777`; exec and probes join those mounts.
+Linux rounds capacities up to page boundaries. These are allocation ceilings rather
+than reservations, and allocated tmpfs pages use the existing workload memory
+cgroup. Each execution recreates empty mounts, including retained OverlayFS and
+user-namespace/rootless copy paths.
 
 ## Named data volumes
 

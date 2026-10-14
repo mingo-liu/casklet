@@ -41,6 +41,10 @@ const runOptions = `Options:
   --hostname     Container hostname: 1-63 alphanumeric/hyphen characters,
                  start and end alphanumeric (default: casklet)
   --memory       Positive bytes or binary k/m/g units (default: 128m)
+  --tmp-size     /tmp capacity: positive bytes or binary k/m/g, up to 128g (default: 16m)
+  --shm-size     /dev/shm capacity: same units and bound (default: 64m)
+                 Allocated pages count against --memory; sizes are not reservations
+                 Linux rounds to pages; start/restart preserves sizes and clears contents
   --pids-limit   Positive maximum processes and threads (default: 64)
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
   --config       Strict JSON run options; CLI scalars override config values

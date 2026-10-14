@@ -6,6 +6,40 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-14: Configure temporary and shared-memory capacities
+
+Added `run --tmp-size` and `--shm-size`, with positive byte or binary k/m/g
+values up to 128 GiB per mount. Run JSON and project service run objects accept
+the same string fields; explicit CLI values override run JSON. Saved configs
+retain sizes across start/restart and automatic restarts. Omitted/legacy zero
+fields preserve 16 MiB `/tmp` and 64 MiB `/dev/shm` defaults without changing
+existing project fingerprints. Explicit capacity changes participate in drift
+checks. Public inspection reports configured bytes with defaults applied.
+
+Init validates capacities before filesystem mutation and retains the existing
+private, writable `nosuid,nodev,noexec,mode=1777` mounts for copied roots,
+OverlayFS roots and user namespaces. Exec and health probes share those mounts.
+Linux rounds capacities up to pages; sizes are ceilings rather than reservations,
+and allocated pages remain charged to the workload memory cgroup. Every new
+execution recreates empty temporary mounts. Focused help, usage, architecture
+and both READMEs describe these boundaries.
+
+Regressions cover bad units, explicit zero/negative values, maximum/overflow
+bounds, JSON types and precedence, persisted legacy/custom values, inspection,
+exec inheritance and project identity. Privileged Linux cases cover actual
+copy/overlay capacities, retained start/restart, probes/exec, non-root writable
+mounts and safety flags, page rounding, ENOSPC, memory accounting and OOM ceilings;
+rootless cases include custom capacities. Mac cases cover CLI/run JSON/project
+transport, health, retained start/restart, non-root writes and ENOSPC.
+
+Validation:
+
+- macOS arm64 formatting, complete unit/vet/race checks and native client with
+  embedded Linux engine build passed.
+- Linux arm64 integration test executable cross-compilation passed. Privileged
+  Linux and real macOS suites are pending the coordinated disposable VM run;
+  neither was invoked from this worktree. Intel Mac execution was not performed.
+
 ## 2026-10-13: Align inherited exec and probe configuration limits
 
 Sealed exec/probe configurations now use the same 1 MiB serialized JSON limit

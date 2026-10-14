@@ -13,7 +13,7 @@ import (
 func TestInspectionPublicConfiguration(t *testing.T) {
 	cfg := config.Config{Mounts: []config.BindMount{{Source: "/srv/data", Target: "/data", ReadOnly: true}}, RootFS: "/template", Hostname: "worker", Command: []string{"/bin/sleep", "30"},
 		Env: []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="}, Memory: 64 << 20, PidsLimit: 32,
-		CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
+		TmpSize: 32 << 20, ShmSize: 96 << 20, CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
 	record := Record{ID: "id", Name: "worker", State: StateFailed, CreatedAt: time.Now(),
 		RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error", CleanupFailures: []string{"cgroup.remove"}}
 	got := inspectRecord(record, cfg)
@@ -24,7 +24,7 @@ func TestInspectionPublicConfiguration(t *testing.T) {
 	if record.CleanupFailures[0] != "cgroup.remove" {
 		t.Fatal("inspection aliases cleanup failures")
 	}
-	if got.Config.Workdir != "/" || got.Config.User.UID != 1000 || got.Config.Timeout != "30s" ||
+	if got.Config.TmpSize != 32<<20 || got.Config.ShmSize != 96<<20 || got.Config.Workdir != "/" || got.Config.User.UID != 1000 || got.Config.Timeout != "30s" ||
 		got.Limits.CPUs != 0.25 || got.Limits.MemoryBytes != 64<<20 || got.Limits.CPUPeriodUsec != 100000 {
 		t.Fatalf("incorrect public configuration: %+v", got)
 	}
@@ -48,7 +48,7 @@ func TestInspectionPublicConfiguration(t *testing.T) {
 		t.Fatalf("environment names: %v", got.Config.EnvironmentNames)
 	}
 	defaults := inspectRecord(record, config.Config{Command: []string{"sh"}})
-	if defaults.Config.User != (config.User{}) || defaults.Config.Timeout != "0s" {
+	if defaults.Config.TmpSize != 16<<20 || defaults.Config.ShmSize != 64<<20 || defaults.Config.User != (config.User{}) || defaults.Config.Timeout != "0s" {
 		t.Fatalf("defaults: %+v", defaults)
 	}
 }
