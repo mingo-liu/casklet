@@ -47,6 +47,8 @@ type ServiceConfig struct {
 }
 
 type Service struct {
+	Config config.Config
+
 	Key         string
 	Name        string
 	Fingerprint string

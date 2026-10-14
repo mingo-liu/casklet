@@ -200,3 +200,19 @@ func TestStatusReportsConfiguredResources(t *testing.T) {
 		t.Fatalf("status: %s %v", &out, err)
 	}
 }
+
+func TestRequireRunningPreviewNeverStartsOrCreatesMachine(t *testing.T) {
+	for _, record := range []any{nil, resizeRecord()} {
+		machine, log := resizeMachine(t, record, false)
+		if _, err := machine.ensure(context.Background(), defaultOptions(), false, true); err == nil || !strings.Contains(err.Error(), "machine start") {
+			t.Fatalf("preview error: %v", err)
+		}
+		data, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "start") || strings.Contains(string(data), "shell") || strings.Contains(string(data), "copy") {
+			t.Fatalf("preview mutated machine: %s", data)
+		}
+	}
+}

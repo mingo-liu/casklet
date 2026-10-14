@@ -20,7 +20,7 @@ func hostPathArguments(args []string, action string) ([]string, error) {
 		result[len(result)-1] = absolute
 		return result, nil
 	}
-	if action != "run" && action != "doctor" {
+	if action != "run" && action != "doctor" && action != "project-preflight" {
 		return result, nil
 	}
 	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}

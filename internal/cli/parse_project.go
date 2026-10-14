@@ -33,6 +33,8 @@ func parseProject(r Request, args []string) (Request, error) {
 	fs.SetOutput(io.Discard)
 	switch args[0] {
 	case "up":
+		fs.BoolVar(&r.DryRun, "dry-run", false, "preview deployment changes")
+		fs.Func("recreate", "replace a logical service (repeatable)", func(value string) error { r.Recreate = append(r.Recreate, value); return nil })
 		fs.BoolVar(&r.Wait, "wait", false, "wait for all services within the deployment deadline")
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
 		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "dependency health wait deadline")
@@ -59,6 +61,9 @@ func parseProject(r Request, args []string) (Request, error) {
 		}
 		plan, err := readProjectPlan(r.ProjectConfig)
 		r.Project = plan
+		if err == nil {
+			_, err = project.Select(plan, r.Recreate)
+		}
 		return r, err
 	}
 	if fs.NArg() != 1 {
@@ -221,7 +226,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		if _, err := Parse(validationArgs); err != nil {
 			return plan, fmt.Errorf("invalid generated configuration for service %q", key)
 		}
-		plan.Services = append(plan.Services, project.Service{Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
+		plan.Services = append(plan.Services, project.Service{Config: request.Config, Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
 			MatchLegacyFingerprint: func(saved string, aliases []string) bool {
 				// The store appends the container name if it is not already an
 				// explicit alias. It was absent from that legacy config hash.

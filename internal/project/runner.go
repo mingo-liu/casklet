@@ -20,9 +20,10 @@ import (
 type Call func(context.Context, ...string) ([]byte, error)
 
 type Runner struct {
-	Call  Call
-	Save  func(State) error
-	State State
+	Call    Call
+	Save    func(State) error
+	State   State
+	Preview []Change
 }
 
 func (runner *Runner) Records(ctx context.Context) ([]container.Record, error) {
@@ -72,7 +73,17 @@ func sameResource(a, b Resource) bool {
 	return a.Kind == b.Kind && a.Name == b.Name && a.CreatedAt.Equal(b.CreatedAt)
 }
 
+type Change struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Action string `json:"action"`
+	ID     string `json:"id,omitempty"`
+}
+
 type UpOptions struct {
+	Recreate []string
+	DryRun   bool
+
 	Timeout time.Duration
 	Wait    bool
 	// Deadline shares the CLI's budget with local project lock acquisition.
@@ -80,6 +91,11 @@ type UpOptions struct {
 }
 
 func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (records []container.Record, err error) {
+	runner.Preview = nil
+	selected, selectionErr := Select(plan, options.Recreate)
+	if selectionErr != nil {
+		return nil, selectionErr
+	}
 	parent := ctx
 	failureCaptured, deadlineFailure := false, false
 	if options.Wait {
@@ -109,12 +125,12 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		desired[service.Key] = true
 		for _, record := range all {
 			if record.Name == service.Name {
-				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key {
-					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key || record.Labels[LabelSpec] == "" {
+					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
 				}
-				if record.Labels[LabelSpec] != service.Fingerprint {
+				if record.Labels[LabelSpec] != service.Fingerprint && !selected[service.Key] {
 					if service.MatchLegacyFingerprint == nil {
-						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
 					}
 					data, err := runner.Call(ctx, "inspect", record.ID)
 					if err != nil {
@@ -122,7 +138,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 					}
 					var inspection container.Inspection
 					if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || !service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases) {
-						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use project down before recreating", service.Key)
+						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
 					}
 				}
 				existing[service.Key] = record
@@ -130,6 +146,9 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 	}
 	for _, record := range Managed(all, plan.Name) {
+		if expected, found := existing[record.Labels[LabelService]]; desired[record.Labels[LabelService]] && (!found || expected.ID != record.ID) {
+			return nil, errors.New("project has duplicate or renamed service records; use project down before recreating")
+		}
 		if !desired[record.Labels[LabelService]] {
 			return nil, errors.New("project has services absent from this config; use project down before recreating")
 		}
@@ -179,6 +198,78 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	if len(runner.State.Resources)-releasedKeys+newKeys > 64 {
 		return nil, errors.New("project resource history is full; use project down before recreating")
 	}
+	if len(selected) > 0 || options.DryRun {
+		if err := runner.checkConflicts(ctx, plan, all, existing, selected); err != nil {
+			return nil, err
+		}
+	}
+	for _, resource := range needed {
+		runner.Preview = append(runner.Preview, Change{Kind: resource.Kind, Name: resource.Name, Action: "create"})
+	}
+	for _, service := range plan.Services {
+		action, id := "create", ""
+		if record, found := existing[service.Key]; found {
+			id = record.ID
+			action = "reuse"
+			if selected[service.Key] {
+				action = "recreate"
+			} else if record.State != container.StateRunning {
+				action = "start"
+			}
+		}
+		runner.Preview = append(runner.Preview, Change{Kind: "service", Name: service.Key, Action: action, ID: id})
+	}
+	if options.DryRun {
+		return nil, ctx.Err()
+	}
+	// Check every source before removing any old execution. Pin resolved images
+	// for this invocation while retaining the desired-reference fingerprint.
+	prepared := map[string][]string{}
+	if len(selected) > 0 {
+		oldPorts, err := runner.selectedPorts(ctx, existing, selected)
+		if err != nil {
+			return nil, err
+		}
+		for _, service := range plan.Services {
+			if record, found := existing[service.Key]; found && !selected[service.Key] {
+				if record.State != container.StateRunning {
+					args, err := runner.retainedPreflightArguments(ctx, record, plan.Name, service.Key)
+					if err != nil {
+						return nil, err
+					}
+					if _, err := runner.Call(ctx, args...); err != nil {
+						return nil, fmt.Errorf("service %q retained-source preflight: %w", service.Key, err)
+					}
+				}
+				continue
+			}
+			args := preflightArguments(service.Args, oldPorts)
+			data, err := runner.Call(ctx, args...)
+			if err != nil {
+				return nil, fmt.Errorf("service %q preflight: %w", service.Key, err)
+			}
+			args = append([]string(nil), service.Args...)
+			if imageID := strings.TrimSpace(string(data)); imageID != "" {
+				if !strings.HasPrefix(imageID, "sha256:") || len(imageID) != 71 {
+					return nil, errors.New("invalid prepared project image identity")
+				}
+				if _, err := hex.DecodeString(imageID[7:]); err != nil {
+					return nil, errors.New("invalid prepared project image identity")
+				}
+				for i := 1; i < len(args) && args[i] != "--"; i++ {
+					if args[i] == "--image" {
+						args[i+1] = imageID
+						break
+					}
+					if strings.HasPrefix(args[i], "--image=") {
+						args[i] = "--image=" + imageID
+						break
+					}
+				}
+			}
+			prepared[service.Key] = args
+		}
+	}
 	// An explicit external declaration relinquishes any old ownership receipt,
 	// including one left behind after restoring the same name. Persist that
 	// release before mutations so rollback and config-free down cannot delete it.
@@ -224,6 +315,26 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 	}
 
+	// Remove only pinned selected records, under the guest lifecycle lock. All
+	// removals precede creation so selected services can exchange ports/aliases.
+	for i := len(plan.Services) - 1; i >= 0; i-- {
+		service := plan.Services[i]
+		if record, found := existing[service.Key]; found && selected[service.Key] {
+			if _, err = runner.Call(ctx, "__project-replace", record.ID, fmt.Sprint(record.Generation), plan.Name, service.Key, record.Labels[LabelSpec]); err != nil {
+				return nil, err
+			}
+			delete(existing, service.Key)
+		}
+	}
+	// Lima releases the selected old forwarding sockets asynchronously. The
+	// second preflight includes their bindings and uses the bounded host wait.
+	for _, service := range plan.Services {
+		if args, found := prepared[service.Key]; found {
+			if _, err = runner.Call(ctx, append([]string{"__project-preflight"}, args[1:]...)...); err != nil {
+				return nil, err
+			}
+		}
+	}
 	ids := map[string]string{}
 	executions := map[string]serviceExecution{}
 	for _, service := range plan.Services {
@@ -256,7 +367,11 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 				}
 			}
 		} else {
-			args := append([]string{"run", "--label", LabelTransaction + "=" + token}, service.Args[1:]...)
+			serviceArgs := service.Args
+			if args, found := prepared[service.Key]; found {
+				serviceArgs = args
+			}
+			args := append([]string{"run", "--label", LabelTransaction + "=" + token}, serviceArgs[1:]...)
 			data, e := runner.Call(ctx, args...)
 			if e != nil {
 				return nil, e
@@ -299,6 +414,9 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	for _, record := range records {
 		if ids[record.Labels[LabelService]] != record.ID {
 			return nil, errors.New("project service identity changed during startup")
+		}
+		if previous, reused := existing[record.Labels[LabelService]]; reused && previous.State == container.StateRunning && record.Generation != previous.Generation {
+			return nil, errors.New("project service execution changed during startup")
 		}
 		if options.Wait {
 			execution := executions[record.Labels[LabelService]]

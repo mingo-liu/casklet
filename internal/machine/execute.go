@@ -19,6 +19,8 @@ import (
 )
 
 type Invocation struct {
+	PreflightPorts []config.PortMapping
+	RequireRunning bool
 	Args           []string
 	TTY            bool
 	Interactive    bool
@@ -40,7 +42,7 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 		result[len(result)-1] = path
 		return result, nil
 	}
-	if len(result) == 0 || (result[0] != "run" && result[0] != "doctor") {
+	if len(result) == 0 || (result[0] != "run" && result[0] != "doctor" && result[0] != "__project-preflight") {
 		return result, nil
 	}
 	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
@@ -152,6 +154,29 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 			return 125, err
 		}
 	}
+	if len(invocation.PreflightPorts) > 0 {
+		if err := waitHostPorts(ctx, invocation.PreflightPorts, 3*time.Second); err != nil {
+			return 125, err
+		}
+	}
+	if len(invocation.Args) > 0 && invocation.Args[0] == "__project-preflight" {
+		var ports []config.PortMapping
+		if err := visitHostResources(invocation.Args, func(name, value string) error {
+			if name != "p" && name != "publish" {
+				return nil
+			}
+			port, err := config.ParsePortMapping(value)
+			if err == nil {
+				ports = append(ports, port)
+			}
+			return err
+		}); err != nil {
+			return 125, err
+		}
+		if err := waitHostPorts(ctx, ports, 3*time.Second); err != nil {
+			return 125, err
+		}
+	}
 	if err := localPreflight(invocation.Args); err != nil {
 		return 125, err
 	}
@@ -162,7 +187,7 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	if err := m.preflightShares(ctx, invocation.Args); err != nil {
 		return 125, err
 	}
-	instance, err := m.ensure(ctx, defaultOptions(), false)
+	instance, err := m.ensure(ctx, defaultOptions(), false, invocation.RequireRunning)
 	if err != nil {
 		return 125, err
 	}

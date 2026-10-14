@@ -153,7 +153,7 @@ casklet image rm IMAGE_ID
 Use `project up --config project.json` to deploy multiple services with declared
 networks, data volumes and `started`/`healthy` startup dependencies. Matching services
 are reused; reordering network aliases keeps service identity, including after an
-upgrade. Changed configuration fails before deployment mutations. Resources use
+upgrade. Changed unselected configuration fails before deployment mutations. Resources use
 `cp-PROJECT-LOGICAL` names and scoped service aliases. See the
 [project configuration example](guides/usage.md#project-deployment).
 
@@ -165,12 +165,21 @@ casklet project down demo
 casklet project down --volumes demo
 ```
 
+Preview and apply a selected service replacement with
+`casklet project up --config project.json --recreate api --dry-run`, then remove
+`--dry-run` to apply. Repeat `--recreate` for multiple services. Unchanged running
+services and persistent volumes keep their identities/data; selected private
+roots and logs are replaced. Selected services stop during replacement, and
+removed old containers are not automatically restored on failure. Retry creates
+missing services. Preview requires a running VM and does not pull images or
+change deployments. Refresh a tag with `image pull` before recreating its service.
+
 `--wait` requires all healthchecked services to be healthy and other services to
 be running. Its timeout covers the whole deployment after parsing; a deadline
 returns 124 after bounded cleanup. Increase it for cold VM/image preparation.
 
 Failures clean only this invocation's newly created verified resources. Existing
-services and volumes remain; `down` preserves data volumes by default. Local
+unselected services and pre-existing volumes remain; `down` preserves data volumes by default. Local
 ownership receipts prevent adopting or deleting unrelated same-name resources.
 
 For restored or migrated data, declare `"external-volumes": {"data": "restored-data"}`

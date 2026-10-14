@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,9 @@ func (output *boundedProjectOutput) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func projectCall(diagnostic io.Writer) (project.Call, error) {
+const projectPreviewEnvironment = "CASKLET_PROJECT_PREVIEW"
+
+func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -36,6 +39,9 @@ func projectCall(diagnostic io.Writer) (project.Call, error) {
 	return func(ctx context.Context, args ...string) ([]byte, error) {
 		output := &boundedProjectOutput{limit: 8 << 20}
 		cmd := exec.CommandContext(ctx, binary, args...)
+		if preview {
+			cmd.Env = append(os.Environ(), projectPreviewEnvironment+"=1")
+		}
 		// Allow each existing CLI to cancel its remote session and detached startup
 		// normally before the bounded fallback kills an unresponsive child.
 		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
@@ -79,7 +85,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if r.Action == "project-up" {
 		name = r.Project.Name
 	}
-	call, err := projectCall(stderr)
+	call, err := projectCall(stderr, r.DryRun)
 	if err != nil {
 		return 125, preparationError(err)
 	}
@@ -108,9 +114,20 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	runner := project.Runner{Call: call, Save: store.Save, State: state}
 	switch r.Action {
 	case "project-up":
-		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline})
+		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, DryRun: r.DryRun})
 		if err != nil {
 			return 125, err
+		}
+		if r.DryRun {
+			if r.JSON {
+				return 0, json.NewEncoder(stdout).Encode(runner.Preview)
+			}
+			for _, change := range runner.Preview {
+				if _, err := fmt.Fprintf(stdout, "%s %s %s\n", change.Action, change.Kind, change.Name); err != nil {
+					return 125, err
+				}
+			}
+			return 0, nil
 		}
 		return 0, writeRecords(stdout, records, r.JSON)
 	case "project-down":

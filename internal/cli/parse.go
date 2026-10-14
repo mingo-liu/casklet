@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	Recreate      []string
 	Project       project.Plan
 	ProjectConfig string
 	RemoveVolumes bool
@@ -71,6 +72,17 @@ func Parse(args []string) (request Request, err error) {
 		return helpRequest(args[:len(args)-1])
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "__project-preflight" {
+		r, err := parseRun(Request{Action: "run"}, args[1:])
+		r.Action = "project-preflight"
+		return r, err
+	}
+	if r.Action == "__project-replace" || r.Action == "__project-start-preflight" {
+		if args[0] == "__project-start-preflight" {
+			return parseProjectStartPreflight(args[1:])
+		}
+		return parseProjectReplace(args[1:])
+	}
 	if r.Action == "login" || r.Action == "logout" {
 		return parseRegistryCommand(r, args[1:])
 	}

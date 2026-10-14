@@ -6,6 +6,52 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-14: Preview and recreate selected project services
+
+Added repeatable `project up --recreate SERVICE` and deployment `--dry-run`,
+including JSON actions. Unknown/duplicate selections fail before guest calls;
+unselected drift, removed/duplicate service records, ownership and external-volume
+checks complete before mutations. Preview reports create/reuse/start/recreate
+without image pulls, workload/resource mutations or ownership writes/releases.
+Mac preview requires a running machine under its existing lock; engine/template
+repair and lock/metadata initialization on that machine remain permitted.
+
+Actual recreation preflights new/replacement sources, image defaults, binds,
+saved port/alias reservations, and matching stopped services' actual retained
+sources and saved Mac ports. Image resolution uses existing credentials and
+cached-tag policy, then pins the immutable ID without printing merged environment.
+Only identical selected running host endpoints are exempt from the first check;
+changed address scopes are conservative. Full host checks after removal wait
+boundedly for Lima socket release. Each selected removal checks full ID,
+generation (including zero) and project labels under one existing lifecycle
+operation lock spanning stop/removal. Reverse-order removal precedes topological
+creation; unselected running IDs/generations and pre-existing named/external/bind
+data survive. Selected private roots/logs are discarded. Failures use bounded
+new-transaction rollback and never recreate already-removed old containers;
+retry creates missing services. Focused help, usage, architecture and both READMEs
+state these interruption, preview and recovery boundaries.
+
+Unit regressions cover selections/drift/ownership/resources, preview receipt
+preservation/actions, same-hash recreation, actual saved reservations, host-scope
+exemptions, stopped retained sources/ports, cancellation, generation fences,
+partial failure/retry and unchanged service/resource identity. Linux/Mac real
+regression sources cover preview without deployment mutation, full receipt
+fencing, named/external bytes versus private roots, matching TCP/UDP publication
+recreation and connectivity, source/unselected drift/port preflight, failed
+replacement and retry. Linux mutable-tag coverage separates cached recreation
+from explicit pull refresh and verifies inherited image defaults; Mac coverage
+includes an occupied saved host port on an unselected stopped service.
+
+Validation:
+
+- macOS arm64 formatting, full unit/vet/race checks and native client with
+  embedded Linux engine build passed.
+- Linux arm64 cross-vet, all package test executable compilation and privileged
+  integration source compilation passed. These are compilation checks, not Linux
+  execution.
+- Real macOS and privileged Linux execution is coordinated separately on an
+  isolated VM; no VM was started or used during this worktree's implementation.
+
 ## 2026-10-14: Configure temporary and shared-memory capacities
 
 Added `run --tmp-size` and `--shm-size`, with positive byte or binary k/m/g
