@@ -31,7 +31,7 @@ func TestProjectRestoredExternalVolumeThroughLinuxEngine(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "project.json")
 	writeConfig := func(projectName, actual string, unhealthy bool) {
 		t.Helper()
-		run := map[string]any{"rootfs": template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "300"}}
+		run := map[string]any{"tmp-size": "32m", "shm-size": "96m", "rootfs": template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "300"}}
 		if unhealthy {
 			run["health-cmd"], run["health-interval"] = "exit 1", "50ms"
 		}
@@ -79,7 +79,7 @@ func TestProjectRestoredExternalVolumeThroughLinuxEngine(t *testing.T) {
 	if err := json.Unmarshal([]byte(backgroundSuccess(t, "project", "up", "--config", file, "--json")), &first); err != nil || len(first) != 1 {
 		t.Fatalf("restored up: %+v %v", first, err)
 	}
-	if output := backgroundSuccess(t, "exec", "cp-"+name+"-app", "--", "cat", "/data/message"); output != "restored" {
+	if output := backgroundSuccess(t, "exec", "cp-"+name+"-app", "--", "/bin/sh", "-c", tmpfsCapacityProbe+" && cat /data/message"); output != "restored" {
 		t.Fatalf("data: %q", output)
 	}
 	if err := json.Unmarshal([]byte(backgroundSuccess(t, "project", "up", "--config", file, "--json")), &second); err != nil || len(second) != 1 || second[0].ID != first[0].ID || second[0].Generation != first[0].Generation {

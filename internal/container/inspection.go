@@ -38,6 +38,8 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
+	TmpSize          int64                   `json:"tmp_size"`
+	ShmSize          int64                   `json:"shm_size"`
 	Healthcheck      *InspectionHealthConfig `json:"healthcheck"`
 	RestartPolicy    string                  `json:"restart_policy"`
 	StopSignal       string                  `json:"stop_signal"`
@@ -91,6 +93,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		rootfs = ""
 	}
 	logSize, logFiles := cfg.LogRetention()
+	tmpSize, shmSize := cfg.TmpfsSizes()
 	return Inspection{
 		Labels:        maps.Clone(record.Labels),
 		Health:        record.effectiveHealth(),
@@ -98,7 +101,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		CleanupFailures: append([]string{}, record.CleanupFailures...),
 		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{TmpSize: tmpSize, ShmSize: shmSize, Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

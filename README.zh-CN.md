@@ -171,6 +171,13 @@ casklet stop worker
 casklet rm worker
 ```
 
+使用 `casklet run --tmp-size 32m --shm-size 96m --memory 256m -- /bin/sleep 300`
+设置临时存储容量。`/tmp` 默认 16 MiB，`/dev/shm` 默认 64 MiB；两者支持正数
+字节或二进制 `k`/`m`/`g` 单位，最大 `128g`，Linux 会向上按内存页取整。
+run JSON 和项目服务的 `run` 对象也支持同名字符串字段。启动、重启会保留容量，
+并清空其中的数据；`inspect` 显示应用默认值后的配置字节数。实际分配的页计入
+`--memory` 限制，容量不会预留内存。
+
 使用 `casklet stats --watch worker database` 持续监控多个容器，或用
 `casklet stats --watch --filter label=project=demo` 选择项目。添加 `--json`
 可逐行输出 JSON 帧；选择固定现有 ID，中断监控不会停止容器。

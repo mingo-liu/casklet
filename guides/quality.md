@@ -6,6 +6,57 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-14: Configure temporary and shared-memory capacities
+
+Added `run --tmp-size` and `--shm-size`, with positive byte or binary k/m/g
+values up to 128 GiB per mount. Run JSON and project service run objects accept
+the same string fields; explicit CLI values override run JSON. Saved configs
+retain sizes across start/restart and automatic restarts. Omitted/legacy zero
+fields preserve 16 MiB `/tmp` and 64 MiB `/dev/shm` defaults without changing
+existing project fingerprints. Explicit capacity changes participate in drift
+checks. Public inspection reports configured bytes with defaults applied.
+
+Init validates capacities before filesystem mutation and retains the existing
+private, writable `nosuid,nodev,noexec,mode=1777` mounts for copied roots,
+OverlayFS roots and user namespaces. Exec and health probes share those mounts.
+Linux rounds capacities up to pages; sizes are ceilings rather than reservations,
+and allocated pages remain charged to the workload memory cgroup. Every new
+execution recreates empty temporary mounts. Focused help, usage, architecture
+and both READMEs describe these boundaries.
+
+Regressions cover bad units, explicit zero/negative values, maximum/overflow
+bounds, JSON types and precedence, persisted legacy/custom values, inspection,
+exec inheritance and project identity. Privileged Linux cases cover actual
+copy/overlay capacities, retained start/restart, probes/exec, non-root writable
+mounts and safety flags, page rounding, ENOSPC, memory accounting and OOM ceilings;
+rootless cases include custom capacities. Mac cases cover CLI/run JSON/project
+transport, health, retained start/restart, non-root writes and ENOSPC.
+
+Validation:
+
+- macOS arm64 formatting, complete unit/vet/race checks and native client with
+  embedded Linux engine build passed.
+- Linux arm64 cross-vet and test executable compilation passed. The combined
+  tree also passed complete macOS unit/vet/race and formatting checks after
+  synchronizing restored-volume support; the later main synchronization preserved
+  the exact source tree.
+- The complete combined disposable macOS arm64 suite passed all 58 tests in
+  248.910 seconds without skips, including VM stop/start, disk growth, custom
+  capacities, health/exec, retained start/restart, ENOSPC and restored-volume
+  deployments using custom temporary mounts.
+- Native Linux arm64 package test executables passed as the guest user, with
+  rootfs/image/volume/network/container/runtime suites also passing as root.
+  The complete privileged Linux suite passed through the shared-store preservation
+  wrapper in the same disposable VM, including copy/overlay mounts, rootless
+  capacities, memory accounting, OOM, page rounding and the combined restored-data
+  regression. The optional pinned legacy supervisor case was not configured.
+  The runner exited zero and deleted its isolated VM and host state; the daily VM
+  remained stopped.
+- Initial feature revision 0b71dfb passed hosted macOS and native Linux
+  amd64/arm64 unit/vet/race/build checks, the four-target vulnerability scan and
+  both complete privileged Linux suites. Intel Mac execution was not performed
+  locally.
+
 ## 2026-10-14: Reuse restored and migrated volumes in projects
 
 Project JSON accepts an explicit `external-volumes` mapping from logical mount

@@ -27,6 +27,9 @@ func TestScopedHelpMatchesNamedHelp(t *testing.T) {
 			if !strings.Contains(scoped, "Usage:") {
 				t.Fatalf("missing syntax: %q", scoped)
 			}
+			if topic[0] == "run" && (!strings.Contains(scoped, "--tmp-size") || !strings.Contains(scoped, "--shm-size")) {
+				t.Fatalf("missing tmpfs capacity help: %q", scoped)
+			}
 			if topic[0] != "run" && strings.Contains(scoped, "--pids-limit") {
 				t.Fatalf("unrelated run options: %q", scoped)
 			}

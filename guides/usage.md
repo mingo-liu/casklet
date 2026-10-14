@@ -128,6 +128,8 @@ casklet run --rootfs ./rootfs/busybox \
 | Option | Behavior |
 | --- | --- |
 | `--memory` | Positive bytes or binary `k`, `m`, `g` units; default `128m` |
+| `--tmp-size` | `/tmp` tmpfs capacity, positive bytes or binary `k`, `m`, `g`, up to `128g`; default `16m` |
+| `--shm-size` | `/dev/shm` tmpfs capacity, same units and bound; default `64m` |
 | `--pids-limit` | Aggregate process/thread limit; default `64` |
 | `--cpus` | `0` for unlimited, or `0.01–1000` cores with up to three decimals |
 | `--timeout` | Command deadline; `0` disables it |
@@ -136,6 +138,28 @@ casklet run --rootfs ./rootfs/busybox \
 | `--workdir` | Absolute directory; image default or `/`; directory templates require it to exist |
 | `--user UID[:GID]` | Numeric identity; GID defaults to UID; overrides image User, otherwise `0:0` |
 | `--read-only` | Read-only root; `/tmp` stays writable, bind settings are independent |
+
+`/tmp` and `/dev/shm` are private writable tmpfs mounts, including with
+`--read-only`. Their capacities are ceilings, not memory reservations; allocated
+pages count against the aggregate `--memory` limit. Increasing memory alone does
+not increase these capacities. Capacity can exceed the memory limit, but writes
+can still cause a container OOM before filling the filesystem. Linux rounds byte
+capacities up to its page size. `inspect.config.tmp_size` and `shm_size` report
+configured byte capacities with defaults applied. Start, restart, and automatic
+restarts retain the sizes and create fresh empty tmpfs mounts; use named volumes
+or binds for persistent data. Existing saved configurations retain the 16 MiB and
+64 MiB defaults. Exec commands and health probes share the running mounts.
+
+```sh
+casklet run --memory 256m --tmp-size 32m --shm-size 96m \
+  -- /bin/sh -c 'df -Pk /tmp /dev/shm'
+```
+
+The same string fields (`"tmp-size": "32m"`, `"shm-size": "96m"`) are accepted in
+run JSON and project service `run` objects. Explicit CLI scalars override run JSON.
+Zero and negative capacities are rejected; omitting a field selects its default.
+As with other explicit service settings, changing a project's capacities changes
+its service fingerprint and requires the current project recreation workflow.
 
 The default environment is `PATH=/bin:/usr/bin`, `HOME=/`, `LANG=C`. A numeric
 non-root user needs access to the configured working directory and executables.
@@ -754,8 +778,9 @@ startup. Directory templates and non-root image users receive no capabilities.
 OCI images starting as root retain only `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`,
 `SETGID`, `SETPCAP`, `KILL`, and `NET_BIND_SERVICE` for data initialization, privilege dropping,
 and HTTP listeners. These remain bounded; namespace/mount/network administration
-is unavailable. `/dev/shm` is a private 64 MiB tmpfs charged to the container memory
-limit. OCI images currently do not support user namespaces or rootless execution.
+is unavailable. `/dev/shm` is a private tmpfs (64 MiB by default), configured
+with `--shm-size`; allocated pages count against the container memory limit.
+OCI images currently do not support user namespaces or rootless execution.
 It is a denylist, so use trusted workloads. `--seccomp unconfined`
 disables the filter when a trusted command needs blocked syscalls.
 
@@ -799,6 +824,8 @@ before VM startup. No shell evaluation or variable interpolation occurs.
   "detach": true,
   "name": "redis",
   "memory": "256m",
+  "tmp-size": "32m",
+  "shm-size": "96m",
   "restart": "unless-stopped",
   "env-file": ["application.env"],
   "env": ["MODE=production"],

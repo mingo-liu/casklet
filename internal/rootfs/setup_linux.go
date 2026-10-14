@@ -16,8 +16,13 @@ import (
 
 // Setup replaces the current root and mounts the runtime filesystems. Call only
 // inside a new mount namespace; the caller must discard that namespace on error.
-func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
-	root, err := directory(path)
+func Setup(cfg config.Config) error {
+	if err := cfg.ValidateTmpfs(); err != nil {
+		return err
+	}
+	tmpSize, shmSize := cfg.TmpfsSizes()
+	mounts := cfg.Mounts
+	root, err := directory(cfg.RootFS)
 	if err != nil {
 		return err
 	}
@@ -75,7 +80,7 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	if err := os.Mkdir("/dev/shm", 01777); err != nil {
 		return err
 	}
-	if err := unix.Mount("tmpfs", "/dev/shm", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=64m,mode=1777"); err != nil {
+	if err := unix.Mount("tmpfs", "/dev/shm", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, fmt.Sprintf("size=%d,mode=1777", shmSize)); err != nil {
 		return fmt.Errorf("mount shared memory: %w", err)
 	}
 	for i, name := range []string{"null", "zero", "random", "urandom", "tty"} {
@@ -94,7 +99,7 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 			return err
 		}
 	}
-	if err := unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "size=16m,mode=1777"); err != nil {
+	if err := unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, fmt.Sprintf("size=%d,mode=1777", tmpSize)); err != nil {
 		return fmt.Errorf("mount tmp: %w", err)
 	}
 	if err := mountDirectories(mounts, sources); err != nil {
@@ -108,7 +113,7 @@ func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
 	if err := os.Remove(oldRoot); err != nil {
 		return fmt.Errorf("remove old root entry: %w", err)
 	}
-	if readOnly {
+	if cfg.ReadOnly {
 		mountInfo, err := os.Open("/proc/self/mountinfo")
 		if err != nil {
 			return fmt.Errorf("inspect rootfs mount flags: %w", err)

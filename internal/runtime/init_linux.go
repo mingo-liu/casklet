@@ -102,7 +102,7 @@ func Init() int {
 			}
 		}
 	}
-	if err := rootfs.Setup(cfg.RootFS, cfg.ReadOnly, cfg.Mounts...); err != nil {
+	if err := rootfs.Setup(*cfg); err != nil {
 		return fail(err)
 	}
 	if err := unix.Sethostname([]byte(cfg.Hostname)); err != nil {

@@ -8,6 +8,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
-func Setup(path string, readOnly bool, mounts ...config.BindMount) error {
+func Setup(cfg config.Config) error {
 	return errors.New("rootfs setup requires Linux")
 }
