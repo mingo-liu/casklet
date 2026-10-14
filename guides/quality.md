@@ -6,6 +6,26 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Combine offline image delivery with selected service upgrades
+
+Merged OCI archive delivery with project preview/recreation, preserving both
+features' focused help, usage, architecture and quality records. Two bounded
+Linux/Mac combined regression sources stop the registry, export/remove/reload an
+image, deploy a project by its loaded immutable ID, and preview/apply an explicit
+service environment update. They verify inherited image health checks (plus
+Linux entrypoint, environment, user, workdir and stop signal), no preview workload
+mutation, a new selected ID, unchanged unselected ID/generation and named-volume
+bytes readable by the replacement. Config-free down retains the data volume.
+
+Validation:
+
+- Combined macOS arm64 formatting, full unit/vet/race checks and native client
+  with embedded Linux engine build passed.
+- Combined Linux arm64 cross-vet and all package/privileged integration test
+  executable compilation passed; these checks do not execute Linux tests.
+- Real combined macOS/privileged Linux execution remains coordinated on an
+  isolated VM by the parent workflow; this worktree did not access a VM.
+
 ## 2026-10-14: Preview and recreate selected project services
 
 Added repeatable `project up --recreate SERVICE` and deployment `--dry-run`,
