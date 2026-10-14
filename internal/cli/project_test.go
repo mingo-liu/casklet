@@ -343,3 +343,51 @@ func TestProjectWaitDeadlineIncludesLocalProjectLock(t *testing.T) {
 		t.Fatalf("lock deadline code=%d output=%s diagnostic=%s", code, out.String(), diagnostic.String())
 	}
 }
+
+func TestProjectExternalVolumeMountsUseActualNameAndStableFingerprint(t *testing.T) {
+	plan := func(logical, actual string) project.Plan {
+		t.Helper()
+		body := `{"name":"demo","external-volumes":{"` + logical + `":"` + actual + `"},"services":{"app":{"run":{"mount":["type=volume,source=` + logical + `,target=/data,readonly"],"command":["/bin/sleep","30"]}}}}`
+		request, err := Parse([]string{"project", "up", "--config", projectConfigFile(t, body)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return request.Project
+	}
+	first := plan("data", "Restored_Data.1")
+	if len(first.Volumes) != 0 || !reflect.DeepEqual(first.ExternalVolumes, []string{"Restored_Data.1"}) {
+		t.Fatalf("external volume plan %+v", first)
+	}
+	request, err := Parse(first.Services[0].Args)
+	if err != nil || request.Config.Mounts[0].Source != "Restored_Data.1" || !request.Config.Mounts[0].ReadOnly {
+		t.Fatalf("actual mount %+v %v", request.Config.Mounts, err)
+	}
+	if first.Services[0].Fingerprint != plan("renamed", "Restored_Data.1").Services[0].Fingerprint {
+		t.Fatal("logical name affects mount identity")
+	}
+	if first.Services[0].Fingerprint == plan("data", "Restored_Data.2").Services[0].Fingerprint {
+		t.Fatal("changed external target does not affect identity")
+	}
+}
+
+func TestProjectExternalVolumeHelp(t *testing.T) {
+	for _, mac := range []bool{false, true} {
+		up, err := scopedUsage("project up", mac)
+		for _, want := range []string{"external-volumes", "never created or deleted", "releases"} {
+			if err != nil || !strings.Contains(up, want) {
+				t.Fatalf("up help lacks %q: %v %s", want, err, up)
+			}
+		}
+		down, err := scopedUsage("project down", mac)
+		if err != nil || !strings.Contains(down, "External volumes survive even with --volumes") {
+			t.Fatalf("down help: %v %s", err, down)
+		}
+	}
+	for _, topic := range []string{"up", "down"} {
+		out, _, code := helpExecution(t, []string{"project", topic, "--help"})
+		other, _, otherCode := helpExecution(t, []string{"help", "project", topic})
+		if code != 0 || otherCode != 0 || out != other {
+			t.Fatalf("help mismatch for %s", topic)
+		}
+	}
+}

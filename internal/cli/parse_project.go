@@ -95,6 +95,11 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		volumes[key] = name
 		plan.Volumes = append(plan.Volumes, name)
 	}
+	for logical, actual := range doc.ExternalVolumes {
+		volumes[logical] = actual
+		plan.ExternalVolumes = append(plan.ExternalVolumes, actual)
+	}
+	sort.Strings(plan.ExternalVolumes)
 	order, _ := doc.Order()
 	var published []config.PortMapping
 	aliasesInUse := map[string]string{}

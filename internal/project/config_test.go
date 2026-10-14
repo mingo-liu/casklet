@@ -1,7 +1,10 @@
 package project
 
 import (
+	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +40,54 @@ func TestProjectConfigRejectsAmbiguousAndInvalidPlans(t *testing.T) {
 	} {
 		if _, err := Decode([]byte(data)); err == nil {
 			t.Errorf("accepted %s", data)
+		}
+	}
+}
+
+func TestProjectExternalVolumeDeclarations(t *testing.T) {
+	base := func(fields string) string { return `{"name":"demo",` + fields + `,"services":{"app":{"run":{}}}}` }
+	doc, err := Decode([]byte(base(`"volumes":["owned"],"external-volumes":{"data":"Restored_Data.1"}`)))
+	if err != nil || doc.ExternalVolumes["data"] != "Restored_Data.1" {
+		t.Fatalf("external declaration: %+v %v", doc, err)
+	}
+	for _, fields := range []string{
+		`"external-volumes":null`, `"external-volumes":[]`, `"external-volumes":{"data":true}`,
+		`"external-volumes":{"data":"one","data":"two"}`, `"external-volumes":{"Data":"one"}`,
+		`"external-volumes":{"data":""}`, `"external-volumes":{"data":"../outside"}`,
+		`"external-volumes":{"data":"-bad"}`, `"external-volumes":{"data":"one","other":"one"}`,
+		`"volumes":["data"],"external-volumes":{"data":"restored"}`,
+		`"volumes":["data"],"external-volumes":{"other":"cp-demo-data"}`,
+	} {
+		if _, err := Decode([]byte(base(fields))); err == nil {
+			t.Errorf("accepted %s", fields)
+		}
+	}
+	for _, length := range []int{63, 64} {
+		fields := `"external-volumes":{"` + strings.Repeat("a", length) + `":"` + strings.Repeat("A", length) + `"}`
+		_, err := Decode([]byte(base(fields)))
+		if (err == nil) != (length == 63) {
+			t.Fatalf("external name length %d: %v", length, err)
+		}
+	}
+	for _, owned := range []int{0, 1, 16} {
+		document := map[string]any{"name": "demo", "services": map[string]any{"app": map[string]any{"run": map[string]any{}}}}
+		volumes := []string{}
+		external := map[string]string{}
+		for i := 0; i < owned; i++ {
+			volumes = append(volumes, fmt.Sprintf("owned-%d", i))
+		}
+		for i := owned; i < 16; i++ {
+			external[fmt.Sprintf("external-%d", i)] = fmt.Sprintf("existing-%d", i)
+		}
+		document["volumes"], document["external-volumes"] = volumes, external
+		data, _ := json.Marshal(document)
+		if _, err := Decode(data); err != nil {
+			t.Fatalf("16 total rejected: %v", err)
+		}
+		external["overflow"] = "overflow"
+		data, _ = json.Marshal(document)
+		if _, err := Decode(data); err == nil {
+			t.Fatal("accepted 17 total volumes")
 		}
 	}
 }

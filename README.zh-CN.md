@@ -148,6 +148,11 @@ casklet project down --volumes demo
 失败时仅清理本次新建且归属已验证的资源。已有服务和数据卷会保留；`down` 默认
 保留数据卷。本地归属记录用于防止接管或删除无关的同名资源。
 
+恢复或迁移数据后，使用 `"external-volumes": {"data": "restored-data"}` 声明，
+替代 `volumes` 中的 `data`；挂载仍引用逻辑名称 `data`。先恢复或创建 VM 内的数据卷。
+显式外部卷声明会释放这些名称已有的归属记录；回滚和 `down --volumes` 都会保留
+外部卷。项目管理卷与外部卷合计最多 16 个。
+
 ## 常用操作
 
 ```sh

@@ -6,6 +6,37 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-14: Reuse restored and migrated volumes in projects
+
+Project JSON accepts an explicit `external-volumes` mapping from logical mount
+names to existing guest volumes. Managed and external declarations share the
+16-volume bound; strict decoding rejects nulls, types, duplicates, invalid names,
+logical overlaps and conflicting actual targets. Generated mounts and service
+fingerprints use the actual guest name. Existing managed-resource ownership checks
+remain unchanged, and missing external volumes fail before guest mutations.
+
+External volumes never enter creation or rollback ownership lists. After all
+preflight checks pass, any old receipt for an explicitly external name is removed
+with a synced save before startup. This deliberate release supports same-name
+restoration and managed-to-external conversion; save failure prevents guest
+mutations, and startup failure does not restore ownership. Config-free down,
+including `--volumes`, preserves these volumes. Other projects' receipts are not
+changed. Focused help, usage, architecture and both READMEs document the semantics.
+
+Regressions cover schema/name/total limits, actual-name fingerprints, migration,
+stale restored receipts, matching owned receipts, repeated reuse, preflight/save
+failure, persisted release, config-free down and failed-startup rollback. Real
+Linux/macOS cases export and restore data under the original project volume name,
+redeploy it explicitly, reuse it from a fresh project, verify missing-volume
+preflight and readiness rollback, and verify retained bytes after `down --volumes`.
+
+Validation:
+
+- macOS arm64 formatting, full unit/vet/race checks and native client/embedded
+  engine build passed. Privileged Linux test sources cross-compiled successfully.
+- Real macOS end-to-end and privileged Linux execution are pending the coordinated
+  isolated VM run. Intel Mac execution was not performed.
+
 ## 2026-10-13: Align inherited exec and probe configuration limits
 
 Sealed exec/probe configurations now use the same 1 MiB serialized JSON limit
