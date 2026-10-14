@@ -413,7 +413,10 @@ Options:
   --json     Print managed container records as a JSON array
 
 Notes:
-  Define name, services, optional networks and volumes in the file.
+  Define name, services, optional networks, volumes and external-volumes in the file.
+  external-volumes maps logical names to existing guest volumes (16 total volumes).
+  External volumes must exist, are never created or deleted, and are not adopted.
+  An explicit external declaration releases any old project ownership receipt.
   Each service has a run object and optional depends-on conditions: started/healthy.
   Default network is default; volume/network references use declared logical names.
   Relative rootfs, bind sources, and env-files use the project file directory.
@@ -440,6 +443,7 @@ Options:
 Notes:
   Stops/removes managed containers by pinned IDs and removes owned networks.
   Data volumes survive by default. Unowned or replaced resources are preserved.
+  External volumes survive even with --volumes.
   All failures are reported; completed removals remain completed for safe retries.
   Ownership receipts live in the local casklet machine state directory.
   Down needs the project name only; original config/env-files are not reopened.

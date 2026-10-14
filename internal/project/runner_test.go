@@ -300,3 +300,127 @@ func TestProjectDownContinuesAfterPartialFailure(t *testing.T) {
 		t.Fatalf("retry failed %v", err)
 	}
 }
+
+func TestExternalVolumeRestoreReuseAndOwnershipRelease(t *testing.T) {
+	for _, receipt := range []string{"migrated", "stale-restored", "owned"} {
+		t.Run(receipt, func(t *testing.T) {
+			fake := newFakeProject()
+			runner := fakeRunner(fake)
+			plan := fakePlan()
+			plan.Volumes = nil
+			plan.ExternalVolumes = []string{"cp-demo-data"}
+			external := Resource{Kind: "volume", Name: "cp-demo-data", CreatedAt: time.Unix(200, 0)}
+			fake.resources["volume:"+external.Name] = external
+			if receipt != "migrated" {
+				owned := external
+				if receipt == "stale-restored" {
+					owned.CreatedAt = time.Unix(100, 0)
+				}
+				runner.State.Resources["volume:"+external.Name] = owned
+			}
+			var saved State
+			runner.Save = func(state State) error {
+				saved = State{Version: state.Version, Name: state.Name, Resources: map[string]Resource{}}
+				for key, resource := range state.Resources {
+					saved.Resources[key] = resource
+				}
+				return nil
+			}
+			first, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, owned := runner.State.Resources["volume:"+external.Name]; owned {
+				t.Fatal("external volume acquired ownership")
+			}
+			if _, owned := saved.Resources["volume:"+external.Name]; owned {
+				t.Fatal("ownership release not persisted")
+			}
+			mutations := len(fake.mutations)
+			second, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
+			if err != nil || second[0].ID != first[0].ID || len(fake.mutations) != mutations {
+				t.Fatalf("external reuse: %v %v", second, err)
+			}
+			// Down receives no config: reload only persisted ownership receipts.
+			runner.State = saved
+			if err := runner.Down(context.Background(), "demo", true); err != nil {
+				t.Fatal(err)
+			}
+			if len(fake.resources) != 1 || !sameResource(fake.resources["volume:"+external.Name], external) {
+				t.Fatalf("external removed: %v", fake.resources)
+			}
+		})
+	}
+}
+
+func TestExternalVolumePreflightAndSaveFailurePreventMutations(t *testing.T) {
+	for _, failure := range []string{"missing", "save", "unowned-network", "service-drift"} {
+		t.Run(failure, func(t *testing.T) {
+			fake := newFakeProject()
+			runner := fakeRunner(fake)
+			plan := fakePlan()
+			plan.Volumes = nil
+			plan.ExternalVolumes = []string{"cp-demo-data"}
+			external := Resource{Kind: "volume", Name: "cp-demo-data", CreatedAt: time.Unix(200, 0)}
+			runner.State.Resources["volume:"+external.Name] = external
+			if failure != "missing" {
+				fake.resources["volume:"+external.Name] = external
+			}
+			switch failure {
+			case "save":
+				runner.Save = func(State) error { return errors.New("disk full") }
+			case "unowned-network":
+				fake.resources["network:cp-demo-default"] = Resource{Kind: "network", Name: "cp-demo-default", CreatedAt: time.Unix(200, 0)}
+			case "service-drift":
+				fake.records = []container.Record{{Name: plan.Services[0].Name}}
+			}
+			if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err == nil || len(fake.mutations) != 0 {
+				t.Fatalf("unsafe mutation: %v %v", err, fake.mutations)
+			}
+			if _, owned := runner.State.Resources["volume:"+external.Name]; !owned {
+				t.Fatal("failed preflight/save relinquished receipt")
+			}
+		})
+	}
+}
+
+func TestExternalVolumeSurvivesRollbackAfterOwnershipRelease(t *testing.T) {
+	fake := newFakeProject()
+	runner := fakeRunner(fake)
+	plan := fakePlan()
+	plan.ExternalVolumes = []string{"cp-demo-restored"}
+	external := Resource{Kind: "volume", Name: "cp-demo-restored", CreatedAt: time.Unix(200, 0)}
+	fake.resources["volume:"+external.Name] = external
+	runner.State.Resources["volume:"+external.Name] = external
+	fake.failRun = "cp-demo-api"
+	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err == nil {
+		t.Fatal("expected failure")
+	}
+	if len(fake.records) != 0 || len(fake.resources) != 1 || !sameResource(fake.resources["volume:"+external.Name], external) || len(runner.State.Resources) != 0 {
+		t.Fatalf("rollback changed external data: %v %v %v", fake.records, fake.resources, runner.State)
+	}
+	if err := runner.Down(context.Background(), "demo", true); err != nil || len(fake.resources) != 1 {
+		t.Fatalf("down after rollback: %v", err)
+	}
+}
+
+func TestManagedVolumeConversionToExternalPreservesRunningServices(t *testing.T) {
+	fake := newFakeProject()
+	runner := fakeRunner(fake)
+	plan := fakePlan()
+	first, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := fake.resources["volume:cp-demo-data"]
+	plan.Volumes = nil
+	plan.ExternalVolumes = []string{external.Name}
+	mutations, saves := len(fake.mutations), fake.saves
+	second, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
+	if err != nil || len(second) != len(first) || second[0].ID != first[0].ID || second[1].ID != first[1].ID || len(fake.mutations) != mutations || fake.saves != saves+1 {
+		t.Fatalf("conversion changed running deployment: %+v %v %v", second, err, fake.mutations)
+	}
+	if err := runner.Down(context.Background(), "demo", true); err != nil || len(fake.resources) != 1 || !sameResource(fake.resources["volume:"+external.Name], external) {
+		t.Fatalf("converted volume removed: %v %v", err, fake.resources)
+	}
+}

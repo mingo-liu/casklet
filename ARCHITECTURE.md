@@ -382,7 +382,13 @@ with network aliases sorted only for hashing. Legacy hash reuse inspects the
 pinned container ID and verifies the desired configuration against its saved alias
 order before any deployment mutations. Ownership state stores only network/volume
 names and creation times. Immutable container labels carry the project/service/config
-identity and one startup token.
+identity and one startup token. Explicit external-volume mappings resolve logical
+mount sources to existing guest names before config hashing. Their existence is
+preflighted with other resources, and they never enter creation/rollback ownership
+lists. After successful preflight, any old receipt for an external name is released
+and synced before guest mutations; config-free down therefore preserves it even
+after same-name restore or managed-to-external conversion. Startup failure does
+not reverse that explicit release. Other projects retain their own receipts.
 
 `project up --wait` applies one deadline after parsing to local lock acquisition,
 VM preparation, startup and readiness. The runner pins each service ID/generation

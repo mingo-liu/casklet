@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -141,6 +142,11 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		inventories[kind] = inventory
 	}
+	for _, name := range plan.ExternalVolumes {
+		if _, found := inventories["volume"][name]; !found {
+			return nil, fmt.Errorf("external volume %q does not exist; create or restore it before project up", name)
+		}
+	}
 	var needed []Resource
 	for _, entry := range []struct {
 		kind  string
@@ -164,8 +170,28 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			newKeys++
 		}
 	}
-	if len(runner.State.Resources)+newKeys > 64 {
+	releasedKeys := 0
+	for _, name := range plan.ExternalVolumes {
+		if _, found := runner.State.Resources["volume:"+name]; found {
+			releasedKeys++
+		}
+	}
+	if len(runner.State.Resources)-releasedKeys+newKeys > 64 {
 		return nil, errors.New("project resource history is full; use project down before recreating")
+	}
+	// An explicit external declaration relinquishes any old ownership receipt,
+	// including one left behind after restoring the same name. Persist that
+	// release before mutations so rollback and config-free down cannot delete it.
+	if releasedKeys > 0 {
+		releasedState := runner.State
+		releasedState.Resources = maps.Clone(runner.State.Resources)
+		for _, name := range plan.ExternalVolumes {
+			delete(releasedState.Resources, "volume:"+name)
+		}
+		if err := runner.Save(releasedState); err != nil {
+			return nil, err
+		}
+		runner.State = releasedState
 	}
 	var tokenBytes [16]byte
 	if _, err := rand.Read(tokenBytes[:]); err != nil {

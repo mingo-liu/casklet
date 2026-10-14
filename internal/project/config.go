@@ -9,6 +9,8 @@ import (
 	"io"
 	"regexp"
 	"sort"
+
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 const LabelPrefix = "io.casklet.project."
@@ -32,10 +34,11 @@ func ScopedName(project, logical string) (string, error) {
 }
 
 type Document struct {
-	Name     string                   `json:"name"`
-	Networks []string                 `json:"networks"`
-	Volumes  []string                 `json:"volumes"`
-	Services map[string]ServiceConfig `json:"services"`
+	Name            string                   `json:"name"`
+	Networks        []string                 `json:"networks"`
+	Volumes         []string                 `json:"volumes"`
+	Services        map[string]ServiceConfig `json:"services"`
+	ExternalVolumes map[string]string        `json:"external-volumes"`
 }
 
 type ServiceConfig struct {
@@ -55,10 +58,11 @@ type Service struct {
 }
 
 type Plan struct {
-	Name     string
-	Networks []string
-	Volumes  []string
-	Services []Service // Topological order, with deterministic ties.
+	Name            string
+	Networks        []string
+	Volumes         []string
+	ExternalVolumes []string  // Existing guest names, never project-owned.
+	Services        []Service // Topological order, with deterministic ties.
 }
 
 // Decode rejects duplicate keys at every level, nulls, excessive nesting and
@@ -100,6 +104,23 @@ func Decode(data []byte) (Document, error) {
 			}
 			seen[name] = true
 		}
+	}
+	if len(doc.Volumes)+len(doc.ExternalVolumes) > 16 {
+		return doc, errors.New("project supports at most 16 volumes including external volumes")
+	}
+	logicalNames := map[string]bool{}
+	actualNames := map[string]bool{}
+	for _, name := range doc.Volumes {
+		logicalNames[name] = true
+		actual, _ := ScopedName(doc.Name, name)
+		actualNames[actual] = true
+	}
+	for logical, actual := range doc.ExternalVolumes {
+		if ValidateName(logical) != nil || config.ValidateVolumeName(actual) != nil || logicalNames[logical] || actualNames[actual] {
+			return doc, errors.New("invalid or conflicting external volume declaration")
+		}
+		logicalNames[logical] = true
+		actualNames[actual] = true
 	}
 	for key, service := range doc.Services {
 		if _, err := ScopedName(doc.Name, key); err != nil || ValidateName(key) != nil {
