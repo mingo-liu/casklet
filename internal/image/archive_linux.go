@@ -83,10 +83,8 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 		if err != nil {
 			return Record{}, err
 		}
-		count, unpackErr := unpackLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total)
-		if unpackErr == nil {
-			unpackErr = validateOCILayerArchive(ctx, archive)
-		}
+		progress := &streamProgress{ctx: ctx, now: time.Now}
+		count, unpackErr := unpackPreparedLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total, progress, false, validateOCILayerArchive)
 		if err := errors.Join(unpackErr, archive.Close(), os.Remove(archive.Name())); err != nil {
 			return Record{}, fmt.Errorf("OCI image layer %d: %w", i+1, err)
 		}

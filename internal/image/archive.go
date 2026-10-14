@@ -90,8 +90,8 @@ func readOCIArchive(ctx context.Context, dir string, source io.Reader) (*ociArch
 		}
 		seen[name] = true
 		if h.Typeflag == tar.TypeDir {
-			if name != "." && name != "blobs" && name != "blobs/sha256" {
-				return nil, fmt.Errorf("unsupported OCI archive directory %q", name)
+			if strings.HasPrefix(name, "blobs/") && name != "blobs/sha256" {
+				return nil, fmt.Errorf("unsupported OCI blob directory %q", name)
 			}
 			if h.Size != 0 {
 				return nil, errors.New("OCI archive directory has content")
@@ -106,10 +106,16 @@ func readOCIArchive(ctx context.Context, dir string, source io.Reader) (*ociArch
 		}
 		blob := strings.TrimPrefix(name, "blobs/sha256/")
 		isBlob := strings.HasPrefix(name, "blobs/sha256/") && ValidateID("sha256:"+blob) == nil
-		// OCI permits extra layout files; accept them as bounded opaque data, but
+		// OCI permits extra layout files; discard bounded unknown regular data, but
 		// never follow them or use Docker manifest.json to infer an image.
-		if !isBlob && (strings.Contains(name, "/") || name == "." || h.Size > maxOCIMetadataBytes) {
+		if !isBlob && (strings.HasPrefix(name, "blobs/") || name == "." || h.Size > maxOCIMetadataBytes) {
 			return nil, fmt.Errorf("unsupported OCI archive path %q", name)
+		}
+		if !isBlob && name != "oci-layout" && name != "index.json" {
+			if _, err := io.Copy(io.Discard, reader); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0700); err != nil {
 			return nil, err
@@ -312,11 +318,14 @@ func validateOCILayerArchive(ctx context.Context, archive *os.File) error {
 	reader := tar.NewReader(stream)
 	for count := 0; ; count++ {
 		before := stream.count
-		_, err := reader.Next()
+		header, err := reader.Next()
 		if err == io.EOF {
 			return finishOCIStream(stream, before)
 		}
 		if err != nil {
+			return err
+		}
+		if err := rejectSparseLayer(header); err != nil {
 			return err
 		}
 		if count >= maxLayerEntries {

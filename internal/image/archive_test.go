@@ -10,11 +10,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -318,5 +320,111 @@ func TestOCIDescriptorSizeAndConfigValidation(t *testing.T) {
 	a.sizes["index.json"] = int64(len(raw))
 	if _, err := a.nativeImage(context.Background(), runtime.GOARCH); err == nil {
 		t.Fatal("accepted descriptor size mismatch")
+	}
+}
+
+// tar.Writer intentionally refuses GNU sparse output. Encode a small PAX
+// extension header independently, declaring a 64 GiB all-hole logical file.
+func sparseLayerFixture(t *testing.T) []byte {
+	t.Helper()
+	var pax string
+	for _, entry := range []string{"GNU.sparse.size=68719476736\n", "GNU.sparse.numblocks=1\n", "GNU.sparse.map=0,0\n"} {
+		size := len(entry) + 2
+		for {
+			candidate := fmt.Sprintf("%d %s", size, entry)
+			if len(candidate) == size {
+				pax += candidate
+				break
+			}
+			size = len(candidate)
+		}
+	}
+	var raw bytes.Buffer
+	writer := tar.NewWriter(&raw)
+	if err := writer.WriteHeader(&tar.Header{Name: "PaxHeaders/sparse", Typeflag: tar.TypeReg, Mode: 0600, Size: int64(len(pax))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte(pax)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteHeader(&tar.Header{Name: "huge-sparse", Typeflag: tar.TypeReg, Mode: 0600}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := raw.Bytes()
+	data[156] = tar.TypeXHeader
+	for i := 148; i < 156; i++ {
+		data[i] = ' '
+	}
+	sum := 0
+	for _, b := range data[:512] {
+		sum += int(b)
+	}
+	copy(data[148:156], []byte(fmt.Sprintf("%06o\x00 ", sum)))
+	h, err := tar.NewReader(bytes.NewReader(data)).Next()
+	if err != nil || h.Size != 64<<30 {
+		t.Fatalf("invalid sparse attack fixture: %+v %v", h, err)
+	}
+	return data
+}
+func TestOCILayerSparseLogicalExpansionRejectedBeforeExtraction(t *testing.T) {
+	data := sparseLayerFixture(t)
+	file, err := os.CreateTemp(t.TempDir(), "sparse-layer-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := validateOCILayerArchive(ctx, file); err == nil || !strings.Contains(err.Error(), "sparse") {
+		t.Fatalf("sparse prevalidation: %v", err)
+	}
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := applyLayer(ctx, root, file); err == nil || !strings.Contains(err.Error(), "sparse") {
+		t.Fatalf("sparse shared extractor: %v", err)
+	}
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("sparse layer mutated filesystem: %v %v", entries, err)
+	}
+}
+func TestOCIArchiveDiscardsBoundedAdditionalFiles(t *testing.T) {
+	data := archiveFixture(t)
+	var result bytes.Buffer
+	writer := tar.NewWriter(&result)
+	if err := writer.WriteHeader(&tar.Header{Name: "extras", Typeflag: tar.TypeDir, Mode: 0700}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"manifest.json", "extras/build-metadata.json"} {
+		if err := writer.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0600, Size: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	result.Write(data)
+	dir := t.TempDir()
+	a, err := readOCIArchive(context.Background(), dir, bytes.NewReader(result.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.nativeImage(context.Background(), runtime.GOARCH); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "extras")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stored ignored auxiliary file: %v", err)
 	}
 }

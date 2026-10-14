@@ -356,9 +356,9 @@ Archive reference annotations do not create cached registry tag mappings; use
 Loading limits are 32 GiB of outer tar (including padding), 4096 outer entries,
 1 MiB per JSON/auxiliary metadata file, 256 layers, 4 GiB per unpacked tar layer,
 16 GiB unpacked total and one million entries per layer. Each included blob is
-limited to 4 GiB. Additional bounded top-level layout files are ignored. Unsafe
+limited to 4 GiB. Additional bounded regular layout files are safely discarded. Unsafe
 paths, duplicate names/JSON fields, links/special outer entries, sparse outer
-entries, bad sizes/digests, missing tar terminators and nonzero trailing bytes
+entries and sparse inner layers, bad sizes/digests, missing tar terminators and nonzero trailing bytes
 fail. Conventional zero tar block padding is accepted. Loading needs temporary
 VM disk space for the outer blobs, current uncompressed layer and resulting
 filesystem; size limits are validation bounds, not disk reservations.

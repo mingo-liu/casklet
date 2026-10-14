@@ -25,7 +25,8 @@ Regressions include an independently produced third-party OCI layout, exported
 layout readability by the pinned primary reader, ownership/default/StartInterval
 round trips, whiteouts, existing-image deduplication/reference preservation,
 malformed/duplicate/traversal/special entries, digest/size/platform/JSON failures,
-missing terminators, nonzero trailing bytes, cancellation, rollback, cache
+missing terminators, nonzero trailing bytes, sparse logical expansion before
+filesystem allocation, discarded auxiliary layout files, cancellation, rollback, cache
 preservation, directory-policy rejection and save lease/deletion fencing.
 Linux/macOS integration cases cover actual binary transport, disconnected
 registry execution, retained restart and blocked input/output cancellation.

@@ -51,6 +51,9 @@ func walkLayer(ctx context.Context, archive *os.File, visit func(*tar.Header, *t
 		if err != nil {
 			return err
 		}
+		if err := rejectSparseLayer(header); err != nil {
+			return err
+		}
 		if count >= maxLayerEntries {
 			return errors.New("image layer exceeds entry limit")
 		}
@@ -269,4 +272,16 @@ func setOwnership(root *os.Root, name string, uid, gid int) error {
 		return nil
 	}
 	return root.Lchown(name, uid, gid)
+}
+
+func rejectSparseLayer(header *tar.Header) error {
+	if header.Typeflag == tar.TypeGNUSparse {
+		return errors.New("sparse image layers are unsupported")
+	}
+	for key := range header.PAXRecords {
+		if strings.HasPrefix(key, "GNU.sparse.") {
+			return errors.New("sparse image layers are unsupported")
+		}
+	}
+	return nil
 }
