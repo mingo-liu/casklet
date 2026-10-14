@@ -32,7 +32,7 @@ func TestOCIArchiveOfflineBinaryTransportAndRetainedRestart(t *testing.T) {
 	if err := cmd.Run(); err != nil || out.String() != id+"\n" {
 		t.Fatalf("load: %q %q %v", out.String(), diagnostic.String(), err)
 	}
-	if got := imageSuccess(t, id, nil); got != "image:default:/new-work\n" {
+	if got := backgroundSuccess(t, "run", "--image", id); got != "image:default:/new-work\n" {
 		t.Fatalf("offline defaults: %q", got)
 	}
 	name := fmt.Sprintf("archive-%d", time.Now().UnixNano())
