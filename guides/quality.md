@@ -34,8 +34,20 @@ Validation:
 
 - macOS arm64 formatting, full unit/vet/race checks and native client/embedded
   engine build passed. Privileged Linux test sources cross-compiled successfully.
-- Real macOS end-to-end and privileged Linux execution are pending the coordinated
-  isolated VM run. Intel Mac execution was not performed.
+- The complete disposable macOS arm64 suite passed all 56 tests in 241.885
+  seconds, including actual restoration, migration, reuse, rollback and external
+  data preservation. VM stop/start and disk-growth tests passed without skips.
+- Native Linux arm64 package test executables passed as the guest user, with
+  rootfs/image/volume/network/container/runtime suites also passing as root.
+  The complete privileged Linux suite passed through the shared-store preservation
+  wrapper in the same disposable VM. The optional pinned legacy supervisor case
+  was not configured. The runner exited zero and deleted its isolated VM and host
+  state; the daily VM remained stopped.
+- Hosted CI passed macOS and native Linux amd64/arm64 formatting, unit/vet/race
+  checks, builds, the four-target vulnerability scan and both complete privileged
+  Linux suites on revision b5d525c. Intel Mac execution was not performed locally.
+- Initial Linux CI identified a parser test fixture without an execution source;
+  declaring an explicit image made it portable without changing its assertions.
 
 ## 2026-10-13: Align inherited exec and probe configuration limits
 
