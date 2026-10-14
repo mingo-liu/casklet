@@ -173,6 +173,12 @@ Failures clean only this invocation's newly created verified resources. Existing
 services and volumes remain; `down` preserves data volumes by default. Local
 ownership receipts prevent adopting or deleting unrelated same-name resources.
 
+For restored or migrated data, declare `"external-volumes": {"data": "restored-data"}`
+instead of listing `data` in `volumes`; mounts still refer to logical `data`.
+Restore/create the guest volume first. Explicit external declarations release old
+ownership receipts for those names; external volumes survive rollback and
+`down --volumes`. Managed and external volumes share the 16-volume limit.
+
 ## Common operations
 
 ```sh

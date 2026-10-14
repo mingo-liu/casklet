@@ -40,6 +40,49 @@ Validation:
   Linux and real macOS suites are pending the coordinated disposable VM run;
   neither was invoked from this worktree. Intel Mac execution was not performed.
 
+## 2026-10-14: Reuse restored and migrated volumes in projects
+
+Project JSON accepts an explicit `external-volumes` mapping from logical mount
+names to existing guest volumes. Managed and external declarations share the
+16-volume bound; strict decoding rejects nulls, types, duplicates, invalid names,
+logical overlaps and conflicting actual targets. Generated mounts and service
+fingerprints use the actual guest name. Existing managed-resource ownership checks
+remain unchanged, and missing external volumes fail before guest mutations.
+
+External volumes never enter creation or rollback ownership lists. After all
+preflight checks pass, any old receipt for an explicitly external name is removed
+with a synced save before startup. This deliberate release supports same-name
+restoration and managed-to-external conversion; save failure prevents guest
+mutations, and startup failure does not restore ownership. Config-free down,
+including `--volumes`, preserves these volumes. Other projects' receipts are not
+changed. Focused help, usage, architecture and both READMEs document the semantics.
+
+Regressions cover schema/name/total limits, actual-name fingerprints, migration,
+stale restored receipts, matching owned receipts, repeated reuse, preflight/save
+failure, persisted release, config-free down and failed-startup rollback. Real
+Linux/macOS cases export and restore data under the original project volume name,
+redeploy it explicitly, reuse it from a fresh project, verify missing-volume
+preflight and readiness rollback, and verify retained bytes after `down --volumes`.
+
+Validation:
+
+- macOS arm64 formatting, full unit/vet/race checks and native client/embedded
+  engine build passed. Privileged Linux test sources cross-compiled successfully.
+- The complete disposable macOS arm64 suite passed all 56 tests in 241.885
+  seconds, including actual restoration, migration, reuse, rollback and external
+  data preservation. VM stop/start and disk-growth tests passed without skips.
+- Native Linux arm64 package test executables passed as the guest user, with
+  rootfs/image/volume/network/container/runtime suites also passing as root.
+  The complete privileged Linux suite passed through the shared-store preservation
+  wrapper in the same disposable VM. The optional pinned legacy supervisor case
+  was not configured. The runner exited zero and deleted its isolated VM and host
+  state; the daily VM remained stopped.
+- Hosted CI passed macOS and native Linux amd64/arm64 formatting, unit/vet/race
+  checks, builds, the four-target vulnerability scan and both complete privileged
+  Linux suites on revision b5d525c. Intel Mac execution was not performed locally.
+- Initial Linux CI identified a parser test fixture without an execution source;
+  declaring an explicit image made it portable without changing its assertions.
+
 ## 2026-10-13: Align inherited exec and probe configuration limits
 
 Sealed exec/probe configurations now use the same 1 MiB serialized JSON limit

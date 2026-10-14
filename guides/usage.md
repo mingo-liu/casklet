@@ -1011,6 +1011,45 @@ casklet project down demo
 casklet project down --volumes demo
 ```
 
+To reuse a restored or migrated volume, replace its entry in `volumes` with an
+explicit `external-volumes` mapping. Mounts continue to use the logical key:
+
+```json
+{
+  "name": "demo",
+  "external-volumes": {"redis-data": "restored-redis"},
+  "services": {
+    "redis": {
+      "run": {
+        "image": "redis:8",
+        "mount": ["type=volume,source=redis-data,target=/data"]
+      }
+    }
+  }
+}
+```
+
+Restore the archive before deploying, for example
+`casklet volume restore restored-redis < redis-data.tar`, then run
+`casklet project up --config project.json`. The mapped guest volume must already
+exist; missing external volumes fail before any deployment mutations. Guest names
+use the named-volume grammar (1-63 letters, digits, underscores, periods or
+hyphens, starting alphanumeric). Logical keys must be distinct from managed
+`volumes`; each actual volume has one logical key and cannot also be a managed
+scoped volume. The combined managed/external limit is 16 volumes. Effective mount
+identity uses the actual guest name, so changing that name requires service
+recreation; renaming a logical key while keeping the same mount does not.
+
+External volumes are never created, adopted, or deleted by project deployment,
+rollback or `down --volumes`. After all preflight checks pass, an explicit external
+declaration permanently releases any old ownership receipt for the same guest
+name, including a stale receipt after same-name restoration. This release is
+persisted before startup and remains even if startup fails. This also lets an
+existing managed volume become external without copying its data. Returning it
+to `volumes` does not implicitly reacquire ownership. Volume lease/reference/mount
+guards continue to apply; remove an external volume explicitly with `volume rm`
+when all users have been removed. Other projects' ownership receipts are unchanged.
+
 Project, service and logical resource names use lowercase DNS labels; generated
 `cp-PROJECT-LOGICAL` names must fit 63 characters. Each service gets its logical
 name as an alias on its selected network. `run` uses the existing run-config field
@@ -1031,7 +1070,7 @@ pins the observed execution through the existing readiness wait. Missing checks,
 stops or execution changes fail the wait. `--timeout` applies to each health wait
 (default 30s, greater than zero and at most 24h). Dependency conditions apply during
 startup; later health changes do not stop downstream services. There are at most
-64 services and 16 declared networks/volumes each. Overlapping host ports are
+64 services, 16 declared networks and 16 total managed/external volumes. Overlapping host ports are
 rejected before startup; live port availability uses the existing Mac preflight.
 
 Add `--wait` to require readiness of every service, including services with no
@@ -1060,7 +1099,7 @@ upgrade without recreation. Environment/config changes fail before deployment
 mutations; use `down`, edit the configuration and run `up` again. Image tags retain
 their cached version; pin a digest for reproducibility. A retained service keeps its
 immutable image across reuse. Services removed from the file require `down` before deploying
-again. Existing resources are reused only when their creation receipts match local
+again. Managed resources are reused only when their creation receipts match local
 project ownership; manually created same-name resources are never adopted.
 
 On an ordinary startup failure or cancellation, a bounded cleanup stops/removes
