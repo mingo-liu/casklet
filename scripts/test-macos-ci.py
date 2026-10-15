@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Run the real macOS suite in a bounded, disposable Lima home."""
+import argparse
 import os
+import platform
 from pathlib import Path
 import shutil
 import signal
@@ -66,6 +68,10 @@ def run_suite(project, artifacts, timeout=2100, temporary_parent="/private/tmp",
     try:
         result = command(["make", "test-macos"], env, project,
                          artifacts / "suite.log", timeout)
+        if result == 0 and env.get("CASKLET_MACOS_REQUIRE_NO_SKIPS") == "1":
+            if "--- SKIP:" in (artifacts / "suite.log").read_text(errors="replace"):
+                print("Release validation rejects skipped macOS tests", flush=True)
+                result = 1
     except Interrupted as interrupt:
         result = 128 + interrupt.signum
     except (OSError, subprocess.SubprocessError) as error:
@@ -112,7 +118,23 @@ def run_suite(project, artifacts, timeout=2100, temporary_parent="/private/tmp",
     return result
 
 
+def check_architecture(expected):
+    if expected not in ("arm64", "amd64"):
+        raise ValueError("expected Mac architecture must be arm64 or amd64")
+    # Intel kernels may omit this key; -i ignores that known absence.
+    translated = subprocess.run(["/usr/sbin/sysctl", "-in", "sysctl.proc_translated"],
+                                capture_output=True, text=True, timeout=10)
+    if translated.returncode != 0 or translated.stdout.strip() not in ("", "0"):
+        raise ValueError("release validation requires a native process; Rosetta or architecture-probe failure is not accepted")
+    native = {"arm64": "arm64", "x86_64": "amd64"}.get(platform.machine())
+    if native != expected:
+        raise ValueError(f"release validation requires native {expected} hardware; found {native}")
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--project", type=Path, default=Path(__file__).resolve().parent.parent)
+    args = parser.parse_args()
     if sys.platform != "darwin" or os.geteuid() == 0:
         sys.exit("macOS CI requires a regular user on a dedicated Mac")
     if sys.version_info < (3, 9):
@@ -120,11 +142,16 @@ def main():
     for executable in ("make", "go", "limactl"):
         if not shutil.which(executable):
             sys.exit(f"Required command is missing: {executable}")
+    if os.environ.get("CASKLET_MACOS_EXPECT_ARCH"):
+        try:
+            check_architecture(os.environ["CASKLET_MACOS_EXPECT_ARCH"])
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            sys.exit(str(error))
     timeout = int(os.environ.get("CASKLET_MACOS_CI_TIMEOUT_SECONDS", "2100"))
     if not 60 <= timeout <= 3600:
         sys.exit("CASKLET_MACOS_CI_TIMEOUT_SECONDS must be between 60 and 3600")
     artifacts = Path(os.environ.get("CASKLET_MACOS_CI_ARTIFACTS", "bin/macos-e2e-artifacts")).resolve()
-    project = Path(__file__).resolve().parent.parent
+    project = args.project.resolve()
     def interrupted(signum, _frame):
         raise Interrupted(signum)
     for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):

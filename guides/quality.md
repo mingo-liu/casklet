@@ -6,6 +6,28 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Gate draft publication on both real Mac architectures
+
+Added a main-only release workflow that validates an existing draft/tag, runs
+reusable hosted checks and mandatory Apple silicon/Intel VM suites against the
+same immutable commit, and grants publication rights only to the final job.
+Disabled configuration, failed/cancelled/skipped checks, unmerged or moved tags
+and replaced/published drafts cannot reach publication. Exact tag object,
+commit and draft identity are rechecked immediately before publishing.
+
+Mac jobs require native architecture labels and use separately checked-out
+trusted runner controls, so old candidate scripts cannot disable Rosetta or
+skipped-test rejection. PR code never selects persistent runners. Documentation
+describes dedicated hosts, main-only environment policy and the supported
+draft-to-public publication path, including the manual-publisher boundary.
+
+Validation: ten Python release/runner tests passed, covering real local Git
+ancestry/tag mutations, failure/cancellation/skips, draft replacement, native
+architecture/Rosetta checks and cleanup. Pinned actionlint 1.7.12 passed all
+workflows. Actual repository inspection found no registered dedicated Mac
+runners; the gate remains disabled and no release was published. Real Intel
+and hosted dual-Mac gate execution remain dependent on operator-provided hosts.
+
 ## 2026-10-15: Recover incomplete runtime machine provisioning
 
 VM running state no longer bypasses dependency setup. Before engine installation

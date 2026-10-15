@@ -128,25 +128,27 @@ same Lima VM with `make test-macos`; dedicated CI uses the isolation described b
 ## Dedicated macOS end-to-end CI
 
 `.github/workflows/macos-e2e.yml` runs the complete `make test-macos` client/VM
-suite weekly, when a release is published, or by manual dispatch from `main`.
+suite weekly, by manual dispatch from `main`, or as a required release gate.
+Its matrix requires native Apple silicon (`ARM64`) and Intel (`X64`) dedicated
+runners; Rosetta is rejected.
 It is opt-in because GitHub-hosted Mac runners cannot be assumed to support the
 product's Virtualization.framework VM. Before enabling it:
 
-1. Register a dedicated self-hosted Mac runner with labels `self-hosted`, `macOS`,
-   and `casklet-e2e`. Use macOS 13.5+ with working Virtualization.framework,
+1. Register two dedicated self-hosted Mac runners with labels `self-hosted`, `macOS`,
+   and `casklet-e2e`, plus their automatic `ARM64` or `X64` architecture label.
+   Use macOS 13.5+ with working Virtualization.framework,
    Lima 2.0+, Make, Python 3.9+, and network access to Ubuntu images and packages.
    The job installs the Go version in `go.mod` through `setup-go`.
 2. Run the agent as a regular dedicated Mac account with no personal files,
    credentials, everyday containers, or other jobs. Product provisioning mounts
    this account's home writable. The test suite uses free host ports but requires
    exclusive use of this runner. Do not attach a personal workstation runner.
-3. Create the GitHub environment `macos-e2e`, restrict it to `main` and protected
-   release tags, and configure reviewer approval if required by your release
+3. Create the GitHub environment `macos-e2e`, restrict it to the `main` branch
+   only, and configure reviewer approval if required by your release
    policy. Limit runner-group access to this repository where supported.
-4. Set repository Actions variable `CASKLET_MACOS_E2E_ENABLED` to `1`. Until a
-   capable runner and environment exist, leave it unset; the job skips instead
-   of queuing indefinitely. Neither runner registration nor environment creation
-   is performed by the workflow.
+4. Set repository Actions variable `CASKLET_MACOS_E2E_ENABLED` to `1` only after
+   both capable runners and the environment exist. Until then, optional weekly
+   runs skip; release preparation explicitly fails and cannot publish.
 
 The workflow never runs for pull requests or ordinary pushes. A GitHub-hosted
 gate verifies that the selected immutable revision is an ancestor of `main`
@@ -169,6 +171,9 @@ runner never adopts or stops an inherited Lima home or daily product VM.
 The runner enables `CASKLET_MACOS_RESIZE_GROW=1` so the opt-in disk-growth
 regression can exercise real expansion once available, only on this temporary VM.
 
+The workflow checks out the candidate and trusted runner controls separately;
+the controls select the candidate with `--project`, enforce native architecture
+and reject skipped tests. Older candidate scripts cannot disable these checks.
 The suite has a 35-minute outer deadline, retains the existing Go test timeout,
 and terminates its command group on timeout or catchable signals. Bounded
 diagnostics collect suite output, the instance listing, recent guest journal,
@@ -200,6 +205,37 @@ The fake-runner checks cover success, launch/bootstrap/test failure, deadline, S
 failure, preservation of inherited daily state, and exclusion of SSH keys. They
 run in ordinary macOS CI without virtualization. A passing fake/unit check does
 not establish that the real workflow or VM suite passed.
+
+## Release publication gate
+
+Publish through `.github/workflows/release.yml` from `main`. Prepare an existing
+tag whose commit is already merged into `main`, and an unpublished GitHub draft
+release for that tag. Attach any desired assets while it remains a draft, then
+start the workflow:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+Preparation refuses disabled Mac validation, non-main dispatches, missing drafts
+and unmerged tags. Hosted formatting/unit/vet/race/build/vulnerability and both
+privileged Linux suites run against the selected immutable commit. Both native
+Mac architectures must also pass their complete disposable-VM suites with no
+skipped tests. Failed, cancelled or skipped prerequisites cannot publish; a
+missing runner leaves validation pending rather than approving the release.
+
+Only the final hosted publication job receives `contents: write`. It rechecks
+the draft release ID, exact tag object, target commit and main ancestry before
+changing `draft` to `false`. A moved tag or replaced draft requires a new run.
+The workflow publishes an existing draft; it does not build downloadable release
+packages. GitHub writers who publish directly through the UI/API bypass this
+workflow, so maintainers must use this publication path and protect release refs.
+See the [GitHub reusable workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)
+and [release API](https://docs.github.com/en/rest/releases/releases#update-a-release).
+
+At the introduction of this gate, no dedicated Mac runners were registered.
+The gate remains disabled and release attempts fail until both real architectures
+are provisioned; unit/fake-runner checks do not establish Intel Mac compatibility.
 
 ## OCI regression tests
 

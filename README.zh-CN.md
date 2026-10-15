@@ -338,8 +338,10 @@ make test-macos # 在运行时虚拟机中执行真实命令；需要时会自�
 ```
 
 内部 Linux 引擎保留了需要特权的集成测试，在共享的 `casklet-runtime` 虚拟机中独占运行，
-测试期间会保留日常数据。维护者可以在专用 Mac runner 上启用定时、发布和手动触发的
-macOS 端到端 CI；每次运行结束都会删除临时虚拟机。参见
+测试期间会保留日常数据。维护者可以在 Apple silicon 和 Intel 专用 Mac runner 上启用
+定时、手动触发的 macOS 端到端 CI；每次运行结束都会删除临时虚拟机。正式发布前，
+两种架构的实机验收及托管检查必须全部通过，才能发布已有草稿；缺少配置会阻止发布。
+参见[发布门禁](guides/development.md#release-publication-gate)（英文）及
 [runner 配置](guides/development.md#dedicated-macos-end-to-end-ci)（英文）。
 生成的二进制文件、文件系统模板、运行时状态以及本地 `docs/` 笔记不纳入版本控制。
 许可证见 [LICENSE](LICENSE)。
