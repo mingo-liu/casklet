@@ -6,6 +6,53 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-14: Deliver native images through standard OCI archives
+
+Added streaming `image load`/`image save` using the existing Mac binary SSH
+transport. Loads validate bounded OCI layout tar framing/paths/types, every
+included SHA-256 blob, native selection, descriptor sizes, supported configs,
+DiffIDs and ordered confined extraction. Private leased transactions publish
+atomically without registry tag or compressed-cache writes. Save holds a shared
+image usage lease, verifies content and synthesizes one uncompressed OCI layer
+with supported launch/health defaults and numeric ownership. Reload preserves
+local identity, while original manifest digest/layer boundaries/tags are not
+exported. OCI-only save and its explicit 4 GiB flattened-layer ceiling preserve
+directory imports' existing ownership/capability semantics. Preparation and
+output do not hold the image metadata lock. Focused help, usage, architecture
+and both READMEs describe transport, limits, disk needs and partial output.
+
+Regressions include an independently produced third-party OCI layout, exported
+layout readability by the pinned primary reader, ownership/default/StartInterval
+round trips, whiteouts, existing-image deduplication/reference preservation,
+malformed/duplicate/traversal/special entries, digest/size/platform/JSON failures,
+missing terminators, nonzero trailing bytes, sparse logical expansion before
+filesystem allocation, discarded auxiliary layout files, cancellation, rollback, cache
+preservation, directory-policy rejection and save lease/deletion fencing.
+Linux/macOS integration cases cover actual binary transport, disconnected
+registry execution, retained restart and blocked input/output cancellation.
+
+Image and volume streams use nonblocking duplicates registered with Go's poller,
+restore caller status flags and preserve caller descriptors. Archive output and
+control signals use independent SSH connections. Cancellation also bounds host
+output draining when the producer has already finished and removed its control
+socket, preserving a nonzero signal status and releasing guest image leases.
+
+Validation:
+
+- macOS arm64 formatting, complete unit/vet/race checks and native client with
+  embedded Linux engine build passed on the combined tree.
+- The complete combined macOS arm64 suite passed all 61 tests without skips in
+  305.221 seconds. A separate real-pipe regression passed before that suite;
+  both runs covered offline transport, retained restart, blocked input/output
+  cancellation and successful image removal after cancellation.
+- Linux arm64 user/root unit and complete privileged integration suites passed;
+  hosted Linux amd64/arm64 unit/race/vet, builds, privileged integration and
+  vulnerability checks also passed. Archive tests verify offline defaults,
+  retained numeric user and cancellation of actual inherited pipes.
+- The optional pinned legacy-supervisor case was not configured. Intel Mac
+  execution was not performed. Disposable VM validation preserved the stopped
+  daily VM and cleaned up its temporary machine and host state.
+
 ## 2026-10-14: Configure temporary and shared-memory capacities
 
 Added `run --tmp-size` and `--shm-size`, with positive byte or binary k/m/g

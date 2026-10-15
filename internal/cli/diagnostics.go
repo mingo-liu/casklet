@@ -44,7 +44,7 @@ func argumentError(args []string, err error) error {
 					topic += " " + args[2]
 				}
 			}
-			if len(args) > 1 && (args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm" || args[1] == "prune") {
+			if len(args) > 1 && (args[1] == "load" || args[1] == "save" || args[1] == "import" || args[1] == "pull" || args[1] == "ls" || args[1] == "rm" || args[1] == "prune") {
 				topic += " " + args[1]
 			}
 		}

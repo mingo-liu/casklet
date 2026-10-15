@@ -148,6 +148,24 @@ IDs/prefixes rather than registry names such as `redis:8`.
 casklet image rm IMAGE_ID
 ```
 
+Standard OCI layout tar archives can deliver native Linux applications offline:
+
+```sh
+image_id=$(casklet image load < app.tar)
+casklet run --image "$image_id"
+casklet image save "$image_id" > app-copy.tar
+```
+
+Load validates one native image and preserves its startup defaults and numeric
+ownership without accessing registries or changing cached tags. Save synthesizes
+one flattened OCI layer, preserving the local image ID when loaded again but
+producing a new manifest digest. It accepts OCI images, including loaded images;
+directory imports cannot be saved because their ownership and capability policy
+differs. Save is limited to a 4 GiB layer including tar metadata. Load allows
+32 GiB archives, 4 GiB per unpacked layer and 16 GiB total. Docker save archives
+and compressed outer tar archives are unsupported. See [archive limits and
+semantics](guides/usage.md#offline-oci-image-archives).
+
 ## Deploy a project
 
 Use `project up --config project.json` to deploy multiple services with declared

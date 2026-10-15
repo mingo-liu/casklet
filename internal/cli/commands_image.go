@@ -2,19 +2,54 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
-func executeImage(ctx context.Context, r Request, stdout io.Writer) (int, error) {
+func executeImage(ctx context.Context, r Request, stdout io.Writer, input ...io.Reader) (int, error) {
 	store, err := image.OpenStore()
 	if err != nil {
 		return 125, err
 	}
+	if r.Action == "image-save" {
+		if file, ok := stdout.(*os.File); ok {
+			stream, finish, err := cancelableArchiveFile(ctx, file)
+			if err != nil {
+				return 125, err
+			}
+			defer finish()
+			stdout = stream
+		}
+	}
+	if r.Action == "image-load" && len(input) > 0 {
+		if file, ok := input[0].(*os.File); ok {
+			stream, finish, err := cancelableArchiveFile(ctx, file)
+			if err != nil {
+				return 125, err
+			}
+			defer finish()
+			input = append([]io.Reader(nil), input...)
+			input[0] = stream
+		}
+	}
 	switch r.Action {
+	case "image-load":
+		if len(input) == 0 {
+			return 125, errors.New("image load requires an OCI tar archive on stdin")
+		}
+		var record image.Record
+		record, err = store.Load(ctx, input[0])
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, record.ID)
+		}
+	case "image-save":
+		err = store.Save(ctx, r.Reference, stdout)
+
 	case "image-cache-ls", "image-cache-limit":
 		var report image.CacheReport
 		if r.Action == "image-cache-limit" {

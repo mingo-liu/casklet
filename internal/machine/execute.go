@@ -222,7 +222,8 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
 	// SSH owns terminal raw mode and resizing. Explicit control messages also
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
-	cmd := sshCommand(context.Background(), instance, invocation.TTY, command...)
+	archiveOutput := len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
+	cmd := sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if authentication != nil {
 		cmd.Stdout = authentication
@@ -256,9 +257,13 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var shutdown <-chan time.Time
+	var canceledArchiveSignal syscall.Signal
 	for {
 		select {
 		case err := <-done:
+			if canceledArchiveSignal != 0 {
+				return 128 + int(canceledArchiveSignal), nil
+			}
 			if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
 				authentication.err = errors.New("incomplete registry preparation response")
 			}
@@ -272,17 +277,29 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 				continue
 			}
 			controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, controlErr := m.output(controlCtx, instance, engineCommand(invocation.Rootless, "__signal", token, strconv.Itoa(int(signal.(syscall.Signal))))...)
+			controlErr := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(signal.(syscall.Signal))))
 			cancel()
 			if controlErr != nil {
 				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)
 			}
 			if shutdown == nil {
-				shutdown = time.After(75 * time.Second)
+				grace := 75 * time.Second
+				if archiveOutput {
+					// SSH itself may be blocked writing the archive to a full host
+					// pipe even after the guest finishes and removes its signal
+					// socket. Attempt forwarding first, then bound transport draining
+					// regardless of delivery; discarded output is already incomplete.
+					grace = 2 * time.Second
+					canceledArchiveSignal = signal.(syscall.Signal)
+				}
+				shutdown = time.After(grace)
 			}
 		case <-shutdown:
 			_ = cmd.Process.Kill()
 			<-done
+			if canceledArchiveSignal != 0 {
+				return 128 + int(canceledArchiveSignal), nil
+			}
 			return 125, errors.New("guest did not finish after signal forwarding")
 		}
 	}

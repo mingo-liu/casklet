@@ -77,6 +77,5 @@ func Watchdog(encoded, token, rootlessValue string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	m := &Machine{}
-	_, err = m.output(ctx, instance, engineCommand(rootless, "__signal", token, strconv.Itoa(int(syscall.SIGHUP)))...)
-	return err
+	return m.sendSignal(ctx, instance, rootless, token, strconv.Itoa(int(syscall.SIGHUP)))
 }
