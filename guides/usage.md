@@ -351,7 +351,9 @@ Existing identical images are reused with their existing metadata intact.
 Failure/cancellation removes private staging, leaves existing images and cached
 registry names unchanged, and does not populate the compressed download cache.
 Archive reference annotations do not create cached registry tag mappings; use
-`run --image ID` after loading.
+`run --image ID` after loading. Removing an image leaves existing cached reference
+indexes intact; loading the same ID can make those names usable again without
+creating or changing any mapping.
 
 Loading limits are 32 GiB of outer tar (including padding), 4096 outer entries,
 1 MiB per JSON/auxiliary metadata file, 256 layers, 4 GiB per unpacked tar layer,
