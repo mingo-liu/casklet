@@ -6,6 +6,28 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Report local client and bundled engine build identity
+
+Added `version`/`--version`, optional JSON and focused help. Queries run before
+platform dispatch and report version, full Go VCS commit/modified flag, compiler
+and platform. Darwin clients identify their validated embedded Linux engine by
+architecture and SHA-256 without reading VM state or opening Lima/Keychain.
+Missing VCS metadata and missing/invalid payloads are explicit; local inspection
+still succeeds. Linux reports its own engine build without a recursive payload.
+
+Make stamps identical versions into client/engine, using an exact version tag,
+explicit VERSION or the release workflow's selected tag. Hosted CI verifies
+stamped native clients/engines offline, compares both aliases and independently
+checks commit/modified state and payload bytes. CLI regressions cover local
+execution without Lima/state, JSON metadata, malformed arguments and help parity.
+Both READMEs, usage and development documentation describe these boundaries.
+
+Validation: macOS arm64 formatting, unit/vet/race checks, stamped native client
+and embedded-engine identity checks, missing-VCS fallback, and actionlint passed.
+Version aliases and JSON remained usable with no Lima in PATH and invalid
+machine-state settings. The independent build checker matched actual payload
+bytes and Go VCS metadata; native Linux CI also checks engine version stamping.
+
 ## 2026-10-15: Gate draft publication on both real Mac architectures
 
 Added a main-only release workflow that validates an existing draft/tag, runs

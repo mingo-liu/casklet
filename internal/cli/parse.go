@@ -72,6 +72,9 @@ func Parse(args []string) (request Request, err error) {
 		return helpRequest(args[:len(args)-1])
 	}
 	r := Request{Action: args[0]}
+	if r.Action == "version" || r.Action == "--version" {
+		return parseVersion(r, args[1:])
+	}
 	if r.Action == "__project-preflight" {
 		r, err := parseRun(Request{Action: "run"}, args[1:])
 		r.Action = "project-preflight"

@@ -8,6 +8,9 @@ on:
       revision:
         required: true
         type: string
+      version:
+        required: false
+        type: string
   schedule:
     - cron: '17 3 * * 1'
 
@@ -84,6 +87,7 @@ jobs:
           CASKLET_MACOS_CI_ARTIFACTS: ${{ runner.temp }}/casklet-macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.goarch }}
           CASKLET_MACOS_EXPECT_ARCH: ${{ matrix.goarch }}
           CASKLET_MACOS_REQUIRE_NO_SKIPS: '1'
+          CASKLET_RELEASE_VERSION: ${{ inputs.version }}
         run: python3 gate/scripts/test-macos-ci.py --project "$GITHUB_WORKSPACE/source"
       - name: Upload test and VM diagnostics
         if: always()

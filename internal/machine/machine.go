@@ -225,6 +225,15 @@ func enginePayload() ([]byte, error) {
 	return payload, nil
 }
 
+// BundledEngineSHA256 identifies the validated embedded engine without opening Lima.
+func BundledEngineSHA256() (string, error) {
+	payload, err := enginePayload()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
+}
+
 // Engine caching and template health are independent. The guest checks and
 // repairs the template even when the installed engine matches this client.
 const installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3" && test "$(sha256sum -- "$1")" = "$3  $1"`

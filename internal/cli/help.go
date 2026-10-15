@@ -25,6 +25,7 @@ Commands:
   network   Manage isolated named networks and service discovery
   image     Pull, import, list, or remove images
   doctor    Check runtime prerequisites and a rootfs template
+  version   Show local build and bundled engine information
   help      Show command help
 `
 
@@ -110,6 +111,25 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"version": `Usage: casklet version [--json]
+       casklet --version [--json]
+
+Options:
+  --json     Print machine-readable build information
+  -h, --help Show this help
+
+Notes:
+  Reports version, source commit, modified state, Go version and native platform.
+  On macOS, reports the bundled Linux engine architecture and SHA-256 too.
+  Runs locally without Lima, VM startup, credentials or runtime state changes.
+  Source builds use dev unless built at a version tag or with make build VERSION=VALUE.
+  Missing VCS metadata reports unknown; an unavailable bundled engine is reported
+  without failing the local query. The internal Linux engine has no bundled engine.
+
+Examples:
+  casklet --version
+  casklet version --json
+`,
 	"login": `Usage: casklet login --username USER --password-stdin [REGISTRY]
 
 Options:

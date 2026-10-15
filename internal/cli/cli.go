@@ -40,6 +40,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		}
 		return 0
 	}
+	if r.Action == "version" {
+		return executeVersion(r, stdout, stderr)
+	}
 	if r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
 		return executeProject(r, stdout, stderr)
 	}
