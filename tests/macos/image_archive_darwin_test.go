@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,6 +25,21 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 	fixture := progressRegistryDetails(t)
 	id := strings.TrimSpace(success(t, "image", "pull", fixture.References[0]))
 	t.Cleanup(func() { command(t, "image", "rm", id) })
+	references := func() []string {
+		t.Helper()
+		var records []image.Record
+		if err := json.Unmarshal([]byte(success(t, "image", "ls", "--json")), &records); err != nil {
+			t.Fatal(err)
+		}
+		for _, record := range records {
+			if record.ID == id {
+				return record.References
+			}
+		}
+		t.Fatal("image is missing")
+		return nil
+	}
+	beforeReferences := references()
 	if _, err := guestRootCommand(t, "kill", strconv.Itoa(fixture.PID)); err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +52,8 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 	if code != 0 || out != id+"\n" {
 		t.Fatalf("load: %d %q %q", code, out, diagnostic)
 	}
-	var records []image.Record
-	if err := json.Unmarshal([]byte(success(t, "image", "ls", "--json")), &records); err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range records {
-		if r.ID == id && len(r.References) != 0 {
-			t.Fatal("load recreated cached registry tags")
-		}
+	if afterReferences := references(); !reflect.DeepEqual(beforeReferences, afterReferences) {
+		t.Fatalf("load changed cached registry mappings: %v => %v", beforeReferences, afterReferences)
 	}
 	if got := success(t, "run", "--image", id); got != "image-progress-ok\n" {
 		t.Fatalf("offline default command: %q", got)

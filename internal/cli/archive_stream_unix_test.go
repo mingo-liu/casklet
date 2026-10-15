@@ -24,6 +24,15 @@ func TestArchiveInheritedPipeCancellation(t *testing.T) {
 		if mode == "write" {
 			file = os.Stdout
 		}
+		if mode == "write" {
+			// Darwin sets the read-only FWASWRITTEN history bit on the first write.
+			// Prime that history before capturing flags so equality tests configuration
+			// restoration rather than asking F_SETFL to undo an ordinary write.
+			if _, err := file.Write([]byte{0}); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
 		raw, err := file.SyscallConn()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -82,5 +91,42 @@ func TestArchiveInheritedPipeCancellation(t *testing.T) {
 				t.Fatalf("inherited %s cancellation: %v, %v, %s", mode, err, ctx.Err(), diagnostic.String())
 			}
 		})
+	}
+}
+
+func TestArchiveFileSetupRestoresStatusWithoutIO(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	for _, file := range []*os.File{reader, writer} {
+		raw, err := file.SyscallConn()
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags := func() int {
+			t.Helper()
+			value := -1
+			var statErr error
+			err := raw.Control(func(fd uintptr) { value, statErr = unix.FcntlInt(fd, unix.F_GETFL, 0) })
+			if err != nil || statErr != nil {
+				t.Fatalf("original descriptor: %v %v", err, statErr)
+			}
+			return value
+		}
+		before := flags()
+		_, finish, err := cancelableArchiveFile(context.Background(), file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		finish()
+		if after := flags(); after != before {
+			t.Fatalf("status flags changed without I/O: %d => %d", before, after)
+		}
+		if _, err := file.Stat(); err != nil {
+			t.Fatalf("caller file closed: %v", err)
+		}
 	}
 }

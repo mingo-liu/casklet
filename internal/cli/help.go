@@ -706,6 +706,7 @@ Notes:
   Checks sha256 digests, descriptor sizes, ordered layers, and startup defaults.
   Publishes atomically and prints one local immutable ID. No registry access,
   cached tag changes, or compressed download-cache writes occur.
+  Existing names pointing to this ID can become usable again after loading.
   Limits: 32 GiB archive, 4096 outer entries, 1 MiB metadata, 256 layers,
   4 GiB per unpacked layer and 16 GiB total. External blob URLs are unsupported.
   Docker save archives and compressed outer tar archives are unsupported.
