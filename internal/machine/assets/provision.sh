@@ -48,12 +48,12 @@ profile casklet-rootless /usr/local/bin/casklet flags=(unconfined,attach_disconn
 PROFILE
 apparmor_parser -r /etc/apparmor.d/casklet
 loginctl enable-linger "$user"
+controllers=$(systemctl show --property=DelegateControllers --value "user@$uid.service")
 directory="/etc/systemd/system/user@$uid.service.d"
 mkdir -p "$directory"
 printf '[Service]\nDelegate=cpu memory pids\n' > "$directory/casklet.conf"
 systemctl daemon-reload
 # Package repair must not restart an already delegated user manager or its workloads.
-controllers=$(systemctl show --property=DelegateControllers --value "user@$uid.service")
 case " $controllers " in *' cpu '*) cpu=1 ;; *) cpu=0 ;; esac
 case " $controllers " in *' memory '*) memory=1 ;; *) memory=0 ;; esac
 case " $controllers " in *' pids '*) pids=1 ;; *) pids=0 ;; esac
