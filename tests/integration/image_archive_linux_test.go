@@ -37,9 +37,13 @@ func TestOCIArchiveOfflineBinaryTransportAndRetainedRestart(t *testing.T) {
 	}
 	name := fmt.Sprintf("archive-%d", time.Now().UnixNano())
 	containerID := startImageContainer(t, name, id, `printf '%s:%s\n' "$IMAGE_VALUE" "$PWD"; echo ready; sleep 300`, "entry")
+	t.Cleanup(func() {
+		backgroundCLI(t, "stop", containerID)
+		backgroundCLI(t, "rm", containerID)
+	})
 	lifecycleReady(t, containerID, "ready")
 	backgroundSuccess(t, "restart", containerID)
-	if got := backgroundSuccess(t, "exec", containerID, "--", "/usr/bin/toolbox", "id", "-u"); got != "123\n" {
+	if got := backgroundSuccess(t, "exec", containerID, "--", "/bin/id", "-u"); got != "123\n" {
 		t.Fatalf("saved user: %q", got)
 	}
 	backgroundSuccess(t, "stop", containerID)
@@ -60,6 +64,7 @@ func TestOCIArchiveCancellationUnblocksInputAndOutput(t *testing.T) {
 				args = append(args, id)
 			}
 			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd.WaitDelay = 3 * time.Second
 			reader, writer, err := os.Pipe()
 			if err != nil {
 				t.Fatal(err)
@@ -76,8 +81,17 @@ func TestOCIArchiveCancellationUnblocksInputAndOutput(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			// The real static toolbox makes save exceed pipe capacity; neither endpoint
-			// is consumed, so cancellation must close the blocked guest descriptor.
+			if action == "save" {
+				deadline, _ := ctx.Deadline()
+				if err := reader.SetReadDeadline(deadline); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.ReadFull(reader, make([]byte, 1)); err != nil {
+					t.Fatalf("save never started output: %v", err)
+				}
+			}
+			// The real static toolbox makes save exceed pipe capacity; after the
+			// first byte, output stays unread until cancellation closes the stream.
 			time.Sleep(500 * time.Millisecond)
 			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 				t.Fatal(err)
