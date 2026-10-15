@@ -52,6 +52,8 @@ Options:
 
 Notes:
   Creates or starts the product VM and installs the current bundled engine.
+  Repairs incomplete dependency setup even when the VM is already running.
+  If setup fails, restore network access and retry this command; VM data is preserved.
   Repeatable; keeps container and image storage. Containers with always/unless-stopped policies
   resume automatically; other stopped containers require casklet start or restart.
 
