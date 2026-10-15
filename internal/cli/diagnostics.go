@@ -35,7 +35,7 @@ func argumentError(args []string, err error) error {
 			}
 		case "volume":
 			topic = "volume"
-			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm") {
+			if len(args) > 1 && (args[1] == "create" || args[1] == "ls" || args[1] == "inspect" || args[1] == "rm" || args[1] == "export" || args[1] == "restore") {
 				topic += " " + args[1]
 			}
 		case "image":
