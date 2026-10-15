@@ -148,7 +148,9 @@ func TestNonrootProcessLifecycle(t *testing.T) {
 	})
 	t.Run("timeout", func(t *testing.T) {
 		started := time.Now()
-		code, out, stderr := run(t, []string{"--user", "1000", "--timeout", "300ms"}, "/bin/sh", "-c", "echo started; sleep 30")
+		// Keep the forced shutdown deadline inside the assertion's total budget.
+		// Ignoring TERM exercises that deadline instead of depending on signal timing.
+		code, out, stderr := run(t, []string{"--user", "1000", "--timeout", "300ms", "--stop-timeout", "300ms"}, "/bin/sh", "-c", "trap '' TERM; echo started; sleep 30")
 		if code != 124 || !strings.Contains(out, "started") {
 			t.Fatalf("nonroot timeout exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
