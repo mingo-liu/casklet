@@ -222,7 +222,8 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
 	// SSH owns terminal raw mode and resizing. Explicit control messages also
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
-	cmd := sshCommand(context.Background(), instance, invocation.TTY, command...)
+	archiveOutput := len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
+	cmd := sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if authentication != nil {
 		cmd.Stdout = authentication
@@ -273,14 +274,14 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 				continue
 			}
 			controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, controlErr := m.output(controlCtx, instance, engineCommand(invocation.Rootless, "__signal", token, strconv.Itoa(int(signal.(syscall.Signal))))...)
+			controlErr := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(signal.(syscall.Signal))))
 			cancel()
 			if controlErr != nil {
 				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)
 			}
 			if shutdown == nil {
 				grace := 75 * time.Second
-				if controlErr == nil && len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export")) {
+				if controlErr == nil && archiveOutput {
 					// SSH itself may be blocked writing the archive to a full host
 					// pipe even after the guest cancels and releases its image or
 					// volume lease. Forward cancellation first, then bound transport
