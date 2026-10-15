@@ -19,6 +19,13 @@ func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
 		{[]string{"exec", "worker"}, []string{"casklet exec worker -- /bin/echo hello", "casklet exec --help"}},
 		{[]string{"logs", "worker", "--tail", "20"}, []string{"flags must precede", "casklet logs --help"}},
 		{[]string{"image", "import"}, []string{"casklet image import --help"}},
+		{[]string{"volume", "export"}, []string{"casklet volume export --help"}},
+		{[]string{"volume", "export", "--unknown"}, []string{"casklet volume export --help"}},
+		{[]string{"volume", "export", "one", "two"}, []string{"casklet volume export --help"}},
+		{[]string{"volume", "restore"}, []string{"casklet volume restore --help"}},
+		{[]string{"volume", "restore", "--unknown"}, []string{"casklet volume restore --help"}},
+		{[]string{"volume", "restore", "one", "two"}, []string{"casklet volume restore --help"}},
+		{[]string{"volume", "unknown"}, []string{"casklet volume --help"}},
 		{[]string{"unknown"}, []string{"casklet help"}},
 	} {
 		_, err := Parse(tt.args)

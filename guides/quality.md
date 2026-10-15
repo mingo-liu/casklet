@@ -6,6 +6,17 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Point volume backup argument errors to scoped help
+
+Malformed `volume export`/`volume restore` commands now suggest their existing
+subcommand help instead of the volume overview. Regression cases cover missing
+names, unknown flags and excess names for both commands, while unknown volume
+subcommands retain the group help. The usage guide records this behavior.
+
+Validation: the focused regression reproduced the incorrect export hint before
+the fix. CLI argument/help regressions, formatting, complete Go unit tests and
+vet pass after the change; named help and `--help` remain equivalent.
+
 ## 2026-10-15: Ship verified macOS download archives
 
 Hosted CI builds native arm64/amd64 archives with the matching embedded engine,

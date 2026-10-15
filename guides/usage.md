@@ -738,7 +738,10 @@ CPU 100% means one busy core, and unavailable metrics are `N/A` or JSON `null`.
 
 Command exit codes pass through. Signals return `128 + signal`, command timeout
 returns `124`, and configuration/startup errors return `125`. Diagnostics go to
-stderr. Argument errors link to the relevant command help. Lifecycle errors
+stderr. Argument errors link to the relevant command help, including
+`casklet volume export --help` and `casklet volume restore --help` for malformed
+backup/restore arguments. Unknown volume subcommands link to `volume --help`.
+Lifecycle errors
 include recovery commands, such as stopping a running container before removal
 or listing containers after a failed lookup. Successful foreground `run` and
 `exec` commands return 125 if cleanup fails. A command's nonzero exit code is
