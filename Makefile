@@ -4,7 +4,10 @@ GOARCH ?= $(shell $(GO) env GOARCH)
 ROOTFS ?= rootfs/busybox
 PREFIX ?= /usr/local
 DESTDIR ?=
-VERSION ?= $(if $(CASKLET_RELEASE_VERSION),$(CASKLET_RELEASE_VERSION),$(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo dev))
+VERSION ?= $(shell git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo dev)
+ifneq ($(CASKLET_RELEASE_VERSION),)
+VERSION := $(CASKLET_RELEASE_VERSION)
+endif
 export VERSION
 
 .PHONY: build engine install fmt fmt-check vet test test-race vuln rootfs test-integration test-macos
