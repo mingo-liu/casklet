@@ -1167,12 +1167,70 @@ Identity includes effective run defaults, expanded env values, source paths and
 entrypoint selection. Network alias order does not affect identity; adding or
 removing aliases still changes it. Existing services with older ordered-alias
 hashes are verified against their saved alias order and can be reused after an
-upgrade without recreation. Environment/config changes fail before deployment
-mutations; use `down`, edit the configuration and run `up` again. Image tags retain
+upgrade without recreation. Environment/config changes on unselected services fail
+before deployment mutations; explicitly recreate changed services or use `down`. Image tags retain
 their cached version; pin a digest for reproducibility. A retained service keeps its
 immutable image across reuse. Services removed from the file require `down` before deploying
 again. Managed resources are reused only when their creation receipts match local
 project ownership; manually created same-name resources are never adopted.
+
+Use repeatable `--recreate SERVICE` with logical service keys to replace selected
+services, including when their desired configuration hash is unchanged:
+
+```sh
+casklet project up --config project.json --recreate api --dry-run
+casklet image pull example/api:latest
+casklet project up --config project.json --recreate api --wait --timeout 1m
+# Replace multiple services together:
+casklet project up --config project.json --recreate api --recreate worker
+```
+
+Unknown or duplicate selections fail during parsing. All unselected configuration
+drift, absent-from-config services and resource ownership failures remain errors.
+Replacement checks all sources needed by this invocation, bind directories,
+merged image startup defaults, external volume presence and saved port/alias
+reservations before removing old services. Cached image tags keep the existing
+pull-on-miss policy; explicit `image pull` refreshes them, and recreation resolves
+and pins that refreshed image for the new container. Authentication uses the
+existing credential preparation path. No merged environment values are printed.
+Actual retained sources and saved Mac host ports of matching stopped services
+are also checked before removal. Only identical HostIP/HostPort/protocol bindings
+belonging to selected running services are exempted from the first host check.
+Address scope changes are checked conservatively and can require stopping the
+old service explicitly before recreation. Selected identical bindings are checked after removal,
+with a bounded wait for Lima's asynchronous socket release; other host bindings
+are checked beforehand. Preflight is a snapshot, not a port or image reservation.
+
+All selected old records are stopped/removed in reverse dependency order before
+replacements are created in dependency order. The guest lifecycle operation lock
+checks their full IDs, generations and project ownership labels before any stop.
+This permits selected services to exchange aliases/ports. Unselected running
+services retain their actual IDs and generations; matching stopped services are
+started as with ordinary `up`. The selected container's private writable root and
+its old logs are removed. Named/external volumes and bind data survive; use them
+for state that must persist. A replacement can interrupt dependents and is not a
+zero-downtime update. Existing dependency and `--wait` readiness rules still apply.
+
+There is no automatic restoration of the old containers. If removal, startup,
+readiness or cancellation fails, successfully removed old records stay absent.
+Only this invocation's new containers/resources are rolled back with bounded
+cleanup; unchanged services and pre-existing persistent resources are preserved.
+A failure between removals may leave some selected old services intact. Inspect
+`project ps`, fix the error and retry the same `up --recreate` command: absent
+selected services are created, and selected services still present are replaced.
+Ordinary `up` can also create missing services if remaining configs match.
+
+`--dry-run` prints deterministic `create network/volume NAME` and
+`create/reuse/start/recreate service KEY` lines. With `--json`, each action has
+`kind`, `name`, `action` and the old full `id` where applicable. Preview validates
+selection, ownership, drift, external volumes and saved alias/port reservations,
+but does not pull images, validate source readiness, wait for health, create
+resources, start/stop/remove workloads, or release/save ownership receipts.
+macOS preview rejects missing/stopped VMs; run `casklet machine start` explicitly
+first. On a running VM the client may install/repair its embedded engine and
+initialize metadata directories; it also takes the local project lock. Preview
+is a snapshot and does not reserve resources for a later deployment. `--wait`
+does not run readiness waits during preview.
 
 On an ordinary startup failure or cancellation, a bounded cleanup stops/removes
 only containers marked with this invocation's startup token and removes only its

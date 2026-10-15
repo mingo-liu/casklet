@@ -391,3 +391,42 @@ func TestProjectExternalVolumeHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectRecreateAndPreviewParsingAndHelp(t *testing.T) {
+	file := projectConfigFile(t, `{"name":"demo","services":{"api":{"run":{"image":"app:1"}},"db":{"run":{"image":"db:1"}}}}`)
+	request, err := Parse([]string{"project", "up", "--config", file, "--recreate", "api", "--recreate=db", "--dry-run", "--json"})
+	if err != nil || !request.DryRun || !request.JSON || len(request.Recreate) != 2 {
+		t.Fatalf("request=%+v err=%v", request, err)
+	}
+	for _, names := range [][]string{{"--recreate", "missing"}, {"--recreate", "api", "--recreate", "api"}, {"--recreate", ""}} {
+		if _, err := Parse(append([]string{"project", "up", "--config", file}, names...)); err == nil {
+			t.Fatalf("accepted %v", names)
+		}
+	}
+	direct, err := Parse([]string{"project", "up", "--help"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alternate, err := Parse([]string{"help", "project", "up"})
+	if err != nil || direct.HelpTopic != alternate.HelpTopic {
+		t.Fatalf("help parity: %v %v", direct, err)
+	}
+	help, err := platformUsage(direct.HelpTopic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, term := range []string{"--recreate", "--dry-run", "private root", "no automatic", "running VM", "missing services"} {
+		if !strings.Contains(help, term) {
+			t.Errorf("missing help %q", term)
+		}
+	}
+	// Initial durable executions use generation zero.
+	if _, err := Parse([]string{"__project-replace", strings.Repeat("0", 32), "0", "demo", "api", "spec"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"id", "0", "demo", "api", "spec"}, {strings.Repeat("0", 32), "-1", "demo", "api", "spec"}} {
+		if _, err := parseProjectReplace(args); err == nil {
+			t.Fatalf("accepted identity %v", args)
+		}
+	}
+}

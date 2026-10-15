@@ -143,7 +143,7 @@ casklet image save "$image_id" > app-copy.tar
 ## 部署项目
 
 使用 `project up --config project.json` 部署多个服务，声明网络、数据卷及
-`started`/`healthy` 启动依赖。配置一致的服务会复用，配置变化会在部署修改前报错。
+`started`/`healthy` 启动依赖。配置一致的服务会复用，未选中的服务配置变化会在部署修改前报错。
 调整网络别名顺序不会改变服务标识，升级后已有服务也可以继续复用。
 资源名称为 `cp-PROJECT-LOGICAL`，服务别名按网络隔离。参见
 [项目配置示例](guides/usage.md#project-deployment)。
@@ -156,11 +156,17 @@ casklet project down demo
 casklet project down --volumes demo
 ```
 
+使用 `casklet project up --config project.json --recreate api --dry-run` 预览指定
+服务的重建，移除 `--dry-run` 后应用；重复 `--recreate` 可选择多个服务。未变化的运行
+服务和持久卷保留身份与数据，被选服务的私有根目录和旧日志会被替换。重建会停止选中
+服务，失败时不会自动恢复已删除的旧容器；重试会创建缺失服务。预览要求 VM 已运行，
+不会拉取镜像或更改部署。先用 `image pull` 刷新标签，再重建对应服务。
+
 `--wait` 要求所有配置健康检查的服务健康，其他服务处于运行状态。超时覆盖配置解析
 后的整个部署；超时后完成有时限的清理并返回 124。首次准备 VM 或拉取镜像时应适当
 增加超时时间。
 
-失败时仅清理本次新建且归属已验证的资源。已有服务和数据卷会保留；`down` 默认
+失败时仅清理本次新建且归属已验证的资源。未选中的已有服务和预先存在的数据卷会保留；`down` 默认
 保留数据卷。本地归属记录用于防止接管或删除无关的同名资源。
 
 恢复或迁移数据后，使用 `"external-volumes": {"data": "restored-data"}` 声明，

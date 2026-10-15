@@ -105,7 +105,7 @@ func (m *Machine) lock(ctx context.Context) (*os.File, error) {
 	}
 }
 
-func (m *Machine) ensure(ctx context.Context, options Options, initialize bool) (*Instance, error) {
+func (m *Machine) ensure(ctx context.Context, options Options, initialize bool, requireRunning ...bool) (*Instance, error) {
 	lock, err := m.lock(ctx)
 	if err != nil {
 		return nil, err
@@ -114,6 +114,9 @@ func (m *Machine) ensure(ctx context.Context, options Options, initialize bool) 
 	instance, err := m.instance(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if len(requireRunning) > 0 && requireRunning[0] && (instance == nil || instance.Status != "Running") {
+		return nil, errors.New("project preview requires a running runtime machine; run casklet machine start before retrying")
 	}
 	if initialize && instance != nil {
 		return nil, errors.New("runtime machine already exists; initialization options apply only when creating it; stop it and use casklet machine resize to change resources")

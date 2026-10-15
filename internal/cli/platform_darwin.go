@@ -15,7 +15,7 @@ import (
 )
 
 func platformArguments(args []string) []string {
-	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor") {
+	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {
 		return args
 	}
 	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
@@ -82,8 +82,11 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 		return true, 125
 	}
 	paths = guestProgressArguments(paths, request, stderr)
-	invocation := machine.Invocation{Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}
-	if request.Action == "image-pull" || request.Action == "run" && request.Config.Image != "" {
+	invocation := machine.Invocation{RequireRunning: os.Getenv(projectPreviewEnvironment) == "1", Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}
+	if request.Action == "project-start-preflight" {
+		invocation.PreflightPorts = request.Config.Publish
+	}
+	if request.Action == "image-pull" || (request.Action == "run" || request.Action == "project-preflight") && request.Config.Image != "" {
 		invocation.ImageReference, invocation.RefreshImage, invocation.Progress = request.Config.Image, request.Action == "image-pull", progressMode(request.Progress, stderr)
 		if invocation.RefreshImage {
 			invocation.ImageReference = request.Reference

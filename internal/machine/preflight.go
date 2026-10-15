@@ -19,7 +19,7 @@ func visitHostResources(args []string, visit func(string, string) error) error {
 	if len(args) >= 3 && args[0] == "image" && args[1] == "import" {
 		return visit("rootfs", args[len(args)-1])
 	}
-	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor") {
+	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {
 		return nil
 	}
 	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}

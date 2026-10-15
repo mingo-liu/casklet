@@ -407,14 +407,16 @@ Examples:
   casklet project ps demo
   casklet project down demo
 `,
-	"project up": `Usage: casklet project up --config FILE [--wait] [--timeout DURATION] [--json]
+	"project up": `Usage: casklet project up --config FILE [--recreate SERVICE]... [--dry-run] [--wait] [--timeout DURATION] [--json]
 
 Options:
   --config   Local strict JSON project file, at most 1 MiB
+  --recreate Replace a logical service even if its desired config matches (repeatable)
+  --dry-run  Preview create/reuse/start/recreate actions without deployment mutations
   --wait     Wait for all services to become ready within the whole deployment deadline
   --timeout  Each dependency health wait, or whole deployment with --wait (default: 30s)
              Greater than 0s up to 24h
-  --json     Print managed container records as a JSON array
+  --json     Print managed records, or dry-run actions, as a JSON array
 
 Notes:
   Define name, services, optional networks, volumes and external-volumes in the file.
@@ -427,7 +429,19 @@ Notes:
   Local files are expanded before VM operations; volume sources remain names.
   Reuses matching running services and starts matching stopped services.
   Reordering network aliases keeps service identity, including older deployments.
-  Changed configs or unowned resource names fail before deployment changes.
+  Changed unselected configs, removed services or unowned resources fail before changes.
+  --recreate checks sources/resources and stopped services before selected removal.
+  Only identical selected running host bindings skip the first host check.
+  Changed host address scopes are checked conservatively before removal.
+  Selected services lose their old private root; named/external mounts survive.
+  Unselected running services keep their IDs/generations. Stopped ones are started.
+  Replacement interrupts selected services; there is no automatic old-container rollback.
+  Partial failure leaves removed old services absent; retry up creates missing services.
+  Refresh an image tag explicitly with image pull, then --recreate its service.
+  --dry-run never pulls images, starts workloads or releases ownership receipts.
+  It checks identities/resources and saved reservations; runtime/source readiness is not tested.
+  macOS preview requires a running VM; it may install/repair its engine and take local locks.
+  Preview is a snapshot; availability can change before deployment.
   On failure, only this invocation's new verified containers/resources are removed.
   Existing services resumed by up remain running. Image caches are preserved.
   --wait requires healthy services, or running services without a healthcheck.
@@ -438,6 +452,8 @@ Notes:
 Examples:
   casklet project up --config project.json
   casklet project up --config project.json --wait --timeout 1m --json
+  casklet project up --config project.json --recreate api --dry-run
+  casklet project up --config project.json --recreate api --wait --timeout 1m
 `,
 	"project down": `Usage: casklet project down [--volumes] NAME
 

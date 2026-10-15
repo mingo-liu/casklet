@@ -419,6 +419,31 @@ and synced before guest mutations; config-free down therefore preserves it even
 after same-name restore or managed-to-external conversion. Startup failure does
 not reverse that explicit release. Other projects retain their own receipts.
 
+`project up --recreate KEY` explicitly replaces selected service records even
+when the desired hash matches. It preflights all replacement/new sources and
+saved port/alias reservations before removal, resolves cached image references
+with existing credential preparation, and pins the selected immutable image.
+Matching stopped services preflight their actual retained sources and saved Mac
+host ports. Only identical selected running HostIP/HostPort/protocol endpoints
+are exempt from the first host check; all endpoints are checked again after
+removal with bounded forwarding-socket release waiting.
+Each private guest removal uses the existing operation lock across generation/
+project-label verification, stop and remove. Selected old records are removed in
+reverse dependency order before topological creation. Unselected running IDs and
+generations, managed/external volumes and bind data are preserved; selected
+private roots/logs are discarded. Removed old records are not automatically
+restored after partial failure. Existing transaction-token rollback removes only
+new records/resources; retry creates absent services.
+
+`project up --dry-run` shares inventory/drift/ownership checks and reports
+resource creation plus service create/reuse/start/recreate actions. It never
+pulls images, validates source readiness, runs health waits, changes container or
+resource deployment state, or saves/releases ownership receipts. Mac inventory
+calls require an already-running VM under the machine lock; stopped/missing VMs
+fail with an explicit start hint. Engine installation/repair on a running VM and
+local project locks/metadata initialization remain permitted. Preview is a
+snapshot; lifecycle generation fences and live port checks still run at apply.
+
 `project up --wait` applies one deadline after parsing to local lock acquisition,
 VM preparation, startup and readiness. The runner pins each service ID/generation
 after startup and samples existing health state through sanitized inspection,

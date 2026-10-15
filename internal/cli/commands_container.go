@@ -15,6 +15,12 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 	switch r.Action {
 	case "network-create", "network-ls", "network-inspect", "network-rm":
 		return executeNetwork(ctx, r, stdout)
+	case "project-start-preflight":
+		return executeProjectStartPreflight(ctx, r)
+	case "project-replace":
+		return executeProjectReplace(ctx, r)
+	case "project-preflight":
+		return executeProjectPreflight(ctx, r, stdout)
 	case "project-resource":
 		return executeProjectResource(ctx, r, stdout)
 	case "system-df":

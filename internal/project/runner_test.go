@@ -21,6 +21,7 @@ type fakeProject struct {
 	failRun   string
 	failWait  bool
 	saves     int
+	nextID    int
 }
 
 func newFakeProject() *fakeProject { return &fakeProject{resources: map[string]Resource{}} }
@@ -57,6 +58,20 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 		}
 		delete(fake.resources, key)
 		return nil, nil
+	case "__project-preflight", "__project-start-preflight":
+		return nil, nil
+	case "__project-replace":
+		for i, record := range fake.records {
+			if record.ID == args[1] {
+				if fmt.Sprint(record.Generation) != args[2] || record.Labels[LabelName] != args[3] || record.Labels[LabelService] != args[4] || record.Labels[LabelSpec] != args[5] {
+					return nil, errors.New("replacement identity changed")
+				}
+				fake.mutations = append(fake.mutations, "replace "+record.ID)
+				fake.records = append(fake.records[:i], fake.records[i+1:]...)
+				return nil, nil
+			}
+		}
+		return nil, errors.New("missing")
 	case "run":
 		labels := map[string]string{}
 		name := ""
@@ -74,7 +89,8 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 				labels[key] = value
 			}
 		}
-		id := fmt.Sprintf("%032x", len(fake.records)+1)
+		fake.nextID++
+		id := fmt.Sprintf("%032x", fake.nextID)
 		fake.records = append(fake.records, container.Record{ID: id, Name: name, State: container.StateRunning, Generation: 1, Labels: labels})
 		fake.mutations = append(fake.mutations, "run "+name)
 		if fake.failRun == name {
