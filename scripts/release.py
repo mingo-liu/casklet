@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 
+from release_assets import validate_version, verify
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -22,6 +24,7 @@ def github(*args):
 
 
 def candidate(tag):
+    validate_version(tag)
     if os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise ValueError("release validation must run from main")
     if os.environ.get("CASKLET_MACOS_E2E_ENABLED") != "1":
@@ -50,7 +53,7 @@ def prepare(tag):
             output.write(f"{name}={value}\n")
 
 
-def publish(tag):
+def publish(tag, assets):
     if any(os.environ.get(name) != "success" for name in ("CHECKS_RESULT", "MACOS_RESULT")):
         raise ValueError("both hosted checks and both Mac architectures must succeed before publishing")
     expected = {"revision": os.environ.get("RELEASE_REVISION", ""),
@@ -60,6 +63,11 @@ def publish(tag):
         raise ValueError("missing or invalid release validation identity")
     if candidate(tag) != expected:
         raise ValueError("draft release or tag changed after validation; start a new release run")
+    paths = verify(assets, tag)
+    run("gh", "release", "upload", tag, *map(str, paths), "--clobber",
+        "--repo", os.environ["GITHUB_REPOSITORY"])
+    if candidate(tag) != expected:
+        raise ValueError("draft release or tag changed during asset upload; start a new release run")
     github("api", "--method", "PATCH",
            f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/{expected['release_id']}",
            "-F", "draft=false")
@@ -70,9 +78,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("prepare", "publish"))
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--assets", type=Path, help="verified architecture packages (required for publish)")
     args = parser.parse_args()
     try:
-        (prepare if args.action == "prepare" else publish)(args.tag)
+        if args.action == "publish":
+            if args.assets is None:
+                raise ValueError("publish requires --assets")
+            publish(args.tag, args.assets)
+        else:
+            prepare(args.tag)
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         print(f"release: {error}", file=sys.stderr)
         return 1

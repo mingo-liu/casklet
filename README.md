@@ -19,6 +19,30 @@ output when reporting a problem.
 
 ## Quick start
 
+Published [releases](https://github.com/mingo-liu/casklet/releases) provide
+`casklet_VERSION_darwin_arm64.tar.gz` for Apple silicon and
+`casklet_VERSION_darwin_amd64.tar.gz` for Intel. Each contains the client with its
+matching Linux engine, both READMEs and the license. Install Lima with
+`brew install lima`; Go and Make are unnecessary for downloaded clients.
+
+Download the matching archive and `SHA256SUMS` into an empty directory. Replace
+the example version below with the downloaded release; use `amd64` for Intel.
+Continue only when the checksum reports `OK`:
+
+```sh
+CASKLET_VERSION=v0.1.0
+CASKLET_ARCH=arm64
+shasum -a 256 --ignore-missing -c SHA256SUMS &&
+  tar -xzf "casklet_${CASKLET_VERSION}_darwin_${CASKLET_ARCH}.tar.gz" &&
+  sudo install -d /usr/local/bin &&
+  sudo install -m 0755 casklet /usr/local/bin/casklet
+casklet --version
+```
+
+Repeat these steps to update a downloaded client. Release binaries are not
+Developer ID signed or notarized; after a browser download, macOS may require
+approval in `System Settings > Privacy & Security`.
+
 Building from source requires Go 1.27.2+ and Make. Run these commands from the
 repository directory:
 

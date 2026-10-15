@@ -225,8 +225,8 @@ not establish that the real workflow or VM suite passed.
 
 Publish through `.github/workflows/release.yml` from `main`. Prepare an existing
 tag whose commit is already merged into `main`, and an unpublished GitHub draft
-release for that tag. Attach any desired assets while it remains a draft, then
-start the workflow:
+release for that tag. Tags use `vMAJOR.MINOR.PATCH` with an optional prerelease or
+build suffix (for example `v0.1.0-rc.1`). Start the workflow:
 
 ```sh
 gh workflow run release.yml --ref main -f tag=v0.1.0
@@ -242,9 +242,28 @@ missing runner leaves validation pending rather than approving the release.
 Only the final hosted publication job receives `contents: write`. It rechecks
 the draft release ID, exact tag object, target commit and main ancestry before
 changing `draft` to `false`. A moved tag or replaced draft requires a new run.
-The workflow publishes an existing draft; it does not build downloadable release
-packages. GitHub writers who publish directly through the UI/API bypass this
-workflow, so maintainers must use this publication path and protect release refs.
+The hosted checks also build native downloadable packages on `macos-15` (arm64)
+and `macos-15-intel` (amd64). Trusted packaging controls build the selected source
+and version, then execute the archived client offline to verify its version,
+commit and bundled Linux engine bytes. Archives contain `casklet`, `LICENSE` and
+both READMEs; no local configuration or standalone guest engine is shipped.
+Each architecture's transfer checksum is checked before generating `SHA256SUMS`.
+Only the final job uploads both archives and that manifest to the existing draft,
+replacing same-named assets on a retry. It rechecks draft/tag identity again after
+upload before publishing. Missing/corrupt packages or failed uploads leave the
+draft unpublished; a partial upload can be retried. Other draft assets are retained.
+The binaries are not Developer ID signed or notarized. These hosted package
+checks do not replace the mandatory dedicated-Mac VM suites.
+
+The same package build runs on every CI invocation. For local native verification
+from a clean checkout (output stays ignored), run:
+
+```sh
+python3 scripts/release_assets.py --project . --output bin/packages --version v0.1.0 --arch arm64
+```
+
+Use `amd64` on an Intel Mac. Build each archive on its native host.
+GitHub writers who publish directly through the UI/API bypass this workflow, so maintainers must use this publication path and protect release refs.
 See the [GitHub reusable workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)
 and [release API](https://docs.github.com/en/rest/releases/releases#update-a-release).
 

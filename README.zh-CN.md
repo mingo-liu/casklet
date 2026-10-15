@@ -16,6 +16,28 @@ Go 版本、客户端平台及内嵌 Linux 引擎的 SHA-256。查询在本机�
 
 ## 快速开始
 
+发布后的[版本页面](https://github.com/mingo-liu/casklet/releases)提供 Apple 芯片的
+`casklet_VERSION_darwin_arm64.tar.gz` 和 Intel 的
+`casklet_VERSION_darwin_amd64.tar.gz`。每个包包含客户端、匹配的 Linux 引擎、
+中英文 README 和许可证。通过 `brew install lima` 安装 Lima；使用下载的客户端
+无需安装 Go 或 Make。
+
+将对应架构的安装包及 `SHA256SUMS` 下载到空目录。把下面示例版本替换为实际下载的
+版本；Intel 用户将架构改为 `amd64`。校验显示 `OK` 后再继续安装：
+
+```sh
+CASKLET_VERSION=v0.1.0
+CASKLET_ARCH=arm64
+shasum -a 256 --ignore-missing -c SHA256SUMS &&
+  tar -xzf "casklet_${CASKLET_VERSION}_darwin_${CASKLET_ARCH}.tar.gz" &&
+  sudo install -d /usr/local/bin &&
+  sudo install -m 0755 casklet /usr/local/bin/casklet
+casklet --version
+```
+
+更新下载的客户端时重复上述步骤。发布的程序未经 Developer ID 签名或公证；
+通过浏览器下载后首次打开，macOS 可能要求在“系统设置 > 隐私与安全性”中批准运行。
+
 从源码构建需要 Go 1.27.2 及以上版本和 Make。请在仓库目录中执行：
 
 ```sh

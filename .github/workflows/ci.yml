@@ -24,6 +24,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  packages:
+    name: Downloadable macOS packages
+    uses: ./.github/workflows/release-packages.yml
+    with:
+      revision: ${{ inputs.revision || github.sha }}
+      version: ${{ inputs.version || 'v0.0.0-ci' }}
+
   checks:
     name: Checks (${{ matrix.os }})
     strategy:
