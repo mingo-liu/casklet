@@ -154,6 +154,9 @@ func (m *Machine) ensure(ctx context.Context, options Options, initialize bool, 
 	if instance.Arch != map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH] {
 		return nil, errors.New("runtime machine architecture does not match the macOS client")
 	}
+	if err := m.ensureProvisioned(ctx, *instance, len(requireRunning) > 0 && requireRunning[0]); err != nil {
+		return nil, err
+	}
 	if err := m.install(ctx, *instance); err != nil {
 		return nil, err
 	}

@@ -255,6 +255,17 @@ suite does not. Pull staging and caches live on the VM disk.
 - `casklet doctor` checks the guest runtime with the default BusyBox template.
 - If startup was interrupted, retry `casklet machine start`; engine installation
   is repeatable and executable replacement preserves existing container storage.
+- A running VM is not sufficient evidence of completed initialization. Before
+  installing/reusing the engine, the client checks the provisioning marker and
+  required guest tools/static BusyBox package. Incomplete setup or missing tools
+  rerun the shared provisioning script under a guest lock, without rebooting the
+  VM. Ubuntu package downloads retry three times with 30-second network timeouts;
+  package-lock waits are bounded to 60 seconds, and each guest repair has a
+  nine-minute deadline plus ten seconds for forced termination. Restore network
+  access and retry `machine start` after a failure. Healthy setup skips package
+  installation; repairing packages preserves an already delegated user manager.
+  Project preview requires completed initialization and reports a start hint
+  rather than installing guest dependencies.
 - The installed engine is checked against the bundled SHA-256 before reuse.
   A matching version marker alone does not bypass repair of damaged executable
   content. Repair atomically replaces the binary while active supervisors keep

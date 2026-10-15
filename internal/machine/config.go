@@ -121,32 +121,10 @@ func configData(options Options) ([]byte, error) {
 			{"guestIP": "127.0.0.3", "hostIP": "127.0.0.1", "proto": "any"},
 			{"guestIP": "0.0.0.0", "proto": "any", "ignore": true},
 		},
-		"provision": []map[string]string{{"mode": "system", "script": provisionScript}},
+		"provision": []map[string]string{{"mode": "system", "script": initialProvisionScript()}},
 	}
 	return json.MarshalIndent(data, "", "  ")
 }
-
-const provisionScript = `#!/bin/sh
-set -eu
-if [ -f /usr/local/lib/casklet/provisioned-v1 ]; then exit 0; fi
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y busybox-static binutils iproute2 nftables util-linux conntrack apparmor-utils
-cat > /etc/apparmor.d/casklet <<'PROFILE'
-abi <abi/4.0>,
-profile casklet-rootless /usr/local/bin/casklet flags=(unconfined,attach_disconnected) {
-  userns,
-}
-PROFILE
-apparmor_parser -r /etc/apparmor.d/casklet
-loginctl enable-linger '{{.User}}'
-mkdir -p '/etc/systemd/system/user@{{.UID}}.service.d'
-printf '[Service]\nDelegate=cpu memory pids\n' > '/etc/systemd/system/user@{{.UID}}.service.d/casklet.conf'
-systemctl daemon-reload
-systemctl restart 'user@{{.UID}}.service'
-mkdir -p /usr/local/lib/casklet
-touch /usr/local/lib/casklet/provisioned-v1
-`
 
 func within(parent, child string) bool {
 	rel, err := filepath.Rel(parent, child)
