@@ -117,6 +117,12 @@ Validation:
   before closing that transport while preserving the requested signal status.
   Mac cancellation regressions bound subprocess pipe waits and verify that the
   canceled export releases its image lease through subsequent deletion.
+- The next real Mac run showed that bounding the SSH child alone was insufficient:
+  Lima's shared SSH mux master owns the blocked output descriptor. Archive export
+  sessions now use independent SSH connections, and signal/watchdog messages
+  independently bypass the mux so a stalled output cannot block cancellation.
+  The regression captures signal-forwarding diagnostics instead of discarding
+  them. This correction awaits the combined real VM run.
 - Privileged Linux and real macOS execution are pending the coordinated
   disposable VM validation; no daily VM was used by this feature worktree.
 

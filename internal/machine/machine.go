@@ -170,11 +170,31 @@ func remoteCommand(args []string) string {
 }
 
 func sshCommand(ctx context.Context, instance Instance, tty bool, args ...string) *exec.Cmd {
+	return sshSessionCommand(ctx, instance, tty, false, args...)
+}
+
+func sshSessionCommand(ctx context.Context, instance Instance, tty, independent bool, args ...string) *exec.Cmd {
 	terminal := "-T"
 	if tty {
 		terminal = "-tt"
 	}
-	return exec.CommandContext(ctx, "/usr/bin/ssh", "-F", instance.SSHConfigFile, "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", terminal, "--", "lima-"+instance.Name, remoteCommand(args))
+	options := []string{"-F", instance.SSHConfigFile, "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
+	if independent {
+		// A mux master can block on a session's full stdout pipe, preventing
+		// other sessions from receiving control messages or closing that pipe.
+		options = append(options, "-S", "none")
+	}
+	options = append(options, terminal, "--", "lima-"+instance.Name, remoteCommand(args))
+	return exec.CommandContext(ctx, "/usr/bin/ssh", options...)
+}
+
+func (m *Machine) sendSignal(ctx context.Context, instance Instance, rootless bool, token, value string) error {
+	cmd := sshSessionCommand(ctx, instance, false, true, engineCommand(rootless, "__signal", token, value)...)
+	data, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("guest operation: %w: %s", err, strings.TrimSpace(string(data)))
+	}
+	return nil
 }
 
 func (m *Machine) output(ctx context.Context, instance Instance, args ...string) ([]byte, error) {

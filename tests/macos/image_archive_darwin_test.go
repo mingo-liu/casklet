@@ -90,7 +90,8 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 			}
 			defer reader.Close()
 			defer writer.Close()
-			cmd.Stderr = io.Discard
+			var diagnostic bytes.Buffer
+			cmd.Stderr = &diagnostic
 			if action == "load" {
 				cmd.Stdin = reader
 				cmd.Stdout = io.Discard
@@ -115,11 +116,11 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 			}
 			err = cmd.Wait()
 			if ctx.Err() != nil {
-				t.Fatalf("blocked %s did not cancel", action)
+				t.Fatalf("blocked %s did not cancel: %s", action, diagnostic.String())
 			}
 			exit, ok := err.(*exec.ExitError)
 			if !ok || exit.ExitCode() != 143 {
-				t.Fatalf("%s cancellation: %v", action, err)
+				t.Fatalf("%s cancellation: %v: %s", action, err, diagnostic.String())
 			}
 		})
 	}
