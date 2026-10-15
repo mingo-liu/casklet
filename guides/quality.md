@@ -6,6 +6,21 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Check supervisor-loss cleanup at the owning lifecycle stage
+
+`TestBackgroundSupervisorDeathRecovery` now checks removal of the recorded
+workload cgroup immediately after recovery. It still verifies runtime-directory
+cleanup, unknown exit status, retained failure metadata and a subsequent launch.
+The systemd service parent is checked after normal container removal resets the
+failed unit; a failed transient unit can retain an empty parent before that step.
+No production cleanup behavior or disappearance assertion was relaxed.
+
+Validation: recent CI failures showed an empty service parent (`populated 0`).
+The original test reproduced that failure once in 30 local Linux arm64 runs.
+The updated regression passed 50 consecutive privileged runs through the
+shared-VM preservation wrapper. macOS unit tests, formatting and vet passed;
+Linux arm64 integration-source vet passed. Intel Mac execution was not run.
+
 ## 2026-10-15: Point volume backup argument errors to scoped help
 
 Malformed `volume export`/`volume restore` commands now suggest their existing
