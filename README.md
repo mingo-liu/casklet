@@ -35,6 +35,10 @@ the existing VM and its local data. Container options precede `--` when supplyin
 a command. Registry images provide their own default command and are downloaded
 automatically on a cache miss; `--` is unnecessary when using that default.
 
+If initial dependency installation fails, restore network access and retry
+`casklet machine start` or your original command. The client resumes incomplete
+setup even when the VM is already running, preserving existing workloads and data.
+
 After updating the source, run `make build` and `sudo make install` again to update
 the installed client. Its bundled guest engine updates automatically on the next
 engine command, preserving existing containers and images.

@@ -38,6 +38,15 @@ The reuse check verifies the installed executable's SHA-256 as well as the
 version marker, so executable corruption triggers atomic reinstallation before
 guest engine execution.
 
+VM running state and guest provisioning readiness are independent. The host
+checks the completion marker and required dependencies before engine setup;
+incomplete setup uses the same embedded shell script as Lima's initial provision.
+A guest flock serializes both paths, package retries/lock waits and a guest
+timeout bound failures, and only successful setup publishes the completion
+marker. Repair runs in place, preserving engine storage and already delegated
+user-manager executions. Preview rejects incomplete provisioning with a start
+hint instead of repairing it.
+
 Engine caching is independent of builtin template health. A private guest
 installation operation checks the template's layout, applet links, permissions,
 architecture, and recorded BusyBox checksum. Repairs generate and validate a

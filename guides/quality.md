@@ -6,6 +6,42 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Recover incomplete runtime machine provisioning
+
+VM running state no longer bypasses dependency setup. Before engine installation
+or reuse, the Mac client checks the existing completion marker, required tools
+and installed static BusyBox package. Incomplete setup or missing tools rerun
+the same embedded script used by initial Lima provisioning. A guest lock
+serializes both paths; package downloads/lock waits and the guest process have
+bounded retries/deadlines. Interrupted package configuration is resumed, missing
+tools are reinstalled, and only successful initialization publishes readiness.
+Already delegated user managers are preserved during repair. Project preview
+rejects incomplete setup with a start hint instead of installing dependencies.
+Focused help, both READMEs, development and architecture document recovery.
+
+Shell regressions cover package outages, interrupted execution/configuration,
+service setup failure, readiness publication, stale-marker missing tools,
+healthy reuse and user-manager preservation. Linux additionally exercises two
+concurrent provisioners with the real guest flock. Host regressions cover
+preview and cancellation. The disposable Mac regression injects a package
+failure, retries with `machine start`, removes `readelf` behind a matching marker,
+and verifies repair without changing the engine/hash marker, boot ID, delegated
+user-manager invocation, active workload or private/named-volume data.
+
+Validation:
+
+- macOS arm64 native client/embedded engine build, formatting, complete unit,
+  vet and race checks passed. Runner isolation/cleanup tests also passed.
+- Four-target Darwin/Linux arm64/amd64 vulnerability scans and Linux arm64/amd64
+  cross-vet passed. Hosted macOS/native Linux checks and both complete privileged
+  Linux integration suites passed on the recovery implementation.
+- The real macOS arm64 recovery regression passed in 20.68 seconds in a disposable
+  VM. Cold initialization, rootless execution, VM stop/start and disk expansion,
+  engine repair, offline image transport, project recreation/readiness and port
+  conflicts also passed in that run.
+- Intel Mac execution and the optional pinned legacy-supervisor case were not
+  configured. Daily VM state and data were not used for fault injection.
+
 ## 2026-10-15: Combine offline image delivery with selected service upgrades
 
 Merged OCI archive delivery with project preview/recreation, preserving both

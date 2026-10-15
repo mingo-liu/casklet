@@ -7,3 +7,6 @@ import "embed"
 //
 //go:embed assets/prepare-rootfs.sh
 var assets embed.FS
+
+//go:embed assets/provision.sh
+var guestProvisionScript string

@@ -67,3 +67,15 @@ func TestHostHelpDoesNotInterpretOptionOrDirectoryValues(t *testing.T) {
 		}
 	}
 }
+
+func TestMachineStartHelpDocumentsInitializationRecovery(t *testing.T) {
+	text, err := Help("machine start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phrase := range []string{"already running", "restore network access and retry", "VM data is preserved"} {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("missing recovery guidance %q: %s", phrase, text)
+		}
+	}
+}
