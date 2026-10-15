@@ -20,11 +20,19 @@ bytes readable by the replacement. Config-free down retains the data volume.
 Validation:
 
 - Combined macOS arm64 formatting, full unit/vet/race checks and native client
-  with embedded Linux engine build passed.
-- Combined Linux arm64 cross-vet and all package/privileged integration test
-  executable compilation passed; these checks do not execute Linux tests.
-- Real combined macOS/privileged Linux execution remains coordinated on an
-  isolated VM by the parent workflow; this worktree did not access a VM.
+  with embedded Linux engine build passed. Linux arm64 cross-vet and all
+  package/privileged integration test executable compilation also passed.
+- The complete disposable macOS arm64 suite passed all 61 tests without skips
+  in 305.221 seconds, including offline-image deployment, preview/recreation,
+  actual TCP/UDP reuse and stopped-service host-port preflight.
+- Linux arm64 user/root unit and complete privileged integration suites passed,
+  including loaded-image defaults, stable unselected IDs/generations, retained
+  volume bytes, recreation failure/retry and explicit mutable-tag refresh.
+- Hosted macOS/Linux checks, both Linux amd64/arm64 privileged integration suites
+  and vulnerability scans passed. Intel Mac execution and the optional pinned
+  legacy-supervisor case were not configured.
+- Temporary VM and host state were removed after validation. The ordinary daily
+  VM remained stopped and its data was preserved.
 
 ## 2026-10-14: Preview and recreate selected project services
 
@@ -65,12 +73,13 @@ includes an occupied saved host port on an unselected stopped service.
 Validation:
 
 - macOS arm64 formatting, full unit/vet/race checks and native client with
-  embedded Linux engine build passed.
-- Linux arm64 cross-vet, all package test executable compilation and privileged
-  integration source compilation passed. These are compilation checks, not Linux
-  execution.
-- Real macOS and privileged Linux execution is coordinated separately on an
-  isolated VM; no VM was started or used during this worktree's implementation.
+  embedded Linux engine build passed on the combined tree.
+- Linux arm64 cross-vet, all package test compilation, user/root unit tests and
+  the complete privileged integration suite passed. The full macOS arm64 suite
+  passed all 61 tests without skips in 305.221 seconds.
+- Hosted macOS/Linux checks, Linux amd64/arm64 integration and vulnerability
+  scans passed. The combined validation above covers preservation, preview,
+  port/source preflight, failure/retry and offline loaded-image upgrades.
 
 ## 2026-10-14: Deliver native images through standard OCI archives
 
