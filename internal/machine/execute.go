@@ -286,6 +286,9 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	for {
 		select {
 		case err := <-done:
+			if canceledArchiveSignal != 0 {
+				return 128 + int(canceledArchiveSignal), nil
+			}
 			if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
 				authentication.err = errors.New("incomplete registry preparation response")
 			}
@@ -306,11 +309,11 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 			}
 			if shutdown == nil {
 				grace := 75 * time.Second
-				if controlErr == nil && archiveOutput {
+				if archiveOutput {
 					// SSH itself may be blocked writing the archive to a full host
-					// pipe even after the guest cancels and releases its image or
-					// volume lease. Forward cancellation first, then bound transport
-					// draining; discarded archive output is already incomplete.
+					// pipe even after the guest finishes and removes its signal
+					// socket. Attempt forwarding first, then bound transport draining
+					// regardless of delivery; discarded output is already incomplete.
 					grace = 2 * time.Second
 					canceledArchiveSignal = signal.(syscall.Signal)
 				}
