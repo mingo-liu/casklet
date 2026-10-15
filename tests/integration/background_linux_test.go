@@ -744,18 +744,40 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 
 func TestBackgroundLogRotationFollow(t *testing.T) {
 	name := backgroundName(t)
-	id := startBackground(t, name, []string{"--log-max-size", "1k", "--log-max-files", "3"}, "/bin/sh", "-c", `echo ready; sleep 1; i=0; while [ "$i" -lt 10 ]; do printf '%0900d\n' "$i"; i=$((i+1)); sleep .15; done; printf final`)
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
-	code, out, stderr, err := backgroundCommand(ctx, "logs", "-f", id)
+	ack := t.TempDir()
+	// Advance only after the follower has consumed each batch. A fixed producer
+	// sleep can overrun the 3 KiB retention window on a descheduled CI runner.
+	id := startBackground(t, name, []string{"--log-max-size", "1k", "--log-max-files", "3", "--timeout", "20s", "--mount", bindOption(ack, "/ack", false)}, "/bin/sh", "-c", `echo ready; i=0; while [ "$i" -lt 10 ]; do printf '%0900d\n' "$i"; while [ ! -f "/ack/$i" ]; do sleep .01; done; i=$((i+1)); done; printf final`)
+	call := start(t, "", "logs", "-f", id)
+	deadline := time.Now().Add(12 * time.Second)
 	var want strings.Builder
 	want.WriteString("ready\n")
 	for i := 0; i < 10; i++ {
 		fmt.Fprintf(&want, "%0900d\n", i)
+		for {
+			out, err := os.ReadFile(call.stdout.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(want.String(), string(out)) {
+				t.Fatalf("rotated follow batch %d: unexpected output %q", i, out)
+			}
+			if string(out) == want.String() {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("rotated follow batch %d: bytes=%d want=%d", i, len(out), want.Len())
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := os.WriteFile(filepath.Join(ack, fmt.Sprint(i)), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	want.WriteString("final")
-	if err != nil || code != 0 || out != want.String() {
-		t.Fatalf("rotated follow: code=%d bytes=%d want=%d stderr=%q error=%v", code, len(out), want.Len(), stderr, err)
+	code, out, stderr := call.wait(t)
+	if code != 0 || out != want.String() {
+		t.Fatalf("rotated follow: code=%d bytes=%d want=%d stderr=%q", code, len(out), want.Len(), stderr)
 	}
 	assertBackgroundExit(t, waitBackground(t, id, "exited"), 0)
 	retained := backgroundSuccess(t, "logs", id)

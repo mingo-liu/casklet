@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Synchronize the live log-rotation fixture with its follower
+
+`TestBackgroundLogRotationFollow` acknowledges each complete output batch through
+a bind-mounted test directory before producing the next. This keeps its exact
+9,021-byte assertion inside the three-segment retention window even when a CI
+reader starts late or is descheduled. The fixture still writes across rotations,
+checks the retained suffix and capacity, and verifies a tail crossing segments.
+The workload has a 20-second timeout and acknowledgements share a 12-second bound.
+Production retention-overrun behavior is unchanged and retains its unit coverage.
+
+Validation: delaying the original follower startup by two seconds reproduced
+missing output (4,925 of 9,021 bytes). The updated privileged Linux arm64 test
+passed 50 consecutive runs through the shared-VM preservation wrapper. macOS
+unit tests, formatting and vet, and Linux arm64 integration-source vet passed.
+Intel Mac execution was not run.
+
 ## 2026-10-15: Point volume backup argument errors to scoped help
 
 Malformed `volume export`/`volume restore` commands now suggest their existing
