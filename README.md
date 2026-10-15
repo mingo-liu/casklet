@@ -386,8 +386,11 @@ make test-macos # Real commands through the runtime VM; creates it if needed.
 
 The internal Linux engine retains a privileged integration suite in the shared
 `casklet-runtime` VM, with daily data preserved during exclusive testing.
-Maintainers can enable scheduled, release, and manual macOS end-to-end CI on a
-dedicated Mac runner; each run removes its disposable VM. See the
+Maintainers can enable scheduled/manual macOS end-to-end CI on dedicated Apple
+silicon and Intel Mac runners; each run removes its disposable VM. Release
+publication requires both architectures and hosted checks to pass before an
+existing draft can be published. Missing configuration blocks publication. See the
+[release gate](guides/development.md#release-publication-gate) and
 [runner setup](guides/development.md#dedicated-macos-end-to-end-ci).
 Generated binaries, templates, runtime state, and
 local `docs/` notes remain untracked. See [LICENSE](LICENSE).

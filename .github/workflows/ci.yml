@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -23,15 +28,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
       - name: Test VM runner guards and cleanup
-        run: python3 -B -m unittest discover -s scripts -p 'test_shared_vm_test.py' -v
+        run: python3 -B -m unittest discover -s scripts -p '*_test.py' -v
+      - name: Validate workflow dependencies and permissions
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - run: make fmt-check test vet test-race
-      - name: Check disposable macOS runner cleanup
-        if: runner.os == 'macOS'
-        run: python3 -B -m unittest discover -s scripts -p 'test_macos_ci_test.py' -v
       - name: Build macOS clients with bundled Linux engines
         if: runner.os == 'macOS'
         run: |
@@ -47,6 +54,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
@@ -65,6 +75,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod

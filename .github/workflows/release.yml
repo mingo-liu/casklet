@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag and unpublished draft release to validate and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate draft and trusted revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      revision: ${{ steps.candidate.outputs.revision }}
+      tag_oid: ${{ steps.candidate.outputs.tag_oid }}
+      release_id: ${{ steps.candidate.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require an enabled Mac gate and an unpublished main-ancestor tag
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
+        run: python3 scripts/release.py prepare --tag "$RELEASE_TAG"
+
+  checks:
+    name: Hosted release checks
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      revision: ${{ needs.prepare.outputs.revision }}
+
+  macos:
+    name: Real release clients and VMs
+    needs: prepare
+    uses: ./.github/workflows/macos-e2e.yml
+    with:
+      revision: ${{ needs.prepare.outputs.revision }}
+
+  publish:
+    name: Publish the verified draft
+    needs: [prepare, checks, macos]
+    if: >-
+      needs.prepare.result == 'success' &&
+      needs.checks.result == 'success' && needs.macos.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recheck tag and draft identity before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_REVISION: ${{ needs.prepare.outputs.revision }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.tag_oid }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
+          CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
+        run: python3 scripts/release.py publish --tag "$RELEASE_TAG"

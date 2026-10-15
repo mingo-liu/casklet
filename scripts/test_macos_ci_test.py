@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import signal
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -37,6 +38,7 @@ if pathlib.Path(sys.argv[0]).name == 'make':
     instance.mkdir()
     (instance / 'serial.log').write_text('diagnostic')
     (instance / 'ssh_key').write_text('private-key-do-not-copy')
+    if mode == 'skipped': print('--- SKIP: TestRequiredFeature (0.00s)', flush=True)
     if mode == 'timeout': time.sleep(30)
     if mode == 'signal': os.kill(os.getppid(), 15); time.sleep(30)
     sys.exit(7 if mode == 'failure' else 0)
@@ -57,6 +59,7 @@ print('fake VM diagnostics')
         shared_home = directory / "home"
         shared_home.mkdir()
         env = {"PATH": str(tools) + os.pathsep + os.environ["PATH"],
+               "CASKLET_MACOS_REQUIRE_NO_SKIPS": "1",
                "LIMA_HOME": str(daily), "CASKLET_MACHINE_STATE_DIR": str(daily),
                "DAILY_LIMA": str(daily), "DAILY_STATE": str(daily), "TEST_MODE": mode,
                "SHARED_HOME": str(shared_home)}
@@ -103,6 +106,26 @@ print('fake VM diagnostics')
                     self.assertIn("exceeded its deadline", (artifacts / "suite.log").read_text())
                 if mode == "launch-failure":
                     self.assertIn("make disappeared", (artifacts / "suite-error.log").read_text())
+
+    def test_release_rejects_skipped_tests_and_still_cleans_up(self):
+        result, _ = self.run_fake("skipped")
+        self.assertEqual(result, 1)
+
+    def test_release_checks_native_hardware_and_rejects_rosetta(self):
+        for expected, physical, process, succeeds in (
+                ("arm64", "0", "arm64", True),
+                ("amd64", "", "x86_64", True),
+                ("amd64", "1", "x86_64", False),
+                ("arm64", "1", "x86_64", False),
+                ("arm64", "0", "x86_64", False)):
+            with self.subTest(expected=expected, physical=physical, process=process):
+                with patch.object(runner.platform, "machine", return_value=process), \
+                        patch.object(runner.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, physical)):
+                    if succeeds:
+                        runner.check_architecture(expected)
+                    else:
+                        with self.assertRaises(ValueError):
+                            runner.check_architecture(expected)
 
 
 if __name__ == "__main__":
