@@ -97,39 +97,27 @@ preservation, directory-policy rejection and save lease/deletion fencing.
 Linux/macOS integration cases cover actual binary transport, disconnected
 registry execution, retained restart and blocked input/output cancellation.
 
+Image and volume streams use nonblocking duplicates registered with Go's poller,
+restore caller status flags and preserve caller descriptors. Archive output and
+control signals use independent SSH connections. Cancellation also bounds host
+output draining when the producer has already finished and removed its control
+socket, preserving a nonzero signal status and releasing guest image leases.
+
 Validation:
 
 - macOS arm64 formatting, complete unit/vet/race checks and native client with
-  embedded Linux engine build passed.
-- Linux arm64 cross-vet and image/integration test executable compilation passed.
-- Initial hosted Linux amd64/arm64 integration identified an extra separator in
-  the default-command fixture and cancellation of inherited blocking standard
-  descriptors. The fixture now invokes the image defaults directly. Image and
-  volume streams use a nonblocking duplicate registered with Go's poller,
-  restoring original status flags on return. Real exec-inherited pipe regressions
-  verify both blocked read/write cancellation and caller descriptor preservation.
-- The follow-up Linux run passed both blocked-stream cancellation cases and
-  exposed an invalid direct invocation of the relocated BusyBox fixture. Its
-  user assertion now invokes the installed `id` applet, and failure cleanup
-  removes the retained container before subsequent image cases. A stalled Mac
-  save also exposed SSH blocking on its own host output after guest cancellation;
-  successful signal forwarding now bounds archive-output draining to two seconds
-  before closing that transport while preserving the requested signal status.
-  Mac cancellation regressions bound subprocess pipe waits and verify that the
-  canceled export releases its image lease through subsequent deletion.
-- The next real Mac run showed that bounding the SSH child alone was insufficient:
-  Lima's shared SSH mux master owns the blocked output descriptor. Archive export
-  sessions now use independent SSH connections, and signal/watchdog messages
-  independently bypass the mux so a stalled output cannot block cancellation.
-  The regression captures signal-forwarding diagnostics instead of discarding
-  them. This correction awaits the combined real VM run.
-- Combined Mac diagnostics identified the completed-producer case: the guest
-  can remove its signal socket before SSH finishes draining buffered archive
-  bytes. Archive cancellation therefore bounds host transport draining even
-  when the guest signal target has already disappeared; it retains the requested
-  cancellation status and never reports successful archive delivery.
-- Privileged Linux and real macOS execution are pending the coordinated
-  disposable VM validation; no daily VM was used by this feature worktree.
+  embedded Linux engine build passed on the combined tree.
+- The complete combined macOS arm64 suite passed all 61 tests without skips in
+  305.221 seconds. A separate real-pipe regression passed before that suite;
+  both runs covered offline transport, retained restart, blocked input/output
+  cancellation and successful image removal after cancellation.
+- Linux arm64 user/root unit and complete privileged integration suites passed;
+  hosted Linux amd64/arm64 unit/race/vet, builds, privileged integration and
+  vulnerability checks also passed. Archive tests verify offline defaults,
+  retained numeric user and cancellation of actual inherited pipes.
+- The optional pinned legacy-supervisor case was not configured. Intel Mac
+  execution was not performed. Disposable VM validation preserved the stopped
+  daily VM and cleaned up its temporary machine and host state.
 
 ## 2026-10-14: Configure temporary and shared-memory capacities
 
