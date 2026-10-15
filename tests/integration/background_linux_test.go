@@ -531,7 +531,10 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 		existing[entry.Name()] = true
 	}
 	id := startBackground(t, name, nil, "/bin/sh", "-c", "echo ready; sleep 30")
-	waitBackground(t, id, "running")
+	running := waitBackground(t, id, "running")
+	if running.Cgroup == "" {
+		t.Fatal("running container did not record its workload cgroup")
+	}
 	unit := "casklet-" + id + ".service"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	output, err := exec.CommandContext(ctx, "systemctl", "show", unit, "--property=ControlGroup", "--value").Output()
@@ -551,7 +554,8 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 		t.Fatalf("lost supervisor did not retain an unknown command exit: %+v", record)
 	}
 	assertBackgroundUnitStopped(t, id)
-	assertCgroupRemoved(t, group)
+	// Recovery owns the workload leaf; systemd owns the service parent.
+	assertCgroupRemoved(t, running.Cgroup)
 	entries, err := os.ReadDir("/var/lib/casklet/runs")
 	if err != nil {
 		t.Fatal(err)
@@ -568,6 +572,10 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 	if _, ok := findBackground(backgroundRecords(t, true), name); !ok {
 		t.Fatal("recovery discarded the failed container record")
 	}
+	// Failed transient units remain loaded until removal resets their failure.
+	// Check service-parent teardown only after that normal lifecycle operation.
+	backgroundSuccess(t, "rm", id)
+	assertCgroupRemoved(t, group)
 }
 
 func TestBackgroundPreviousBootReconciliation(t *testing.T) {
