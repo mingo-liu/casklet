@@ -44,6 +44,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       revision: ${{ needs.prepare.outputs.revision }}
+      version: ${{ inputs.tag }}
 
   macos:
     name: Real release clients and VMs
@@ -51,6 +52,7 @@ jobs:
     uses: ./.github/workflows/macos-e2e.yml
     with:
       revision: ${{ needs.prepare.outputs.revision }}
+      version: ${{ inputs.tag }}
 
   publish:
     name: Publish the verified draft

@@ -9,6 +9,12 @@ on:
       revision:
         required: true
         type: string
+      version:
+        required: false
+        type: string
+
+env:
+  CASKLET_RELEASE_VERSION: ${{ inputs.version }}
 
 permissions:
   contents: read
@@ -42,11 +48,15 @@ jobs:
       - name: Build macOS clients with bundled Linux engines
         if: runner.os == 'macOS'
         run: |
+          make build VERSION=v0.0.0-ci
+          python3 scripts/check-version-build.py --binary bin/casklet --engine internal/machine/assets/casklet-engine --expected-version v0.0.0-ci
           make build GOARCH=arm64
           make build GOARCH=amd64
       - name: Build native Linux engine
         if: runner.os == 'Linux'
-        run: make engine
+        run: |
+          make engine VERSION=v0.0.0-ci
+          python3 scripts/check-version-build.py --binary bin/casklet-engine --expected-version v0.0.0-ci
 
   vulnerabilities:
     name: Vulnerabilities (all client/engine targets)

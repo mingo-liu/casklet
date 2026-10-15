@@ -23,6 +23,21 @@ Select `GOARCH=arm64` for Apple silicon or `GOARCH=amd64` for Intel. The guest
 architecture must match the client. Build each release architecture separately;
 `go build` alone does not regenerate the embedded engine after guest changes.
 
+`make build` and `make engine` stamp the same `VERSION` value into the client
+and guest engine. An exact `v[0-9]*` tag supplies the default; other source builds
+use `dev`. Override explicitly with `make build VERSION=v0.1.0`. The release
+workflow passes its selected tag through `CASKLET_RELEASE_VERSION` so other tags
+on the same commit cannot change the selected release version. Standard Go VCS
+metadata supplies the full commit and modified flag without build timestamps.
+When VCS stamping is unavailable, version output reports `unknown` rather than
+inventing a commit. `go build` alone preserves local version queries but can
+report a missing/stale bundled engine; always use `make build` for delivery.
+
+CI builds a stamped native executable, queries both version aliases with Lima
+absent from `PATH` and invalid machine-state configuration, and independently
+checks its commit, modified flag and actual embedded engine SHA-256. Native Linux
+CI verifies the internal engine's stamped version too.
+
 | Command | Purpose |
 | --- | --- |
 | `make build` | macOS executable with bundled Linux engine |

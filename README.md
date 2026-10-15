@@ -12,6 +12,11 @@ The Linux executable is an internal guest component, not a separately supported
 host product. Use trusted workloads; this learning runtime does not provide a
 security guarantee for untrusted code.
 
+Use `casklet --version` or `casklet version --json` to report the version, source
+commit, modified state, Go version, client platform and bundled Linux engine
+SHA-256. The query runs locally without Lima or starting the VM. Include its
+output when reporting a problem.
+
 ## Quick start
 
 Building from source requires Go 1.27.2+ and Make. Run these commands from the

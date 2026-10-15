@@ -14,6 +14,8 @@ func argumentError(args []string, err error) error {
 	topic := ""
 	if len(args) > 0 {
 		switch args[0] {
+		case "version", "--version":
+			topic = "version"
 		case "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm":
 			topic = args[0]
 		case "project":

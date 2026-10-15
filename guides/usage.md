@@ -22,6 +22,25 @@ Mac ports are checked before VM startup. Unshared paths are rejected before
 creation or startup; for a new VM the error suggests `machine init --mount`,
 and for an existing VM it suggests the stop/share/start recovery flow.
 
+## Local version information
+
+Inspect local build identity without installing Lima or starting a VM:
+
+```sh
+casklet --version
+casklet version --json
+casklet version --help
+```
+
+`version` and `--version` are aliases. JSON reports `version`, `commit`, `dirty`,
+`go_version`, `os` and `arch`. Darwin clients also report `engine.os`,
+`engine.arch` and the SHA-256 of the validated embedded executable in
+`engine.sha256`; this describes the bundled engine, not the currently installed
+guest process. The internal Linux engine has no nested engine field. Version
+queries do not read registry credentials, contact the network or initialize
+machine state. Missing VCS metadata reports `unknown`; an absent or invalid
+Darwin payload reports `engine_error` while retaining a successful local query.
+
 ## macOS execution environment
 
 Run every public command on the Mac as your regular user. The client creates or
