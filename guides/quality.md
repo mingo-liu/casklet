@@ -6,6 +6,21 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Bound non-root timeout fixtures by their explicit stop grace
+
+The timeout case in `TestNonrootProcessLifecycle` explicitly sets a 300 ms stop
+allowance inside its existing three-second total assertion. Its shell ignores
+TERM so the test consistently exercises forced non-root workload shutdown.
+Previously the implicit five-second allowance could legitimately exceed the
+fixture's three-second assertion. Exit 124 and command-start output remain
+required; the other non-root lifecycle cases retain their original coverage.
+
+Validation: the TERM-ignoring fixture without the explicit allowance reproduced
+the CI failure in 5.40 seconds. With the allowance it passed 50 consecutive
+privileged Linux arm64 runs through the shared-VM preservation wrapper.
+macOS unit tests, formatting and vet, and Linux arm64 integration-source vet
+passed. Intel Mac execution was not run.
+
 ## 2026-10-15: Point volume backup argument errors to scoped help
 
 Malformed `volume export`/`volume restore` commands now suggest their existing
