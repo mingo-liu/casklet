@@ -57,6 +57,11 @@ Validation:
   independently bypass the mux so a stalled output cannot block cancellation.
   The regression captures signal-forwarding diagnostics instead of discarding
   them. This correction awaits the combined real VM run.
+- Combined Mac diagnostics identified the completed-producer case: the guest
+  can remove its signal socket before SSH finishes draining buffered archive
+  bytes. Archive cancellation therefore bounds host transport draining even
+  when the guest signal target has already disappeared; it retains the requested
+  cancellation status and never reports successful archive delivery.
 - Privileged Linux and real macOS execution are pending the coordinated
   disposable VM validation; no daily VM was used by this feature worktree.
 
