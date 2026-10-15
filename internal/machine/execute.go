@@ -256,6 +256,7 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var shutdown <-chan time.Time
+	var canceledArchiveSignal syscall.Signal
 	for {
 		select {
 		case err := <-done:
@@ -278,11 +279,23 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)
 			}
 			if shutdown == nil {
-				shutdown = time.After(75 * time.Second)
+				grace := 75 * time.Second
+				if controlErr == nil && len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export")) {
+					// SSH itself may be blocked writing the archive to a full host
+					// pipe even after the guest cancels and releases its image or
+					// volume lease. Forward cancellation first, then bound transport
+					// draining; discarded archive output is already incomplete.
+					grace = 2 * time.Second
+					canceledArchiveSignal = signal.(syscall.Signal)
+				}
+				shutdown = time.After(grace)
 			}
 		case <-shutdown:
 			_ = cmd.Process.Kill()
 			<-done
+			if canceledArchiveSignal != 0 {
+				return 128 + int(canceledArchiveSignal), nil
+			}
 			return 125, errors.New("guest did not finish after signal forwarding")
 		}
 	}

@@ -42,6 +42,15 @@ Validation:
   volume streams use a nonblocking duplicate registered with Go's poller,
   restoring original status flags on return. Real exec-inherited pipe regressions
   verify both blocked read/write cancellation and caller descriptor preservation.
+- The follow-up Linux run passed both blocked-stream cancellation cases and
+  exposed an invalid direct invocation of the relocated BusyBox fixture. Its
+  user assertion now invokes the installed `id` applet, and failure cleanup
+  removes the retained container before subsequent image cases. A stalled Mac
+  save also exposed SSH blocking on its own host output after guest cancellation;
+  successful signal forwarding now bounds archive-output draining to two seconds
+  before closing that transport while preserving the requested signal status.
+  Mac cancellation regressions bound subprocess pipe waits and verify that the
+  canceled export releases its image lease through subsequent deletion.
 - Privileged Linux and real macOS execution are pending the coordinated
   disposable VM validation; no daily VM was used by this feature worktree.
 

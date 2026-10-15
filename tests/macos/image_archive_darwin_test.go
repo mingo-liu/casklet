@@ -81,6 +81,9 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 				args = append(args, id)
 			}
 			cmd := exec.CommandContext(ctx, client(t), args...)
+			// Bound inherited stderr copies if a broken client leaves SSH alive.
+			// The context assertion below still fails any missed cancellation.
+			cmd.WaitDelay = 3 * time.Second
 			reader, writer, err := os.Pipe()
 			if err != nil {
 				t.Fatal(err)
@@ -97,6 +100,15 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
+			if action == "save" {
+				deadline, _ := ctx.Deadline()
+				if err := reader.SetReadDeadline(deadline); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.ReadFull(reader, make([]byte, 1)); err != nil {
+					t.Fatalf("save never started output: %v", err)
+				}
+			}
 			time.Sleep(time.Second)
 			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 				t.Fatal(err)
@@ -111,4 +123,7 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 			}
 		})
 	}
+	// Deletion must succeed after canceled output, proving its guest image lease
+	// no longer keeps the image busy.
+	success(t, "image", "rm", id)
 }
