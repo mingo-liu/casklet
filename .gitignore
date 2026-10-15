@@ -6,6 +6,7 @@
 /internal/machine/assets/casklet-engine
 *.test
 *.out
+__pycache__/
 .DS_Store
 .env
 .env.*

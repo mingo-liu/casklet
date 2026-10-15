@@ -6,6 +6,23 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-15: Ship verified macOS download archives
+
+Hosted CI builds native arm64/amd64 archives with the matching embedded engine,
+license and both READMEs. Trusted packaging controls execute the archived binary
+without Lima and verify version, commit and engine bytes. Publication requires
+both packages, validates their transfer checksums, uploads the two downloads and
+`SHA256SUMS` to the draft, then rechecks its identity before making it public.
+Failed uploads and missing/corrupt packages leave it unpublished. Documentation
+covers architecture selection, checksum verification, installation, updates and
+the lack of Developer ID signing/notarization.
+
+Validation: Python regressions cover manifest bytes, invalid version filenames,
+missing/corrupt archives, upload failures and replacement drafts during upload.
+Formatting, Go unit/vet checks and pinned workflow lint passed locally. Native
+archive/build identity checks for both architectures are required in CI.
+No real release was created or published; dedicated Mac VM gates remain required.
+
 ## 2026-10-15: Report local client and bundled engine build identity
 
 Added `version`/`--version`, optional JSON and focused help. Queries run before

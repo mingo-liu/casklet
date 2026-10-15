@@ -70,6 +70,11 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-package-*
+          path: packages
+          merge-multiple: true
       - name: Recheck tag and draft identity before publication
         env:
           GH_TOKEN: ${{ github.token }}
@@ -80,4 +85,4 @@ jobs:
           CHECKS_RESULT: ${{ needs.checks.result }}
           MACOS_RESULT: ${{ needs.macos.result }}
           CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
-        run: python3 scripts/release.py publish --tag "$RELEASE_TAG"
+        run: python3 scripts/release.py publish --tag "$RELEASE_TAG" --assets packages

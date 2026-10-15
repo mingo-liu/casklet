@@ -1,0 +1,53 @@
+name: Release packages
+
+on:
+  workflow_call:
+    inputs:
+      revision:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: amd64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: gate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: source/go.mod
+      - name: Build and check the native downloadable archive
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+        run: python3 gate/scripts/release_assets.py --project source --output packages --version "$RELEASE_VERSION" --arch "$RELEASE_ARCH"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-package-${{ matrix.arch }}
+          path: packages/*
+          if-no-files-found: error
+          retention-days: 7
