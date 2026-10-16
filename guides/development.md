@@ -395,3 +395,23 @@ to include the pinned old-supervisor upgrade regression. Without it that one
 case skips explicitly. The Linux runner preserves this setting across sudo.
 Root-only network package tests additionally validate metadata ownership, stable
 leases, cancellation, and canonical subnet records; other DNS tests run normally.
+
+## Project readiness sampling benchmark
+
+This opt-in benchmark creates and removes bounded 16/64-service projects in the
+product VM. Run it without other VM tests or workloads that need predictable
+latency; teardown preserves unrelated retained records. Setup is excluded from
+timing, and each measured sample checks the original full IDs/generations.
+
+```sh
+make build
+CASKLET_MACOS_BENCHMARK=1 CASKLET_MACOS_BINARY="$PWD/bin/casklet" \
+  go test -run '^$' -bench BenchmarkProjectReadinessSampling \
+  -benchtime=3x -timeout 8m ./tests/macos
+```
+
+The two strategies compare the former per-service `inspect` transport with one
+project-scoped `__project-status` read. This measures one readiness pass, not complete
+startup, dependency waits or image preparation. Use 1-10 iterations to keep live
+sampling bounded. Initial per-service configuration/healthcheck inspection and
+final deployment validation remain outside the optimized wait loop.

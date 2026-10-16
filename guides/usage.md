@@ -135,6 +135,30 @@ Inspection does not require the original source directory to still exist.
 `--rootfs` and imports must contain Linux executables matching the Mac/VM CPU
 architecture; macOS binaries are not container workloads.
 
+## Doctor reports
+
+```sh
+casklet doctor
+casklet doctor --json
+```
+
+Doctor retains automatic VM/template preparation. Its text and JSON reports
+include client and installed engine build identities, Lima version, current VM
+state/configured resources, and the guest data filesystem's total/free/available
+bytes. JSON also includes the bundled engine architecture and SHA-256 under
+`client.engine`. `checks` records named success/error
+results; `ok` summarizes them and `schema_version` is 1. The internal Linux
+engine reports its own identity, runtime check and filesystem only. Runtime
+checks cover the rootfs template, delegated cgroups and namespace/security probe.
+Filesystem capacity uses `/var/lib`, without walking workload trees.
+
+Failed checks return 125 while still emitting a report, including host preparation
+failures on macOS. Argument errors use normal stderr diagnostics. Low space
+(below 1 GiB or 10% available) is advisory. Setup progress stays on stderr;
+JSON stdout contains exactly one object. VM metadata excludes host shares and
+SSH paths. Error messages can contain local paths; review before sharing a report.
+`version --json` remains the offline query that does not start a VM.
+
 ## Resource and execution options
 
 ```sh
@@ -1334,6 +1358,37 @@ and a cancelable project lock live under the local casklet configuration directo
 state. Keep ownership files with the machine they describe; without receipts,
 containers can still be discovered by their labels but networks/volumes are preserved.
 
+### Project logs
+
+```sh
+casklet project logs --tail 20 demo
+casklet project logs --follow --service api --service database demo
+```
+
+`project logs` reads all retained project services, or repeatable logical
+`--service` selections, without holding the deployment lock. `--tail` applies
+per service (default: all retained output). Each line carries a `[service]`
+prefix; ordering across services is unspecified. Readers pin full container IDs
+once and retain the underlying `logs` generation, rotation and cancellation
+semantics. New or recreated services are not added to an existing follower.
+No matches succeed silently; explicitly missing or duplicate service records
+fail. Stream or output failure cancels and joins other readers. Partial final
+lines flush at EOF; lines exceeding 32 KiB split into prefixed chunks. At most
+64 services are read concurrently; stdout/stderr from each container remain
+combined, as with `logs`.
+
+### Readiness sampling
+
+`project up --wait` now reads all selected project lifecycle/health records in
+one guest call per wait pass. The private response omits commands, configuration
+and probe output to keep even large service configurations bounded. It still pins
+each full ID and execution generation,
+requires enabled explicit/image healthchecks to be healthy, rechecks every service
+including dependencies on each pass, and validates the final returned records.
+Missing/replaced/stopped executions fail. Sampling is not an atomic simultaneous
+snapshot; the shared deployment deadline, cancellation and rollback policies are
+unchanged. Initial healthcheck configuration inspection still runs per service.
+
 ## Multi-container resource monitoring
 
 `stats` accepts multiple container references, `--all`, or repeatable `--filter`
@@ -1358,45 +1413,3 @@ execution metrics after restart; a generation change during sampling reports
 unavailable metrics rather than combining different executions. CPU 100% means one
 fully used core. Missing metrics are N/A/JSON null rather than zero. Empty selections
 exit after one frame. Interrupting monitoring leaves workloads running.
-
-### Project logs
-
-```sh
-casklet project logs --tail 20 demo
-casklet project logs --follow --service api --service database demo
-```
-
-`project logs` reads all retained project services, or repeatable logical
-`--service` selections, without holding the deployment lock. `--tail` applies
-per service (default: all retained output). Each line carries a `[service]`
-prefix; ordering across services is unspecified. Readers pin full container IDs
-once and retain the underlying `logs` generation, rotation and cancellation
-semantics. New or recreated services are not added to an existing follower.
-No matches succeed silently; explicitly missing or duplicate service records
-fail. Stream or output failure cancels and joins other readers. Partial final
-lines flush at EOF; lines exceeding 32 KiB split into prefixed chunks. At most
-64 services are read concurrently; stdout/stderr from each container remain
-combined, as with `logs`.
-
-### Doctor reports
-
-```sh
-casklet doctor
-casklet doctor --json
-```
-
-Doctor retains automatic VM/template preparation. Its text and JSON reports
-include client and installed engine build identities, bundled engine identity,
-Lima version, current VM state/configured resources, and the guest data
-filesystem's total/free/available bytes. `checks` records named success/error
-results; `ok` summarizes them and `schema_version` is 1. The internal Linux
-engine reports its own identity, runtime check and filesystem only. Runtime
-checks cover the rootfs template, delegated cgroups and namespace/security probe.
-Filesystem capacity uses `/var/lib`, without walking workload trees.
-
-Failed checks return 125 while still emitting a report, including host preparation
-failures on macOS. Argument errors use normal stderr diagnostics. Low space
-(below 1 GiB or 10% available) is advisory. Setup progress stays on stderr;
-JSON stdout contains exactly one object. VM metadata excludes host shares and
-SSH paths. Error messages can contain local paths; review before sharing a report.
-`version --json` remains the offline query that does not start a VM.

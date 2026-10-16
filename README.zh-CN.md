@@ -112,6 +112,7 @@ casklet project down demo
 也会删除项目拥有的数据卷。
 
 使用 `project logs --follow demo` 查看带服务名前缀的聚合日志。
+`project up --wait` 每轮通过一次 VM 调用批量检查服务就绪状态。
 
 使用 `doctor --json` 查看版本、VM 状态、磁盘余量和诊断检查。
 

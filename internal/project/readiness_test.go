@@ -34,17 +34,20 @@ func TestProjectWaitIncludesLeafHealthAndKeepsDefaultBehavior(t *testing.T) {
 		runner := fakeRunner(fake)
 		plan := fakePlan()
 		plan.Services[1].DependsOn = nil
-		inspections := 0
+		inspections, samples := 0, 0
 		runner.Call = func(ctx context.Context, args ...string) ([]byte, error) {
-			data, err := fake.call(ctx, args...)
-			if err == nil && args[0] == "inspect" && len(fake.records) > 1 && args[1] == fake.records[1].ID {
-				inspections++
+			if args[0] == "__project-status" {
+				samples++
 				status := container.HealthUnhealthy
-				if inspections >= 3 {
+				if samples >= 2 {
 					status = container.HealthHealthy
 				}
 				fake.records[1].Health = &container.Health{Status: status}
-				data = healthInspection(t, data, status)
+			}
+			data, err := fake.call(ctx, args...)
+			if err == nil && args[0] == "inspect" && len(fake.records) > 1 && args[1] == fake.records[1].ID {
+				inspections++
+				data = healthInspection(t, data, container.HealthUnhealthy)
 			}
 			return data, err
 		}
@@ -52,7 +55,7 @@ func TestProjectWaitIncludesLeafHealthAndKeepsDefaultBehavior(t *testing.T) {
 		if err != nil || len(records) != 2 {
 			t.Fatalf("wait=%v records=%v err=%v", wait, records, err)
 		}
-		if wait && inspections < 3 || !wait && inspections != 0 {
+		if wait && (inspections != 1 || samples < 2) || !wait && (inspections != 0 || samples != 0) {
 			t.Fatalf("wait=%v inspections=%d", wait, inspections)
 		}
 		if wait && records[1].Health != nil {
@@ -124,28 +127,26 @@ func TestProjectWaitRejectsChangedExecutionAndStoppedService(t *testing.T) {
 			runner := fakeRunner(fake)
 			plan := fakePlan()
 			plan.Services = plan.Services[:1]
-			inspections := 0
 			runner.Call = func(ctx context.Context, args ...string) ([]byte, error) {
 				data, err := fake.call(ctx, args...)
-				if err == nil && args[0] == "inspect" {
-					inspections++
-					if inspections > 1 {
-						var value container.Inspection
-						json.Unmarshal(data, &value)
-						switch change {
-						case "generation":
-							value.Generation++
-						case "identity":
-							value.ID = "replaced"
-						case "stopped":
-							value.State = container.StateExited
-						case "missing":
-							return nil, container.ErrNotFound
-						case "final state":
-							fake.records[0].State = container.StateExited
-						}
-						data, _ = json.Marshal(value)
+				if err == nil && args[0] == "__project-status" {
+					var values []ServiceStatus
+					if err := json.Unmarshal(data, &values); err != nil {
+						t.Fatal(err)
 					}
+					switch change {
+					case "generation":
+						values[0].Generation++
+					case "identity":
+						values[0].ID = "replaced"
+					case "stopped":
+						values[0].State = container.StateExited
+					case "missing":
+						values = nil
+					case "final state":
+						fake.records[0].State = container.StateExited
+					}
+					data, _ = json.Marshal(values)
 				}
 				return data, err
 			}
