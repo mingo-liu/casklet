@@ -122,6 +122,7 @@ Use the guide's `demo` configuration for this example. `project down` preserves
 data volumes; `--volumes` also removes project-owned volumes.
 
 Use `project logs --follow demo` for service-prefixed output.
+`project up --wait` samples service readiness in one guest call per pass.
 
 Use `doctor --json` for versions, VM state, disk space and diagnostic checks.
 

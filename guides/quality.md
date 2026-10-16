@@ -6,6 +6,32 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-17: Batch project readiness sampling
+
+The readiness wait loop uses one project-scoped minimal guest response per pass,
+then verifies every pinned full ID, service/project label, execution generation
+and required health state. At most 64 minimal status entries exclude commands,
+configuration and probe history, bounding the private transport response.
+Initial healthcheck discovery and final record validation remain unchanged. Sampling still revisits dependencies after each
+wait and uses the original deployment deadline and rollback behavior.
+
+Measurement: three timed samples per strategy on the real macOS arm64/SSH/VM
+path, excluding 16/64-service project setup/teardown. Legacy per-service inspect
+versus minimal batch status averaged 4.137 s versus 0.295 s for 16 services, and
+18.176 s versus 0.455 s for 64 services. This measures a ready-state sampling pass,
+not complete deployment latency. The opt-in bounded benchmark remains in-tree.
+
+Validation: 16/64-service call counts and identity/generation/ownership checks,
+missing/duplicate/malformed responses, stopped/failed health, dependency resampling,
+shared deadlines, cancellation and existing rollback regressions. Complete macOS
+formatting/unit/vet/race checks and native build passed, as did five real macOS
+tests for project deployment/wait/rollback, logs and doctor. The final bounded
+benchmark passed with three samples per strategy at both sizes. Linux arm64
+unit/vet and CLI/project race checks passed. Bilingual examples and maintained
+local documentation links remain aligned; all 17 script tests passed. All 162
+privileged Linux tests passed through the shared-VM preservation wrapper; only
+the optional pinned legacy-supervisor test was not configured.
+
 ## 2026-10-17: Report structured doctor diagnostics
 
 Doctor retains automatic VM preparation and now emits text or schema-versioned

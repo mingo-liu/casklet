@@ -31,6 +31,16 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 	}
 	encode := func(value any) ([]byte, error) { return json.Marshal(value) }
 	switch args[0] {
+	case "__project-status":
+		values := []ServiceStatus{}
+		for _, record := range Managed(fake.records, args[1]) {
+			health := ""
+			if record.Health != nil {
+				health = record.Health.Status
+			}
+			values = append(values, ServiceStatus{ID: record.ID, Project: record.Labels[LabelName], Service: record.Labels[LabelService], Generation: record.Generation, State: record.State, Health: health})
+		}
+		return encode(values)
 	case "ps":
 		return encode(fake.records)
 	case "network", "volume":
