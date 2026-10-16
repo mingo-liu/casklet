@@ -6,6 +6,20 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Keep downloaded documentation links usable offline
+
+Release archives now include architecture and usage/development documentation at
+its repository-relative paths. Packaging validates inline local Markdown links
+inside the actual archive before executable verification and checksum publication.
+The existing explicit member allowlist excludes private notes and local state.
+Both README translations and release documentation describe the bundled guides.
+
+Validation: a mocked-build archive regression reproduced the three missing
+linked documents before the fix. Archive-content/byte checks and missing/escaping
+link regressions pass, alongside the full Python script suite, Go unit tests,
+formatting and vet. Native arm64 packaging and CI package checks validate the
+real archived executable; Intel native execution is delegated to hosted CI.
+
 ## 2026-10-16: Condense the bilingual project overview
 
 Both READMEs now focus on project scope, installation, first use, container/data
