@@ -467,8 +467,8 @@ requires explicit recreation when applied. Only ID/spec-matched private baseline
 supply field differences; legacy/stale baselines are explicitly unavailable.
 Parsed-intent digests avoid comparing explicit options against image-inherited
 defaults. Successful up publishes comparison history after final identity checks;
-preview does not write it, and down discards comparisons for removed services. It never
-pulls images, validates source readiness, runs health waits, changes container or
+preview does not write it, and down discards comparisons for removed services.
+Preview never pulls images, validates source readiness, runs health waits, changes container or
 resource deployment state, or saves/releases ownership receipts. Mac inventory
 calls require an already-running VM under the machine lock; stopped/missing VMs
 fail with an explicit start hint. Engine installation/repair on a running VM and

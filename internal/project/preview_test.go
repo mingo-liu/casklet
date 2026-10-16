@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,5 +128,35 @@ func TestPreviewTreatsVerifiedLegacyAliasFingerprintAsUnchanged(t *testing.T) {
 	change := runner.Preview[len(runner.Preview)-1]
 	if change.Reason != "explicit_recreate" || len(change.ChangedFields) != 0 {
 		t.Fatalf("legacy alias normalization became drift: %+v", change)
+	}
+}
+
+func TestComparisonPublicationFailureRollsBackOnlyNewServices(t *testing.T) {
+	fake := newFakeProject()
+	runner := fakeRunner(fake)
+	plan := fakePlan()
+	for i := range plan.Services {
+		plan.Services[i].Fields = FieldDigests(plan.Services[i].Config, nil)
+	}
+	initial := plan
+	initial.Services = initial.Services[:1]
+	if _, err := runner.Up(context.Background(), initial, UpOptions{Timeout: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	originalID := fake.records[0].ID
+	before, _ := json.Marshal(runner.State.Services)
+	save := runner.Save
+	runner.Save = func(state State) error {
+		if len(state.Services) == 2 {
+			return errors.New("comparison storage unavailable")
+		}
+		return save(state)
+	}
+	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err == nil {
+		t.Fatal("expected comparison publication failure")
+	}
+	after, _ := json.Marshal(runner.State.Services)
+	if len(fake.records) != 1 || fake.records[0].ID != originalID || string(before) != string(after) {
+		t.Fatalf("publication failure changed existing services/history: %+v %s", fake.records, after)
 	}
 }

@@ -1278,7 +1278,7 @@ selected services are created, and selected services still present are replaced.
 Ordinary `up` can also create missing services if remaining configs match.
 
 `--dry-run` prints deterministic `create network/volume NAME` and
-`create/reuse/start/recreate service KEY` lines with a reason and changed option
+`create/reuse/start/recreate service KEY` lines with a reason and changed configuration field
 names. With `--json`, actions retain `kind`, `name`, `action` and the old full `id`
 where applicable, adding `reason`, optional sorted `changed_fields`,
 `requires_recreate` and `details_unavailable`.

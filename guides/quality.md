@@ -22,11 +22,15 @@ is explicitly unavailable. Preview does not save state, and down discards remove
 service comparisons. Resource ownership receipts retain their existing semantics.
 
 Validation: focused tests cover field changes, explicit/legacy recreation,
-provenance, failed-up history, down cleanup, invalid persisted comparisons and
-redaction. Real Linux/macOS tests verify preview leaves IDs/generations and state
+provenance, failed-up history, comparison-publication failure rollback, down
+cleanup, invalid persisted comparisons and redaction. Real Linux/macOS tests verify preview leaves IDs/generations and state
 bytes unchanged, applying drift still needs selection, selected replacement works
 and legacy field details are not guessed. Formatting, unit/vet/race and native
-build checks passed; shared-VM integration and focused Mac regression passed.
+build checks passed. All 161 privileged Linux tests passed through the shared-VM
+preservation wrapper; the optional pinned legacy-supervisor test was not configured.
+Four real macOS tests cover preview/recreation, existing replacement recovery,
+offline validation and help parity. The final publication-failure regression also
+passed project race tests on both macOS and Linux arm64.
 
 ## 2026-10-16: Validate project configuration offline
 

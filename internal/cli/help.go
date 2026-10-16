@@ -481,7 +481,7 @@ Notes:
   --dry-run reports configuration drift even without --recreate; applying it still requires selection.
   Reasons distinguish missing resources/services, matching config, stopped services,
   changed configuration and explicit same-config recreation.
-  changed_fields lists sorted option names only; values and comparison digests are never shown.
+  changed_fields lists sorted configuration field names only; values and comparison digests are never shown.
   requires_recreate marks drift that needs an explicit --recreate selection.
   details_unavailable marks absent/stale comparison history; field differences are not guessed.
   Successful up saves private field digests bound to each container ID/config label.
