@@ -1358,3 +1358,22 @@ execution metrics after restart; a generation change during sampling reports
 unavailable metrics rather than combining different executions. CPU 100% means one
 fully used core. Missing metrics are N/A/JSON null rather than zero. Empty selections
 exit after one frame. Interrupting monitoring leaves workloads running.
+
+### Project logs
+
+```sh
+casklet project logs --tail 20 demo
+casklet project logs --follow --service api --service database demo
+```
+
+`project logs` reads all retained project services, or repeatable logical
+`--service` selections, without holding the deployment lock. `--tail` applies
+per service (default: all retained output). Each line carries a `[service]`
+prefix; ordering across services is unspecified. Readers pin full container IDs
+once and retain the underlying `logs` generation, rotation and cancellation
+semantics. New or recreated services are not added to an existing follower.
+No matches succeed silently; explicitly missing or duplicate service records
+fail. Stream or output failure cancels and joins other readers. Partial final
+lines flush at EOF; lines exceeding 32 KiB split into prefixed chunks. At most
+64 services are read concurrently; stdout/stderr from each container remain
+combined, as with `logs`.

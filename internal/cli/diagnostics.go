@@ -20,7 +20,7 @@ func argumentError(args []string, err error) error {
 			topic = args[0]
 		case "project":
 			topic = "project"
-			if len(args) > 1 && (args[1] == "validate" || args[1] == "up" || args[1] == "down" || args[1] == "ps") {
+			if len(args) > 1 && (args[1] == "logs" || args[1] == "validate" || args[1] == "up" || args[1] == "down" || args[1] == "ps") {
 				topic += " " + args[1]
 			}
 		case "system":

@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-17: Aggregate project service logs
+
+Added project logs with repeatable logical service selection, per-service tails
+and following through existing generation-fenced container readers. Selection
+pins full IDs once, detects missing/duplicate services and bounds readers to 64.
+Read-only execution avoids the deployment store lock. Bounded per-stream line
+buffers and serialized prefixed writes prevent mixed lines; failures cancel and
+join peers. Help, usage and bilingual overviews describe snapshot membership,
+ordering, partial lines and long-line splitting.
+
+Validation: selection/parser, fragmented/concurrent output, bounded long lines,
+writer-failure cancellation and reader joining regressions; scoped help parity.
+Complete formatting/unit/vet/race checks and native build passed. Real macOS
+regressions verify tails, service filtering, following, SIGTERM exit 143,
+concurrent project up and surviving workloads; native scoped help parity passed.
+
 ## 2026-10-16: Explain deployment previews with redacted field changes
 
 Project preview now reports deterministic reasons, sorted changed field names,
