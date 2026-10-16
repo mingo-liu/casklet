@@ -30,7 +30,8 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-客户端内置匹配的 Linux 引擎，无需 Go 或 Make。发布的程序未经 Developer ID
+安装包包含内置匹配 Linux 引擎的客户端、中英文 README、使用与开发指南、架构说明
+和许可证，无需 Go 或 Make。发布的程序未经 Developer ID
 签名或公证，通过浏览器下载后，macOS 可能要求在**系统设置 > 隐私与安全性**中批准运行。
 
 也可以安装 **Go 1.27.2+** 和 Make，在仓库目录中从源码构建：
