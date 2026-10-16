@@ -6,6 +6,28 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Explain deployment previews with redacted field changes
+
+Project preview now reports deterministic reasons, sorted changed field names,
+explicit recreation requirements and unavailable comparison history. Unselected
+drift is reportable during preview; applying it still requires explicit selection.
+Ownership, removed/duplicate services and reservation checks remain enforced.
+
+Successful up saves bounded private per-field digests, pinned to container IDs and
+configuration labels, after final identity checks. Comparison uses canonical
+parsed intent instead of image-inherited defaults. No raw configuration values
+or comparison digests enter preview output; no configuration values enter saved
+comparison history. Matching legacy up can backfill history; missing/stale history
+is explicitly unavailable. Preview does not save state, and down discards removed
+service comparisons. Resource ownership receipts retain their existing semantics.
+
+Validation: focused tests cover field changes, explicit/legacy recreation,
+provenance, failed-up history, down cleanup, invalid persisted comparisons and
+redaction. Real Linux/macOS tests verify preview leaves IDs/generations and state
+bytes unchanged, applying drift still needs selection, selected replacement works
+and legacy field details are not guessed. Formatting, unit/vet/race and native
+build checks passed; shared-VM integration and focused Mac regression passed.
+
 ## 2026-10-16: Retain structured container exit reasons
 
 Managed runtime completion now returns an observed reason and OOM flag separately

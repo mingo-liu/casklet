@@ -48,6 +48,7 @@ type ServiceConfig struct {
 
 type Service struct {
 	Config config.Config
+	Fields map[string]string
 
 	Key         string
 	Name        string

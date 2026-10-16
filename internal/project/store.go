@@ -15,12 +15,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// State contains resource identities only, never run arguments or environment.
+// State contains resource identities and comparison digests, never run arguments
+// or environment values.
 // Resource creation timestamps fence manual deletion/recreation of the same name.
 type State struct {
-	Version   int                 `json:"version"`
-	Name      string              `json:"name"`
-	Resources map[string]Resource `json:"resources"`
+	Services  map[string]ServiceReceipt `json:"services,omitempty"`
+	Version   int                       `json:"version"`
+	Name      string                    `json:"name"`
+	Resources map[string]Resource       `json:"resources"`
 }
 
 type Resource struct {
@@ -137,6 +139,9 @@ func (store *Store) Load() (State, error) {
 	if state.Version != 1 || state.Name != store.name || state.Resources == nil || len(state.Resources) > 64 {
 		return state, errors.New("invalid project state identity")
 	}
+	if err := validateServiceReceipts(state.Services); err != nil {
+		return state, err
+	}
 	for key, resource := range state.Resources {
 		if key != resource.Kind+":"+resource.Name || (resource.Kind != "network" && resource.Kind != "volume") || resource.CreatedAt.IsZero() || ValidateName(resource.Name) != nil || !strings.HasPrefix(resource.Name, "cp-"+store.name+"-") {
 			return state, errors.New("invalid project resource identity")
@@ -148,6 +153,9 @@ func (store *Store) Load() (State, error) {
 func (store *Store) Save(state State) error {
 	if state.Name != store.name || state.Version != 1 {
 		return errors.New("invalid project state identity")
+	}
+	if err := validateServiceReceipts(state.Services); err != nil {
+		return err
 	}
 	data, err := json.Marshal(state)
 	if err != nil {

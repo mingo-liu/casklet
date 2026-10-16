@@ -226,7 +226,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		if _, err := Parse(validationArgs); err != nil {
 			return plan, fmt.Errorf("invalid generated configuration for service %q", key)
 		}
-		plan.Services = append(plan.Services, project.Service{Config: request.Config, Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
+		plan.Services = append(plan.Services, project.Service{Config: request.Config, Fields: project.FieldDigests(request.Config, request.Entrypoint), Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
 			MatchLegacyFingerprint: func(saved string, aliases []string) bool {
 				// The store appends the container name if it is not already an
 				// explicit alias. It was absent from that legacy config hash.

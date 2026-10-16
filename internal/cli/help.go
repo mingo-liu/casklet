@@ -432,7 +432,7 @@ Examples:
 Options:
   --config   Local strict JSON project file, at most 1 MiB
   --recreate Replace a logical service even if its desired config matches (repeatable)
-  --dry-run  Preview create/reuse/start/recreate actions without deployment mutations
+  --dry-run  Preview actions, reasons and changed field names without deployment mutations
   --wait     Wait for all services to become ready within the whole deployment deadline
   --timeout  Each dependency health wait, or whole deployment with --wait (default: 30s)
              Greater than 0s up to 24h
@@ -449,7 +449,7 @@ Notes:
   Local files are expanded before VM operations; volume sources remain names.
   Reuses matching running services and starts matching stopped services.
   Reordering network aliases keeps service identity, including older deployments.
-  Changed unselected configs, removed services or unowned resources fail before changes.
+  Applying changed unselected configs, removed services or unowned resources fails before changes.
   --recreate checks sources/resources and stopped services before selected removal.
   Only identical selected running host bindings skip the first host check.
   Changed host address scopes are checked conservatively before removal.
@@ -458,7 +458,15 @@ Notes:
   Replacement interrupts selected services; there is no automatic old-container rollback.
   Partial failure leaves removed old services absent; retry up creates missing services.
   Refresh an image tag explicitly with image pull, then --recreate its service.
-  --dry-run never pulls images, starts workloads or releases ownership receipts.
+  --dry-run reports configuration drift even without --recreate; applying it still requires selection.
+  Reasons distinguish missing resources/services, matching config, stopped services,
+  changed configuration and explicit same-config recreation.
+  changed_fields lists sorted option names only; values and comparison digests are never shown.
+  requires_recreate marks drift that needs an explicit --recreate selection.
+  details_unavailable marks absent/stale comparison history; field differences are not guessed.
+  Successful up saves private field digests bound to each container ID/config label.
+  Existing matching services gain comparison history after a successful ordinary up.
+  --dry-run never pulls images, starts workloads or saves/releases project receipts.
   It checks identities/resources and saved reservations; runtime/source readiness is not tested.
   macOS preview requires a running VM; it may install/repair its engine and take local locks.
   Preview is a snapshot; availability can change before deployment.

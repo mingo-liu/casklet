@@ -115,6 +115,8 @@ casklet project ps demo
 casklet project down demo
 ```
 
+Preview deployment reasons and changed field names with `project up --config
+project.json --dry-run`; applying changed services requires `--recreate SERVICE`.
 Use the guide's `demo` configuration for this example. `project down` preserves
 data volumes; `--volumes` also removes project-owned volumes.
 

@@ -2,9 +2,13 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -84,6 +88,63 @@ func TestProjectStoreRejectsUnsafeOrMismatchedArtifacts(t *testing.T) {
 			contents, _ := os.ReadFile(target)
 			if string(contents) != "sentinel" {
 				t.Fatal("mutated symlink target")
+			}
+		})
+	}
+}
+
+func TestServiceComparisonReceiptsRoundTripAndRejectInvalidMetadata(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(context.Background(), root, "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := ServiceReceipt{ID: strings.Repeat("1", 32), Spec: strings.Repeat("a", 64), Fields: map[string]string{"env": strings.Repeat("b", 64)}}
+	state.Services = map[string]ServiceReceipt{"api": valid}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil || !reflect.DeepEqual(loaded.Services, state.Services) {
+		t.Fatalf("comparison roundtrip: %+v %v", loaded, err)
+	}
+	for _, scenario := range []string{"wrong-id", "wrong-spec", "unknown-field", "raw-value", "oversized-history"} {
+		t.Run(scenario, func(t *testing.T) {
+			bad := state
+			bad.Services = map[string]ServiceReceipt{"api": valid}
+			receipt := valid
+			switch scenario {
+			case "wrong-id":
+				receipt.ID = "other"
+			case "wrong-spec":
+				receipt.Spec = "short"
+			case "unknown-field":
+				receipt.Fields = map[string]string{"private-value": strings.Repeat("a", 64)}
+			case "raw-value":
+				receipt.Fields = map[string]string{"env": "private-value"}
+			case "oversized-history":
+				for i := range 65 {
+					bad.Services[fmt.Sprintf("service-%d", i)] = valid
+				}
+			}
+			bad.Services["api"] = receipt
+			if err := store.Save(bad); err == nil {
+				t.Fatal("saved invalid comparison metadata")
+			}
+			data, _ := json.Marshal(bad)
+			if err := os.WriteFile(filepath.Join(root, "demo.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Load(); err == nil {
+				t.Fatal("loaded invalid comparison metadata")
 			}
 		})
 	}
