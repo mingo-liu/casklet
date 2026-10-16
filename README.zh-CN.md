@@ -2,28 +2,23 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
-一个面向 macOS 的命令行容器工具，使用自行实现的 Go 容器引擎。`casklet`
-自动管理专用的 Lima Linux 虚拟机，容器通过 casklet 的命名空间、cgroups v2
-和进程监督机制在虚拟机中运行。无需 Docker Engine 或 containerd。
+面向 macOS 的命令行容器工具，使用自行实现的 Go 引擎。casklet 自动管理专用的
+Lima Linux 虚拟机，通过 Linux 命名空间、cgroups v2 和进程监督机制运行容器，
+无需 Docker Engine 或 containerd。
 
-支持的宿主平台：macOS 13.5 及以上版本，支持 Apple 芯片和 Intel，要求 Lima 2.0
-及以上版本。Linux 可执行文件是虚拟机内部组件，不作为独立的宿主平台产品提供支持。
-请运行可信工作负载；这个学习用途的运行时不为不可信代码提供安全保证。
+要求 **macOS 13.5+**（Apple 芯片或 Intel）和 **Lima 2.0+**。Linux 引擎仅作为
+虚拟机内部组件，不单独支持 Linux 宿主平台。这是一个学习用途的运行时，请仅运行
+可信工作负载；它不为不可信代码提供安全保证。
 
-使用 `casklet --version` 或 `casklet version --json` 可查看版本号、源码提交、修改状态、
-Go 版本、客户端平台及内嵌 Linux 引擎的 SHA-256。查询在本机完成，无需 Lima，也不启动
-虚拟机；反馈问题时请附上查询结果。
+## 安装
 
-## 快速开始
+```sh
+brew install lima
+```
 
-发布后的[版本页面](https://github.com/mingo-liu/casklet/releases)提供 Apple 芯片的
-`casklet_VERSION_darwin_arm64.tar.gz` 和 Intel 的
-`casklet_VERSION_darwin_amd64.tar.gz`。每个包包含客户端、匹配的 Linux 引擎、
-中英文 README 和许可证。通过 `brew install lima` 安装 Lima；使用下载的客户端
-无需安装 Go 或 Make。
-
-将对应架构的安装包及 `SHA256SUMS` 下载到空目录。把下面示例版本替换为实际下载的
-版本；Intel 用户将架构改为 `amd64`。校验显示 `OK` 后再继续安装：
+从[版本页面](https://github.com/mingo-liu/casklet/releases)将对应架构的安装包和
+`SHA256SUMS` 下载到空目录。将下面的版本号改为实际下载版本；Apple 芯片使用
+`arm64`，Intel 使用 `amd64`。校验显示 `OK` 后再继续安装：
 
 ```sh
 CASKLET_VERSION=v0.1.0
@@ -35,339 +30,128 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-更新下载的客户端时重复上述步骤。发布的程序未经 Developer ID 签名或公证；
-通过浏览器下载后首次打开，macOS 可能要求在“系统设置 > 隐私与安全性”中批准运行。
+客户端内置匹配的 Linux 引擎，无需 Go 或 Make。发布的程序未经 Developer ID
+签名或公证，通过浏览器下载后，macOS 可能要求在**系统设置 > 隐私与安全性**中批准运行。
 
-从源码构建需要 Go 1.27.2 及以上版本和 Make。请在仓库目录中执行：
+也可以安装 **Go 1.27.2+** 和 Make，在仓库目录中从源码构建：
 
 ```sh
-brew install lima
 make build
 sudo make install
+```
 
+无需安装也可直接运行 `./bin/casklet`。更新时重复所选安装方式即可；下次执行需要
+引擎的命令时，虚拟机中的引擎会自动更新，并保留容器和镜像。
+
+## 快速开始
+
+使用普通 Mac 用户运行 casklet，**不要加 sudo**：
+
+```sh
 casklet doctor
 casklet run -- /bin/sh -c 'hostname; ps; echo hello'
 casklet run -it -- /bin/sh
 ```
 
-也可以直接使用 `./bin/casklet`，无需安装。运行时使用普通 Mac 用户，不要加 `sudo`。
-首次执行需要容器引擎的命令时，会自动创建 `casklet-runtime` 虚拟机、安装随程序
-打包的引擎，并准备静态 BusyBox 文件系统。首次初始化需要联网，后续运行会使用已有
-虚拟机及其本地数据。指定容器命令时，选项放在 `--` 分隔符之前。仓库镜像提供默认
-启动命令，缓存未命中时会自动下载；使用镜像默认命令时不需要 `--`。
+首次执行需要引擎的命令时，会自动创建 `casklet-runtime` 虚拟机，准备引擎和
+BusyBox 文件系统。首次初始化需要联网，后续复用虚拟机及本地数据；初始化失败后，
+恢复网络并重试即可。
 
-如果首次依赖安装失败，恢复网络后重试 `casklet machine start` 或原命令即可。
-即使虚拟机已在运行，客户端也会继续完成初始化，保留现有工作负载和数据。
-
-更新源码后，再执行 `make build` 和 `sudo make install` 更新已安装的客户端。
-下次执行需要引擎的命令时，会自动更新其内置的虚拟机引擎，保留现有容器和镜像。
-
-开发、测试和日常使用共用同一个 `casklet-runtime` 虚拟机。可选的虚拟机开发工具及
-保留日常数据、独占运行的 Linux 测试流程见[开发指南](guides/development.md#internal-linux-engine-tests)（英文）。
-
-## 运行应用镜像
+运行应用，并将端口发布到 Mac 的本地回环地址：
 
 ```sh
-casklet run -d --name redis --image redis:8
-# Publish to localhost on your Mac:
-casklet run -d --name redis-local --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+casklet run -d --name redis --network bridge -p 127.0.0.1:6379:6379 --image redis:8
+casklet ps
+casklet logs --tail 20 redis
+casklet exec -it redis -- /bin/sh
 ```
 
-OCI/Docker 镜像包含应用程序、依赖和默认启动配置。虚拟机会选择匹配的 Linux 架构，
-校验并解包镜像各层，再通过 casklet 自身的引擎运行。缓存的镜像可以离线使用。
-使用 `--env` 提供应用配置、`--mount` 绑定持久化目录，在 `--` 后指定命令参数。
-这些参数会替换镜像的 `Cmd`，保留 `Entrypoint`；使用 `--entrypoint` 可以覆盖入口。
-支持匿名和私有仓库。使用 `casklet login --username USER --password-stdin REGISTRY`
-保存密码或访问令牌，凭据存放在 macOS 钥匙串中。`casklet logout REGISTRY`
-删除凭据并保留缓存镜像。登录只保存凭据，访问权限在拉取时验证。暂不支持 OCI 镜像的 rootless 运行。
-详细说明见[镜像指南](guides/usage.md#ocidocker-images)（英文）。
+使用 `exit` 退出 exec shell，Redis 会继续运行。OCI/Docker 镜像按本机对应的
+Linux 架构自动拉取，缓存后可离线使用；`image pull` 可刷新缓存的标签版本。
+显式命令参数放在 `--` 后；使用镜像默认启动命令时，可省略命令和分隔符。
 
-例如从受保护的文件读取令牌，避免将其写入命令参数：
+默认网络仅支持容器内回环通信。使用 `--network bridge` 联网和发布 TCP/UDP 端口，
+或使用命名网络实现隔离的服务发现。OCI 镜像暂不支持 rootless 运行。
+
+## 管理容器与数据
 
 ```sh
-casklet login --username alice --password-stdin ghcr.io < /path/to/registry-token
-casklet image pull ghcr.io/example/app:latest
-casklet logout ghcr.io
+casklet inspect redis
+casklet stats redis
+casklet stop redis
+casklet start redis
+casklet restart redis
+casklet stop redis
+casklet rm redis
 ```
 
-后台容器继承镜像的 `Healthcheck` 配置，可用 `--health-cmd` 覆盖探针，
-或用 `--no-healthcheck` 禁用。`ps` 和 `inspect` 单独显示健康状态；探针失败
-不会触发自动重启。时序与就绪语义见[健康检查指南](guides/usage.md#container-health-checks)（英文）。
-执行依赖命令前，可用 `casklet wait --healthy --timeout 30s redis` 等待健康检查通过。
-健康等待默认超时为 30s（`0s` 取消期限），超时返回 124，容器继续运行；
-所观察的执行停止或发生变更时，等待失败。
-
-应用配置也可以通过 `run --config redis.json` 和 `run`/`exec` 的可重复
-`--env-file application.env` 读取。JSON 使用长选项名称，命令行标量覆盖配置文件，
-显式 `--env` 覆盖环境变量文件。文件在 Mac 本地读取。JSON 中的相对 rootfs、
-bind 源和 env-file 路径以配置文件目录为基准；数据卷源仍是名称。完整执行配置
-（包括继承值和 exec 覆盖值）统一限制为 1 MiB 序列化 JSON；操作系统参数限制
-可能更低。详见
-[部署配置](guides/usage.md#repeatable-deployment-configuration)（英文）。
-
-使用不可修改的标签为后台容器分组，再筛选和批量管理。标签在重启后保留，
-独立于工作负载环境变量；`ps --json` 和 `inspect` 会显示标签。重复筛选条件使用 AND，
-`ps -a` 包含已停止的记录。`stop`/`rm` 支持多个引用或 `--filter`/`--all`，
-引用与选择条件不能混用。删除要求容器已经停止；部分失败返回 125，已完成的 ID
-保留在 stdout。详情见[标签与批量操作](guides/usage.md#labels-filters-and-batch-lifecycle-operations)（英文）。
+管理命令接受容器名称、完整 ID 或唯一 ID 前缀。停止、启动和重启会保留容器私有文件，
+`rm` 会删除这些文件；绑定挂载和命名数据卷独立于容器保留数据。Mac 用户主目录默认
+与虚拟机共享，其他目录需要显式添加共享。
 
 ```sh
-casklet run -d --name demo-worker --label project=demo -- /bin/sleep 300
-casklet ps -a --filter label=project=demo --json
-casklet stop --filter label=project=demo
-casklet rm --filter label=project=demo --filter status=exited
+casklet run --mount "type=bind,source=$PWD,target=/work" --workdir /work -- /bin/ls
+casklet volume create app-data
+casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
 ```
 
-## 拉取进度与镜像管理
-
-自动拉取和显式 `image pull` 都会在 stderr 显示逐层下载、校验和解包进度。
-`--progress=auto`（默认）在终端中动态刷新进度条，重定向时输出纯文本；`plain` 和
-`tty` 可以强制选择对应模式。镜像 ID、容器 ID 和应用输出保留在 stdout。
-缓存命中时显示 `Using cached image`；显式拉取未变化的镜像时显示 `Image is up to date`。
-
-新建的特权镜像容器通过 OverlayFS 共享不可变镜像，只保存各自的写入变化。
-后台容器的变化会在 start/restart 后保留；目录来源、rootless 运行和已有的完整复制
-容器继续使用原有复制行为。虚拟机内核必须支持 OverlayFS。不同镜像的拉取和导入可以
-并行准备，下载期间仍可操作其他缓存镜像；同一镜像引用的刷新按顺序执行。
-每次拉取最多使用三个下载 worker，不同镜像共享已验证的压缩层缓存。
-各层仍按原顺序应用，复用时显示 `Already exists`；不同镜像的解包文件尚未去重。
-镜像删除和废弃事务回收也在全局元数据锁之外清理大型目录，期间仍可操作其他镜像。
-活动租约、保留容器的引用和挂载目录继续阻止删除；中断的清理由后续导入、拉取或删除恢复。
-
-```sh
-casklet image pull redis:8
-casklet image pull --progress=plain redis:8
-casklet image ls
-casklet image ls --json
-```
-
-表格的 `IMAGE` 列显示镜像名称和标签，ID 显示前 12 位，大小使用十进制单位，
-例如 `202MB` 或 `1.85GB`。每个镜像引用单独显示一行，无引用的镜像显示 `<none>`。
-`--json` 保留完整 ID、规范化镜像引用和精确字节数。
-
-标签会继续使用缓存版本，直到执行 `image pull` 刷新。使用仓库摘要可以固定镜像来源。
-删除镜像时，将下面的 `IMAGE_ID` 替换为完整本地 ID 或 `image ls` 中的唯一十六进制前缀，
-例如列表中的 12 位 ID。前缀匹配多个镜像时会报错，请使用 `image ls --json` 中的更长 ID。
-需要先停止并删除所有引用该镜像的容器；删除命令接受本地 ID 或其前缀，不接受 `redis:8` 等仓库名称。
-
-```sh
-casklet image rm IMAGE_ID
-```
-
-标准 OCI layout tar 归档可以离线交付原生架构的 Linux 应用：
-
-```sh
-image_id=$(casklet image load < app.tar)
-casklet run --image "$image_id"
-casklet image save "$image_id" > app-copy.tar
-```
-
-加载会校验唯一的原生架构镜像，保留启动默认值和数值所有权，不访问仓库或改变
-缓存标签。保存会把文件系统合成为一个 OCI 层，再次加载后保持本地镜像 ID，
-但生成新的 manifest 摘要。保存接受 OCI 镜像（包括加载的镜像）；目录导入镜像
-因所有权和 capability 策略不同而不能保存。保存限制为包含 tar 元数据的 4 GiB 层；
-加载支持最多 32 GiB 归档，解包后每层最多 4 GiB、总计最多 16 GiB。
-不支持 Docker save 归档或外层压缩的 tar。参见[归档限制与语义](guides/usage.md#offline-oci-image-archives)。
-
-## 部署项目
-
-使用 `project up --config project.json` 部署多个服务，声明网络、数据卷及
-`started`/`healthy` 启动依赖。配置一致的服务会复用，未选中的服务配置变化会在部署修改前报错。
-调整网络别名顺序不会改变服务标识，升级后已有服务也可以继续复用。
-资源名称为 `cp-PROJECT-LOGICAL`，服务别名按网络隔离。参见
-[项目配置示例](guides/usage.md#project-deployment)。
+通过[项目配置](guides/usage.md#project-deployment)部署多个服务，声明网络、数据卷
+和启动依赖：
 
 ```sh
 casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo
-# 同时删除项目拥有的数据卷：
-casklet project down --volumes demo
 ```
 
-使用 `casklet project up --config project.json --recreate api --dry-run` 预览指定
-服务的重建，移除 `--dry-run` 后应用；重复 `--recreate` 可选择多个服务。未变化的运行
-服务和持久卷保留身份与数据，被选服务的私有根目录和旧日志会被替换。重建会停止选中
-服务，失败时不会自动恢复已删除的旧容器；重试会创建缺失服务。预览要求 VM 已运行，
-不会拉取镜像或更改部署。先用 `image pull` 刷新标签，再重建对应服务。
+此示例使用指南中的 `demo` 配置。`project down` 默认保留数据卷；添加 `--volumes`
+也会删除项目拥有的数据卷。
 
-`--wait` 要求所有配置健康检查的服务健康，其他服务处于运行状态。超时覆盖配置解析
-后的整个部署；超时后完成有时限的清理并返回 124。首次准备 VM 或拉取镜像时应适当
-增加超时时间。
+## 功能概览
 
-失败时仅清理本次新建且归属已验证的资源。未选中的已有服务和预先存在的数据卷会保留；`down` 默认
-保留数据卷。本地归属记录用于防止接管或删除无关的同名资源。
+完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。
 
-恢复或迁移数据后，使用 `"external-volumes": {"data": "restored-data"}` 声明，
-替代 `volumes` 中的 `data`；挂载仍引用逻辑名称 `data`。先恢复或创建 VM 内的数据卷。
-显式外部卷声明会释放这些名称已有的归属记录；回滚和 `down --volumes` 都会保留
-外部卷。项目管理卷与外部卷合计最多 16 个。
+| 类别 | 支持的功能 |
+| --- | --- |
+| 镜像 | [OCI/Docker 拉取与本地目录导入](guides/usage.md#ocidocker-images)、[私有仓库与 macOS 钥匙串凭据](guides/usage.md#registry-credentials)、[离线 OCI 归档](guides/usage.md#offline-oci-image-archives) |
+| 执行 | [CPU、内存、进程数和临时存储限制，环境变量、用户与只读根目录](guides/usage.md#resource-and-execution-options)、[交互式 run/exec](guides/usage.md#terminals-and-exec) |
+| 生命周期 | [日志与诊断](guides/usage.md#background-lifecycle-and-diagnostics)、[重启策略](guides/usage.md#automatic-restarts)、[健康检查](guides/usage.md#container-health-checks)、[实时资源监控](guides/usage.md#multi-container-resource-monitoring) |
+| 网络 | [TCP/UDP 端口发布](guides/usage.md#ipv4-networking)、[隔离的命名网络与服务发现](guides/usage.md#named-networks-and-service-discovery) |
+| 存储 | [绑定挂载与命名数据卷](guides/usage.md#persistent-data)、[数据卷备份与迁移](guides/usage.md#volume-backup-restore-and-migration)、[磁盘占用与镜像清理](guides/usage.md#disk-usage-and-cache-cleanup)、[下载缓存限制](guides/usage.md#shared-download-cache) |
+| 部署 | [JSON 配置与环境变量文件](guides/usage.md#repeatable-deployment-configuration)、[标签与批量操作](guides/usage.md#labels-filters-and-batch-lifecycle-operations)、[多服务项目与指定服务替换](guides/usage.md#project-deployment) |
+| 隔离 | [安全控制与 rootless 限制](guides/usage.md#security-and-rootless-execution) |
 
-## 常用操作
+## 虚拟机
 
-```sh
-casklet run -d --name worker --memory 128m --pids-limit 64 --cpus 0.5 \
-  -- /bin/sleep 300
-casklet ps
-casklet exec worker -- /bin/sh -c 'hostname; id'
-casklet exec -it worker -- /bin/sh
-casklet logs --tail 20 worker
-casklet inspect worker
-casklet stats worker
-casklet stop worker
-casklet start worker
-casklet restart worker
-casklet stop worker
-casklet rm worker
-```
-
-使用 `casklet run --tmp-size 32m --shm-size 96m --memory 256m -- /bin/sleep 300`
-设置临时存储容量。`/tmp` 默认 16 MiB，`/dev/shm` 默认 64 MiB；两者支持正数
-字节或二进制 `k`/`m`/`g` 单位，最大 `128g`，Linux 会向上按内存页取整。
-run JSON 和项目服务的 `run` 对象也支持同名字符串字段。启动、重启会保留容量，
-并清空其中的数据；`inspect` 显示应用默认值后的配置字节数。实际分配的页计入
-`--memory` 限制，容量不会预留内存。
-
-使用 `casklet stats --watch worker database` 持续监控多个容器，或用
-`casklet stats --watch --filter label=project=demo` 选择项目。添加 `--json`
-可逐行输出 JSON 帧；选择固定现有 ID，中断监控不会停止容器。
-参见[资源监控](guides/usage.md#multi-container-resource-monitoring)。
-
-
-`ps` 和 `stats` 表格中的容器 ID 显示前 12 位，JSON 输出和 `inspect` 保留完整 ID。
-管理命令支持精确名称、完整 ID 或任意长度的唯一十六进制 ID 前缀。精确名称优先；
-前缀匹配多个容器时会报错，需要使用更长的 ID 或精确名称。
-
-输入 `exit` 可以退出 exec 终端，容器主进程继续运行。停止后启动及重启都会保留容器
-内部文件；`rm` 会删除这些文件。绑定挂载的宿主机数据在删除容器后仍然保留。
-
-Mac 用户主目录会共享给虚拟机，用于导入 rootfs 和绑定挂载。容器及导入的镜像保存在
-虚拟机的 Linux 磁盘中。镜像缓存位于虚拟机内的 `/var/lib/casklet/images`，容器记录
-及独立文件系统位于 `/var/lib/casklet/containers`。发布的 TCP 和 UDP 端口会转发到
-Mac。默认网络仅启用回环接口；需要网络连接和端口发布时，使用 `--network bridge`。
+虚拟机默认配置为 **4 个 CPU、4 GiB 内存和 20 GiB 磁盘**，容器、镜像和数据卷
+保存在虚拟机磁盘中。查看状态或启停虚拟机：
 
 ```sh
-casklet run --mount "type=bind,source=$PWD,target=/work" --workdir /work \
-  -- /bin/sh -c 'ls'
 casklet machine status
 casklet machine stop
 casklet machine start
 ```
 
-命名网络可以隔离项目，并通过名称或别名解析后台容器：
+停止虚拟机会停止工作负载，但保留数据。启动时，采用 `always` 或满足条件的
+`unless-stopped` 策略的容器会自动恢复；其他保留的容器用 `casklet start NAME` 启动。
 
-```sh
-casklet network create demo
-casklet run -d --name demo-redis --network demo --network-alias redis --image redis:8
-casklet run --network demo --image redis:8 -- redis-cli -h redis ping
-casklet network ls
-casklet stop demo-redis
-casklet rm demo-redis
-casklet network rm demo
-```
-
-使用前先创建网络。网络名称、命名网络上的容器名称及别名必须是小写 DNS 标签。
-别名在各网络内独立，停止后保留的容器仍会占用别名。服务发现支持通过 UDP 和 TCP
-解析 IPv4，外部域名交给上游 DNS。命名网络之间、命名网络与原有 bridge 之间的
-直接通信会被阻止，发布的端口仍可从 Mac 访问。网络元数据在 VM 重启后保留；
-每次执行都会重新创建接口和分配地址。详见[命名网络指南](guides/usage.md#named-networks-and-service-discovery)（英文）。
-
-停止虚拟机会停止其中的工作负载，但保留其数据。启动虚拟机后，采用 `always`
-或满足条件的 `unless-stopped` 策略的容器会自动恢复；其他保留的容器可以用
-`casklet start NAME` 再次启动。
-
-虚拟机默认配置为 4 个 CPU、4 GiB 内存和 20 GiB 磁盘。首次使用前，可以自定义资源
-配置并添加共享目录：
-
-```sh
-casklet machine init --cpus 2 --memory 2 --disk 20 --mount /Volumes/Projects
-```
-
-已有虚拟机需先停机再调整资源。省略的资源保持原配置，磁盘只能扩容。下次启动时
-会应用配置并扩展原磁盘，保留容器、镜像、数据卷、共享目录和其他设置。
-`machine status` 显示配置的资源。
-
-```sh
-casklet machine stop
-casklet machine resize --cpus 6 --memory 8 --disk 40
-casklet machine start
-```
-
-命名数据卷将数据保存在 VM 磁盘上，独立于容器：
-
-```sh
-casklet volume create app-data
-casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
-casklet volume ls
-```
-
-新卷为空且属于 root，容器删除后数据仍保留，目前不支持用户命名空间。
-移除所有引用该卷的容器后，`casklet volume rm app-data` 才能删除卷和数据。
-
-停止使用卷的工作负载后，可用 `casklet volume export app-data > app-data.tar` 备份，
-再用 `casklet volume restore app-restored < app-data.tar` 恢复到新卷。tar 流也可迁移到
-另一台 Mac。限制与一致性说明见[卷备份指南](guides/usage.md#volume-backup-restore-and-migration)（英文）。
-
-查看 VM 磁盘占用，预览或清理未使用的缓存镜像：
-
-```sh
-casklet system df
-casklet image prune --dry-run
-casklet image prune
-```
-
-清理包括未使用的带标签镜像，保留容器与数据卷，并跳过存在活动租约或被保留容器引用的镜像。
-同时清理未被拉取操作使用的压缩层缓存。`--dry-run` 保留镜像与压缩层，只输出可清理的镜像 ID。
-`system df` 用 `images` 展示解包镜像占用，用 `image-cache` 单独展示下载存储占用。
-
-可独立管理压缩层下载缓存，保留镜像和容器：
-
-```sh
-casklet image cache ls --json
-casklet image cache prune --dry-run
-casklet image cache prune
-casklet image cache limit 1g
-```
-
-默认最多保留 2 GiB 压缩数据；`limit 0` 关闭自动淘汰。设置保存在虚拟机中，修改容量和
-拉取结束时会按最近使用时间淘汰空闲层。活动租约可能暂时超额；下载临时文件、锁文件
-开销和解包镜像不计入此限制。拉取仍需要足够的下载与解包空间。清理预览只报告可回收的
-实际分配字节数及层、临时文件数量，不删除数据。
-
-镜像的 `StopSignal` 会保留用于后台容器关闭，可用 `--stop-signal SIGQUIT` 覆盖。
-停止和重启会先发送该 Linux 信号，超过配置的停止宽限时间后强制终止。
-前台收到的外部信号仍按原信号转发。
-
-后台容器支持自动重启：
-
-```sh
-casklet run -d --name service --restart unless-stopped -- /bin/sleep 300
-casklet run -d --name retry-job --restart on-failure:3 -- /bin/sh -c 'exit 1'
-```
-
-默认为 `no`。`on-failure[:1-1000]` 重试非零或未知的退出状态；`always` 与
-`unless-stopped` 也会在正常退出后重启，并在 VM 启动后恢复。手动停止会暂停自动重启，
-直到再次 start/restart；`always` 在下一次 VM 启动时恢复，`unless-stopped` 则保持停止。
-重试采用从 1 秒到 30 秒的退避。自动重启的端口转发依赖 Lima，无法实时预检 Mac
-端口占用。重试计数与检查字段的详情见使用指南。
+首次使用前，可通过 `machine init` 自定义资源和共享目录；已有虚拟机可停机后通过
+`machine resize` 调整资源，磁盘只能扩容。详见[虚拟机配置](guides/usage.md#macos-execution-environment)。
 
 ## 文档与开发
 
-- [使用指南](guides/usage.md)：文件、镜像、网络、安全与生命周期管理（英文）。
-- [开发指南](guides/development.md)：构建、测试与故障排查（英文）。
-- [架构说明](ARCHITECTURE.md)：宿主机与虚拟机的边界及资源归属（英文）。
-- `casklet help`：命令概览；`casklet COMMAND --help`：具体命令的语法、选项与示例。
+- `casklet help` 列出命令；`casklet COMMAND --help` 查看选项与示例。
+- [使用指南](guides/usage.md)：详细用法与限制（英文）。
+- [开发指南](guides/development.md)：构建、测试、故障排查与发布（英文）。
+- [架构说明](ARCHITECTURE.md)：模块边界与资源归属（英文）。
 
 ```sh
-make fmt-check test vet test-race vuln
-make test-macos # 在运行时虚拟机中执行真实命令；需要时会自动创建虚拟机。
+make fmt-check test vet test-race
+make test-macos
 ```
 
-内部 Linux 引擎保留了需要特权的集成测试，在共享的 `casklet-runtime` 虚拟机中独占运行，
-测试期间会保留日常数据。维护者可以在 Apple silicon 和 Intel 专用 Mac runner 上启用
-定时、手动触发的 macOS 端到端 CI；每次运行结束都会删除临时虚拟机。正式发布前，
-两种架构的实机验收及托管检查必须全部通过，才能发布已有草稿；缺少配置会阻止发布。
-参见[发布门禁](guides/development.md#release-publication-gate)（英文）及
-[runner 配置](guides/development.md#dedicated-macos-end-to-end-ci)（英文）。
-生成的二进制文件、文件系统模板、运行时状态以及本地 `docs/` 笔记不纳入版本控制。
+特权 Linux 测试共用 `casklet-runtime` 虚拟机，必须遵循
+[保留日常数据的独占测试流程](guides/development.md#internal-linux-engine-tests)。
+反馈问题时请附上 `casklet version --json` 输出；查询无需 Lima 或运行中的虚拟机。
+
 许可证见 [LICENSE](LICENSE)。

@@ -6,6 +6,20 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Condense the bilingual project overview
+
+Both READMEs now focus on project scope, installation, first use, container/data
+lifecycle, and VM behavior. A matching capability index links to existing usage
+sections instead of repeating implementation details, option limits, and advanced
+workflows. Platform prerequisites, security limitations, upgrade behavior, and
+data-retention semantics remain aligned. Release CI details stay in the
+development guide.
+
+Validation: all ten shell blocks match across translations and pass shell syntax
+checks; local links and heading anchors resolve, and link targets match between
+languages. Diff whitespace checks pass. Documentation only; runtime tests were
+not repeated.
+
 ## 2026-10-16: Check supervisor-loss cleanup at the owning lifecycle stage
 
 `TestBackgroundSupervisorDeathRecovery` now checks removal of the recorded
