@@ -110,6 +110,7 @@ Deploy multiple services from a [project configuration](guides/usage.md#project-
 with networks, volumes, and startup dependencies:
 
 ```sh
+casklet project validate --config project.json
 casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo

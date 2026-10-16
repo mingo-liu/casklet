@@ -418,6 +418,12 @@ address translation and forwarding path.
 
 ## Project orchestration
 
+`project validate` stops after the existing host-side project parser and emits
+only project/service identifiers. It never constructs guest calls, reads registry
+credentials, opens project state/locks, or initializes a machine. Structural and
+local env-file checks match `up`; runtime availability and deployed-state checks
+remain owned by deployment.
+
 The CLI expands a project file on the invoking host before VM operations. `project`
 validates the bounded dependency DAG and owns operation sequencing, resource
 receipts and rollback. It calls the existing executable's command paths, preserving

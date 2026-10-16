@@ -1079,6 +1079,24 @@ for the source image configuration semantics.
 
 ## Project deployment
 
+Validate a project file locally before deployment:
+
+```sh
+casklet project validate --config project.json
+casklet project validate --config project.json --json
+```
+
+Validation uses the same parser as `up`: strict fields, dependency graph, resource
+references, port/alias conflicts, option limits, and local env-files. Relative
+paths use the project-file directory. It needs no Lima, VM, network, Keychain or
+project state and writes no files. Success returns 0; invalid input returns 125
+with focused help. JSON contains `valid`, `name` and dependency-ordered `services`
+keys; neither output mode includes run configuration or environment values.
+Validation does not check source availability, occupied host ports, image defaults,
+guest resource existence/ownership, or deployment drift; those remain deployment
+checks. A valid file is not a guarantee that its workloads can start.
+
+
 A local project JSON file groups detached services, named networks, data volumes
 and startup dependencies. `project up` validates the entire file and expands local
 paths/env-files before making VM changes. Networks default to `["default"]`; declare
@@ -1112,6 +1130,7 @@ volume references inside each service use the declared logical names.
 ```
 
 ```sh
+casklet project validate --config project.json
 casklet project up --config project.json --wait --timeout 30s
 casklet project ps --json demo
 casklet stats --watch --filter label=io.casklet.project.name=demo
