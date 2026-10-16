@@ -733,6 +733,22 @@ If log storage is temporarily busy beyond its bounded lock wait, the affected
 chunk is discarded, `log_truncated` is set, and capture resumes for later output.
 The completion error reports that loss. Logs and metadata for other containers
 can continue during rotation or deletion.
+
+`inspect` and `ps -a --json` retain `exit_reason` and `oom_killed` separately
+from `exit_code`. Reasons are `exited` (a completed command, including nonzero
+exits), `oom_killed` (observed kernel OOM), `timeout` (the configured execution
+deadline), `stopped` (a forwarded stop signal), `startup_failed`, `runtime_error`,
+and `supervisor_lost` (command status unknown). Exit codes alone are never used
+to infer OOM or timeout: a command that exits 137 or 124 still reports `exited`.
+Observed OOM takes precedence over another termination reason. `oom_killed: false`
+means no OOM was observed; missing/empty reasons in older records are unavailable,
+and active executions have no completed reason. Existing exit-code semantics and
+restart policies are unchanged.
+
+Start/restart clears the current result and preserves it in `previous_exit` and
+the original execution's completion receipt. Receipt recovery preserves both
+fields. Cleanup failures remain independent in `cleanup_failures`.
+
 `inspect` reports environment names without values. `stats` returns one sample;
 CPU 100% means one busy core, and unavailable metrics are `N/A` or JSON `null`.
 

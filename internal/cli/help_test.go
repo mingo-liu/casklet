@@ -192,3 +192,15 @@ func TestExecutionHelpDescribesMergedConfigurationSize(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectHelpDescribesDurableExitReasons(t *testing.T) {
+	text, err := platformUsage("inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"exit_reason", "oom_killed", "previous_exit", "supervisor_lost", "older records"} {
+		if !strings.Contains(text, field) {
+			t.Fatalf("missing %q in inspect help", field)
+		}
+	}
+}

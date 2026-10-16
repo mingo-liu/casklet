@@ -34,6 +34,8 @@ var (
 // Record is the durable lifecycle state of a detached container.
 // Configurations and logs are stored separately to keep listing bounded.
 type Record struct {
+	ExitReason      string            `json:"exit_reason,omitempty"`
+	OOMKilled       bool              `json:"oom_killed"`
 	Labels          map[string]string `json:"labels,omitempty"`
 	Health          *Health           `json:"health,omitempty"`
 	RestartBootID   string            `json:"restart_boot_id,omitempty"`
@@ -127,7 +129,13 @@ func validateRecord(record Record, id string) error {
 	if record.ExitCode != nil && (*record.ExitCode < 0 || *record.ExitCode > 255) {
 		return errors.New("invalid container exit code")
 	}
+	if err := validateExitStatus(record.ExitReason, record.OOMKilled); err != nil {
+		return err
+	}
 	if record.PreviousExit != nil {
+		if err := validateExitStatus(record.PreviousExit.ExitReason, record.PreviousExit.OOMKilled); err != nil {
+			return err
+		}
 		if err := validateCleanupFailures(record.PreviousExit.CleanupFailures); err != nil {
 			return err
 		}
@@ -153,6 +161,8 @@ func validateCleanupFailures(stages []string) error {
 
 // ExecutionResult is a retained completion receipt for one container execution.
 type ExecutionResult struct {
+	ExitReason      string     `json:"exit_reason,omitempty"`
+	OOMKilled       bool       `json:"oom_killed"`
 	CleanupFailures []string   `json:"cleanup_failures,omitempty"`
 	Generation      uint64     `json:"generation"`
 	StartedAt       *time.Time `json:"started_at"`
@@ -161,5 +171,17 @@ type ExecutionResult struct {
 }
 
 func executionResult(record Record) ExecutionResult {
-	return ExecutionResult{CleanupFailures: append([]string(nil), record.CleanupFailures...), Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
+	return ExecutionResult{ExitReason: record.ExitReason, OOMKilled: record.OOMKilled, CleanupFailures: append([]string(nil), record.CleanupFailures...), Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
+}
+
+func validateExitStatus(reason string, oom bool) error {
+	switch reason {
+	case "", "exited", "oom_killed", "timeout", "stopped", "startup_failed", "runtime_error", "supervisor_lost":
+	default:
+		return errors.New("invalid recorded exit reason")
+	}
+	if oom != (reason == "oom_killed") {
+		return errors.New("inconsistent recorded OOM result")
+	}
+	return nil
 }

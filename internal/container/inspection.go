@@ -16,6 +16,8 @@ var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
 type Inspection struct {
+	ExitReason         string            `json:"exit_reason"`
+	OOMKilled          bool              `json:"oom_killed"`
 	Labels             map[string]string `json:"labels"`
 	Health             *Health           `json:"health"`
 	StoppedByUser      bool              `json:"stopped_by_user"`
@@ -95,6 +97,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	logSize, logFiles := cfg.LogRetention()
 	tmpSize, shmSize := cfg.TmpfsSizes()
 	return Inspection{
+		ExitReason: record.ExitReason, OOMKilled: record.OOMKilled,
 		Labels:        maps.Clone(record.Labels),
 		Health:        record.effectiveHealth(),
 		StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount, RestartAt: record.RestartAt,

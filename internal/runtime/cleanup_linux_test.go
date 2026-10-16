@@ -15,6 +15,8 @@ import (
 type cleanupGroup struct {
 	killErr, emptyErr, closeErr error
 	closed                      bool
+	oom                         bool
+	oomErr                      error
 }
 
 func (*cleanupGroup) Path() string  { return "/test/cgroup" }
@@ -25,8 +27,8 @@ func (g *cleanupGroup) WaitEmpty(ctx context.Context) error {
 	}
 	return g.emptyErr
 }
-func (*cleanupGroup) OOMKilled() (bool, error) { return false, nil }
-func (g *cleanupGroup) Close() error           { g.closed = true; return g.closeErr }
+func (g *cleanupGroup) OOMKilled() (bool, error) { return g.oom, g.oomErr }
+func (g *cleanupGroup) Close() error             { g.closed = true; return g.closeErr }
 
 func TestWorkloadCleanupRecordsFailuresAndPreservesRecoveryState(t *testing.T) {
 	failure := errors.New("cleanup failed")
@@ -51,7 +53,7 @@ func TestWorkloadCleanupRecordsFailuresAndPreservesRecoveryState(t *testing.T) {
 			if err := run.record(tt.group.Path()); err != nil {
 				t.Fatal(err)
 			}
-			err = cleanupWorkload(&tt.group, run, io.Discard)
+			_, err = cleanupWorkload(&tt.group, run, io.Discard)
 			if !reflect.DeepEqual(CleanupStages(err), tt.stages) || run.keep != tt.keep || tt.group.closed != tt.closed {
 				t.Fatalf("cleanup=%v keep=%v closed=%v", err, run.keep, tt.group.closed)
 			}
@@ -67,6 +69,29 @@ func TestWorkloadCleanupRecordsFailuresAndPreservesRecoveryState(t *testing.T) {
 			}
 			if !tt.keep && !errors.Is(statErr, os.ErrNotExist) {
 				t.Fatal("successful cleanup left a receipt", statErr)
+			}
+		})
+	}
+}
+
+func TestWorkloadCleanupRetainsObservedOOMBeforeCgroupRemoval(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		group cleanupGroup
+		want  bool
+	}{
+		{"oom", cleanupGroup{oom: true}, true},
+		{"oom-and-cleanup-failure", cleanupGroup{oom: true, closeErr: errors.New("remove failed")}, true},
+		{"unknown", cleanupGroup{oom: true, oomErr: errors.New("read failed")}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run, err := createRunAt(context.Background(), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			oom, _ := cleanupWorkload(&tc.group, run, io.Discard)
+			if oom != tc.want || !tc.group.closed {
+				t.Fatalf("oom=%v closed=%v", oom, tc.group.closed)
 			}
 		})
 	}

@@ -184,6 +184,14 @@ the follow cursor, preserving rotation and generation fencing.
 Active supervisors from an older engine keep using the metadata lock; readers
 honor that protocol until completion or a new supervisor enables log locking.
 
+Managed runtime completion returns an observed exit reason and OOM flag
+independently of the command exit code and cleanup errors. The supervisor saves
+them in the terminal record and generation receipt. OOM is sampled before cgroup
+removal; timeout and forwarded-stop reasons are recorded at their owning runtime
+branches rather than inferred from numeric exit codes. Supervisor-loss recovery
+records an explicit unknown-command-status reason. Restart clears current results
+and retains the previous generation's reason. Empty legacy fields stay compatible.
+
 Runtime cleanup returns typed failures without changing the command's exit
 code. The supervisor stores sanitized `cleanup_failures` stages in both the
 record and its execution receipt, and detailed diagnostics in the private error
