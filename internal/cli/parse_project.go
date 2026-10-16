@@ -20,7 +20,7 @@ import (
 
 func parseProject(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("project requires up, down, or ps")
+		return r, errors.New("project requires validate, up, down, or ps")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -32,6 +32,9 @@ func parseProject(r Request, args []string) (Request, error) {
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	switch args[0] {
+	case "validate":
+		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
+		fs.BoolVar(&r.JSON, "json", false, "print a validation summary")
 	case "up":
 		fs.BoolVar(&r.DryRun, "dry-run", false, "preview deployment changes")
 		fs.Func("recreate", "replace a logical service (repeatable)", func(value string) error { r.Recreate = append(r.Recreate, value); return nil })
@@ -52,11 +55,11 @@ func parseProject(r Request, args []string) (Request, error) {
 		}
 		return r, err
 	}
-	if args[0] == "up" {
+	if args[0] == "up" || args[0] == "validate" {
 		if fs.NArg() != 0 || r.ProjectConfig == "" {
-			return r, errors.New("project up requires --config FILE and no operands")
+			return r, fmt.Errorf("project %s requires --config FILE and no operands", args[0])
 		}
-		if r.WaitTimeout <= 0 || r.WaitTimeout > 24*time.Hour {
+		if args[0] == "up" && (r.WaitTimeout <= 0 || r.WaitTimeout > 24*time.Hour) {
 			return r, errors.New("project --timeout must be greater than zero and at most 24h")
 		}
 		plan, err := readProjectPlan(r.ProjectConfig)

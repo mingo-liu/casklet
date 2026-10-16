@@ -67,6 +67,23 @@ func executeProject(r Request, stdout, stderr io.Writer) int {
 }
 
 func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Writer) (int, error) {
+	// Validation is host-local: do not open project state or construct a guest call.
+	if r.Action == "project-validate" {
+		if r.JSON {
+			services := make([]string, 0, len(r.Project.Services))
+			for _, service := range r.Project.Services {
+				services = append(services, service.Key)
+			}
+			summary := struct {
+				Valid    bool     `json:"valid"`
+				Name     string   `json:"name"`
+				Services []string `json:"services"`
+			}{true, r.Project.Name, services}
+			return 0, json.NewEncoder(stdout).Encode(summary)
+		}
+		_, err := fmt.Fprintf(stdout, "Project %s is valid (%d services).\n", r.Project.Name, len(r.Project.Services))
+		return 0, err
+	}
 	parent := ctx
 	var deadline time.Time
 	if r.Action == "project-up" && r.Wait {
