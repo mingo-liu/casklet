@@ -417,6 +417,7 @@ Commands:
   up    Deploy services from a local JSON project file
   down  Stop and remove managed containers and owned networks
   ps    Show all retained containers belonging to a project
+  logs  Read or follow output grouped by logical service
 
 Notes:
   Project names and logical service/resource names use lowercase DNS labels.
@@ -519,6 +520,25 @@ Notes:
 Examples:
   casklet project down demo
   casklet project down --volumes demo
+`,
+	"project logs": `Usage: casklet project logs [--tail N] [-f|--follow] [--service KEY ...] NAME
+
+Options:
+  --tail N       Trailing lines per service, 0-1000000 (default: all retained output)
+  -f, --follow   Follow the selected executions until they finish
+  --service KEY  Select a logical service; repeatable (default: all project services)
+  -h, --help     Show this help
+
+Notes:
+  Prefixes output with [service]. Output order across services is unspecified.
+  Pins existing full container IDs once; replacement containers are not followed.
+  No matches succeed without output; explicitly missing or duplicate services fail.
+  Does not hold the deployment lock. Stream failure cancels the other readers.
+  Unterminated output is flushed at EOF; lines over 32 KiB split into prefixed chunks.
+
+Examples:
+  casklet project logs --tail 20 demo
+  casklet project logs --follow --service api demo
 `,
 	"project ps": `Usage: casklet project ps [--json] NAME
 

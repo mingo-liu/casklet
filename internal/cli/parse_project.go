@@ -20,7 +20,7 @@ import (
 
 func parseProject(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("project requires validate, up, down, or ps")
+		return r, errors.New("project requires validate, up, down, ps, or logs")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -44,6 +44,17 @@ func parseProject(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
 	case "down":
 		fs.BoolVar(&r.RemoveVolumes, "volumes", false, "also remove project-owned data volumes")
+	case "logs":
+		fs.IntVar(&r.Tail, "tail", -1, "trailing lines per service")
+		fs.BoolVar(&r.Follow, "follow", false, "follow selected executions")
+		fs.BoolVar(&r.Follow, "f", false, "follow selected executions")
+		fs.Func("service", "logical service name (repeatable)", func(value string) error {
+			if err := project.ValidateName(value); err != nil {
+				return err
+			}
+			r.Services = append(r.Services, value)
+			return nil
+		})
 	case "ps":
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
 	default:
@@ -68,6 +79,13 @@ func parseProject(r Request, args []string) (Request, error) {
 			_, err = project.Select(plan, r.Recreate)
 		}
 		return r, err
+	}
+	if args[0] == "logs" {
+		explicit := false
+		fs.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "tail" })
+		if (explicit && r.Tail < 0) || r.Tail > 1000000 {
+			return r, errors.New("--tail must be between 0 and 1000000")
+		}
 	}
 	if fs.NArg() != 1 {
 		return r, errors.New("project command requires exactly one project name; flags precede it")

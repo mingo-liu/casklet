@@ -111,6 +111,8 @@ casklet project down demo
 实际替换已变化的服务仍需指定 `--recreate SERVICE`。此示例使用指南中的 `demo` 配置。`project down` 默认保留数据卷；添加 `--volumes`
 也会删除项目拥有的数据卷。
 
+使用 `project logs --follow demo` 查看带服务名前缀的聚合日志。
+
 ## 功能概览
 
 完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。

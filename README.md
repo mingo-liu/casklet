@@ -121,6 +121,8 @@ project.json --dry-run`; applying changed services requires `--recreate SERVICE`
 Use the guide's `demo` configuration for this example. `project down` preserves
 data volumes; `--volumes` also removes project-owned volumes.
 
+Use `project logs --follow demo` for service-prefixed output.
+
 ## Capabilities
 
 See the [usage guide](guides/usage.md) for full examples, defaults, and limits.

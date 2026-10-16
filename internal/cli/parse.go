@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	Services      []string
 	Recreate      []string
 	Project       project.Plan
 	ProjectConfig string
