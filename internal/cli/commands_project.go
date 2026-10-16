@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -140,7 +141,17 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 				return 0, json.NewEncoder(stdout).Encode(runner.Preview)
 			}
 			for _, change := range runner.Preview {
-				if _, err := fmt.Fprintf(stdout, "%s %s %s\n", change.Action, change.Kind, change.Name); err != nil {
+				details := []string{change.Reason}
+				if len(change.ChangedFields) > 0 {
+					details = append(details, "changed fields: "+strings.Join(change.ChangedFields, ", "))
+				}
+				if change.DetailsUnavailable {
+					details = append(details, "field details unavailable")
+				}
+				if change.RequiresRecreate {
+					details = append(details, "requires --recreate "+change.Name)
+				}
+				if _, err := fmt.Fprintf(stdout, "%s %s %s (%s)\n", change.Action, change.Kind, change.Name, strings.Join(details, "; ")); err != nil {
 					return 125, err
 				}
 			}

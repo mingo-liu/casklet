@@ -1224,7 +1224,7 @@ Identity includes effective run defaults, expanded env values, source paths and
 entrypoint selection. Network alias order does not affect identity; adding or
 removing aliases still changes it. Existing services with older ordered-alias
 hashes are verified against their saved alias order and can be reused after an
-upgrade without recreation. Environment/config changes on unselected services fail
+upgrade without recreation. Applying environment/config changes on unselected services fails
 before deployment mutations; explicitly recreate changed services or use `down`. Image tags retain
 their cached version; pin a digest for reproducibility. A retained service keeps its
 immutable image across reuse. Services removed from the file require `down` before deploying
@@ -1278,9 +1278,33 @@ selected services are created, and selected services still present are replaced.
 Ordinary `up` can also create missing services if remaining configs match.
 
 `--dry-run` prints deterministic `create network/volume NAME` and
-`create/reuse/start/recreate service KEY` lines. With `--json`, each action has
-`kind`, `name`, `action` and the old full `id` where applicable. Preview validates
-selection, ownership, drift, external volumes and saved alias/port reservations,
+`create/reuse/start/recreate service KEY` lines with a reason and changed configuration field
+names. With `--json`, actions retain `kind`, `name`, `action` and the old full `id`
+where applicable, adding `reason`, optional sorted `changed_fields`,
+`requires_recreate` and `details_unavailable`.
+
+Reasons are `resource_missing`, `service_missing`, `configuration_matches`,
+`service_stopped`, `configuration_changed` and `explicit_recreate`. A changed
+service can be previewed without selecting it; `requires_recreate: true` means
+applying it still needs `--recreate SERVICE`. Actual unselected drift remains an
+error before mutations. Explicit selection with matching configuration reports
+`explicit_recreate`, including when a tag was refreshed outside preview.
+
+Successful `up` privately saves per-field comparison digests bound to the container
+ID and its configuration label. Preview lists changed field names only, never
+old/new values or digests, including for environment, command, labels and health
+probes. It compares parsed intent rather than image-inherited defaults. Older
+or stale baselines set `details_unavailable: true`; missing field history is not
+guessed. A successful unchanged `up` backfills history for existing deployments.
+Preview never writes this history. It does not detect registry tag changes.
+
+For example, changing a service's environment and memory can report:
+
+```text
+recreate service api (configuration_changed; changed fields: env, memory; requires --recreate api)
+```
+
+Preview validates selection, ownership, external volumes and saved alias/port reservations,
 but does not pull images, validate source readiness, wait for health, create
 resources, start/stop/remove workloads, or release/save ownership receipts.
 macOS preview rejects missing/stopped VMs; run `casklet machine start` explicitly

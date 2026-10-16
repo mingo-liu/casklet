@@ -107,7 +107,8 @@ casklet project ps demo
 casklet project down demo
 ```
 
-此示例使用指南中的 `demo` 配置。`project down` 默认保留数据卷；添加 `--volumes`
+通过 `project up --config project.json --dry-run` 查看部署原因和变化字段；
+实际替换已变化的服务仍需指定 `--recreate SERVICE`。此示例使用指南中的 `demo` 配置。`project down` 默认保留数据卷；添加 `--volumes`
 也会删除项目拥有的数据卷。
 
 ## 功能概览

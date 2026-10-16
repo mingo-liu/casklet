@@ -204,3 +204,14 @@ func TestInspectHelpDescribesDurableExitReasons(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectPreviewHelpDescribesRedactedChangesAndExplicitApply(t *testing.T) {
+	for _, macOS := range []bool{false, true} {
+		text, err := scopedUsage("project up", macOS)
+		for _, field := range []string{"changed_fields", "requires_recreate", "details_unavailable", "comparison digests are never shown", "applying it still requires selection"} {
+			if err != nil || !strings.Contains(text, field) {
+				t.Fatalf("missing preview guidance %q: %v", field, err)
+			}
+		}
+	}
+}

@@ -74,10 +74,14 @@ func sameResource(a, b Resource) bool {
 }
 
 type Change struct {
-	Kind   string `json:"kind"`
-	Name   string `json:"name"`
-	Action string `json:"action"`
-	ID     string `json:"id,omitempty"`
+	Reason             string   `json:"reason"`
+	ChangedFields      []string `json:"changed_fields,omitempty"`
+	RequiresRecreate   bool     `json:"requires_recreate,omitempty"`
+	DetailsUnavailable bool     `json:"details_unavailable,omitempty"`
+	Kind               string   `json:"kind"`
+	Name               string   `json:"name"`
+	Action             string   `json:"action"`
+	ID                 string   `json:"id,omitempty"`
 }
 
 type UpOptions struct {
@@ -120,6 +124,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		return nil, err
 	}
 	existing := map[string]container.Record{}
+	matching := map[string]bool{}
 	desired := map[string]bool{}
 	for _, service := range plan.Services {
 		desired[service.Key] = true
@@ -128,19 +133,22 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key || record.Labels[LabelSpec] == "" {
 					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
 				}
-				if record.Labels[LabelSpec] != service.Fingerprint && !selected[service.Key] {
-					if service.MatchLegacyFingerprint == nil {
-						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
-					}
+				matches := record.Labels[LabelSpec] == service.Fingerprint
+				if !matches && service.MatchLegacyFingerprint != nil {
 					data, err := runner.Call(ctx, "inspect", record.ID)
 					if err != nil {
 						return nil, err
 					}
 					var inspection container.Inspection
-					if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || !service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases) {
-						return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
+					if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || inspection.Generation != record.Generation {
+						return nil, fmt.Errorf("service %q changed during configuration preflight", service.Key)
 					}
+					matches = service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases)
 				}
+				if !matches && !selected[service.Key] && !options.DryRun {
+					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
+				}
+				matching[service.Key] = matches
 				existing[service.Key] = record
 			}
 		}
@@ -199,25 +207,24 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		return nil, errors.New("project resource history is full; use project down before recreating")
 	}
 	if len(selected) > 0 || options.DryRun {
-		if err := runner.checkConflicts(ctx, plan, all, existing, selected); err != nil {
+		planned := maps.Clone(selected)
+		if options.DryRun {
+			for key := range existing {
+				if !matching[key] {
+					planned[key] = true
+				}
+			}
+		}
+		if err := runner.checkConflicts(ctx, plan, all, existing, planned); err != nil {
 			return nil, err
 		}
 	}
 	for _, resource := range needed {
-		runner.Preview = append(runner.Preview, Change{Kind: resource.Kind, Name: resource.Name, Action: "create"})
+		runner.Preview = append(runner.Preview, Change{Kind: resource.Kind, Name: resource.Name, Action: "create", Reason: "resource_missing"})
 	}
 	for _, service := range plan.Services {
-		action, id := "create", ""
-		if record, found := existing[service.Key]; found {
-			id = record.ID
-			action = "reuse"
-			if selected[service.Key] {
-				action = "recreate"
-			} else if record.State != container.StateRunning {
-				action = "start"
-			}
-		}
-		runner.Preview = append(runner.Preview, Change{Kind: "service", Name: service.Key, Action: action, ID: id})
+		record, found := existing[service.Key]
+		runner.Preview = append(runner.Preview, runner.serviceChange(service, record, found, matching[service.Key], selected[service.Key]))
 	}
 	if options.DryRun {
 		return nil, ctx.Err()
@@ -428,6 +435,9 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	if len(records) != len(plan.Services) {
 		return nil, errors.New("project services changed during startup")
 	}
+	if err = runner.rememberServices(plan, records); err != nil {
+		return nil, err
+	}
 	return records, nil
 }
 
@@ -489,6 +499,8 @@ func (runner *Runner) Down(ctx context.Context, name string, removeVolumes bool)
 			continue
 		}
 		if _, err := runner.Call(ctx, "rm", record.ID); err != nil {
+			failures = append(failures, err)
+		} else if err := runner.forgetService(record); err != nil {
 			failures = append(failures, err)
 		}
 	}

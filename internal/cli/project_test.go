@@ -214,8 +214,14 @@ func TestProjectLegacyAliasFingerprintReusesServicesAndRejectsDrift(t *testing.T
 				}
 			}
 			runner := project.Runner{Call: call, State: project.State{Version: 1, Name: "demo",
-				Resources: map[string]project.Resource{"network:cp-demo-default": network}}, Save: func(project.State) error {
-				t.Fatal("reused resources must not rewrite ownership state")
+				Resources: map[string]project.Resource{"network:cp-demo-default": network}}, Save: func(state project.State) error {
+				if test.wantError || !reflect.DeepEqual(state.Resources, map[string]project.Resource{"network:cp-demo-default": network}) {
+					t.Fatal("comparison baseline changed resource ownership")
+				}
+				receipt := state.Services["app"]
+				if receipt.ID != record.ID || receipt.Spec != savedFingerprint || !reflect.DeepEqual(receipt.Fields, request.Project.Services[0].Fields) {
+					t.Fatalf("incorrect legacy comparison baseline: %+v", receipt)
+				}
 				return nil
 			}}
 			records, err := runner.Up(context.Background(), request.Project, project.UpOptions{Timeout: time.Second})

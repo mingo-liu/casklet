@@ -432,8 +432,10 @@ generation fencing and managed lifecycle policy. No long-lived project daemon is
 introduced. Config hashes include effective defaults and expanded environment,
 with network aliases sorted only for hashing. Legacy hash reuse inspects the
 pinned container ID and verifies the desired configuration against its saved alias
-order before any deployment mutations. Ownership state stores only network/volume
-names and creation times. Immutable container labels carry the project/service/config
+order before any deployment mutations. Ownership receipts store only network/volume
+names and creation times. Private service comparison receipts additionally store
+per-field digests bound to container IDs and their configuration labels; no
+configuration values are retained. Immutable container labels carry the project/service/config
 identity and one startup token. Explicit external-volume mappings resolve logical
 mount sources to existing guest names before config hashing. Their existence is
 preflighted with other resources, and they never enter creation/rollback ownership
@@ -458,9 +460,15 @@ private roots/logs are discarded. Removed old records are not automatically
 restored after partial failure. Existing transaction-token rollback removes only
 new records/resources; retry creates absent services.
 
-`project up --dry-run` shares inventory/drift/ownership checks and reports
-resource creation plus service create/reuse/start/recreate actions. It never
-pulls images, validates source readiness, runs health waits, changes container or
+`project up --dry-run` shares inventory/ownership checks and reports resource
+creation plus service create/reuse/start/recreate actions, reasons, and sorted
+changed field names. Unselected drift is reportable during preview but still
+requires explicit recreation when applied. Only ID/spec-matched private baselines
+supply field differences; legacy/stale baselines are explicitly unavailable.
+Parsed-intent digests avoid comparing explicit options against image-inherited
+defaults. Successful up publishes comparison history after final identity checks;
+preview does not write it, and down discards comparisons for removed services.
+Preview never pulls images, validates source readiness, runs health waits, changes container or
 resource deployment state, or saves/releases ownership receipts. Mac inventory
 calls require an already-running VM under the machine lock; stopped/missing VMs
 fail with an explicit start hint. Engine installation/repair on a running VM and
