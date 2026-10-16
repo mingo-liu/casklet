@@ -40,13 +40,18 @@ func parseVersion(r Request, args []string) (Request, error) {
 	return r, nil
 }
 
-func executeVersion(r Request, stdout, stderr io.Writer) int {
+func currentVersionInfo() versionInfo {
 	info := versionInfo{Info: buildinfo.Current()}
 	if hash, err := platformEngineSHA256(); err != nil {
 		info.EngineError = err.Error()
 	} else if hash != "" {
 		info.Engine = &engineVersionInfo{OS: "linux", Arch: runtime.GOARCH, SHA256: hash}
 	}
+	return info
+}
+
+func executeVersion(r Request, stdout, stderr io.Writer) int {
+	info := currentVersionInfo()
 	var err error
 	if r.JSON {
 		err = json.NewEncoder(stdout).Encode(info)

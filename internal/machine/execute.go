@@ -45,7 +45,7 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 	if len(result) == 0 || (result[0] != "run" && result[0] != "doctor" && result[0] != "__project-preflight") {
 		return result, nil
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
+	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
 	for i := 1; i < len(result); i++ {
 		arg := result[i]
 		if arg == "--" {

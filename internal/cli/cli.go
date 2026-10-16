@@ -50,17 +50,17 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return code
 	}
 	if err := prepareLaunch(args, r); err != nil {
+		if r.Action == "doctor" && r.JSON {
+			report := engineDoctorReport()
+			report.check("engine_preparation", err)
+			return writeDoctor(report, r.JSON, stdout, stderr)
+		}
 		fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	switch r.Action {
 	case "doctor":
-		if err := containerruntime.Check(r.Config.RootFS); err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", err)
-			return 125
-		}
-		fmt.Fprintln(stdout, "All required runtime capabilities are available.")
-		return 0
+		return executeEngineDoctor(r, stdout, stderr)
 	case "login", "logout":
 		fmt.Fprintln(stderr, "casklet: registry login and logout are available only on macOS")
 		return 125

@@ -22,7 +22,7 @@ func visitHostResources(args []string, visit func(string, string) error) error {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {
 		return nil
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
+	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
 	for i := 1; i < len(args); i++ {
 		if args[i] == "--" {
 			break

@@ -123,6 +123,8 @@ data volumes; `--volumes` also removes project-owned volumes.
 
 Use `project logs --follow demo` for service-prefixed output.
 
+Use `doctor --json` for versions, VM state, disk space and diagnostic checks.
+
 ## Capabilities
 
 See the [usage guide](guides/usage.md) for full examples, defaults, and limits.

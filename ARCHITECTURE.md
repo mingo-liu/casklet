@@ -38,6 +38,14 @@ The reuse check verifies the installed executable's SHA-256 as well as the
 version marker, so executable corruption triggers atomic reinstallation before
 guest engine execution.
 
+Doctor keeps normal preparation semantics. The CLI captures one bounded guest
+JSON report, combines its runtime/filesystem checks and engine identity with
+local build/embedded-engine identity and read-only Lima version/VM metadata,
+then renders text or a schema-versioned JSON object. Setup logs remain on stderr;
+failed host/guest preparation is retained as a named failed check. VM metadata
+omits host shares and SSH configuration. `/var/lib` filesystem capacity uses
+statfs without traversing container roots; low-space status is advisory.
+
 VM running state and guest provisioning readiness are independent. The host
 checks the completion marker and required dependencies before engine setup;
 incomplete setup uses the same embedded shell script as Lima's initial provision.
