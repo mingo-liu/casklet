@@ -32,7 +32,9 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-The client bundles its matching Linux engine; Go and Make are unnecessary.
+The archive includes the client with its matching Linux engine, both READMEs,
+usage/development guides, architecture documentation, and the license. Go and Make
+are unnecessary.
 Release binaries are not Developer ID signed or notarized, so macOS may require
 approval in **System Settings > Privacy & Security** after a browser download.
 

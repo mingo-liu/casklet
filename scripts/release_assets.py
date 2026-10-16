@@ -5,11 +5,13 @@ import hashlib
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.parse import unquote, urlsplit
 
 
 def validate_version(version):
@@ -40,6 +42,23 @@ def verify(directory, version):
     return [*archives, manifest]
 
 
+def validate_documentation_links(package):
+    """Require inline local Markdown links to resolve inside the download."""
+    members = {entry.name for entry in package.getmembers() if entry.isfile()}
+    for name in sorted(members):
+        if not name.endswith(".md"):
+            continue
+        text = package.extractfile(name).read().decode("utf-8")
+        for link in re.findall(r"\[[^\]]*\]\(([^\s)]+)\)", text):
+            target = urlsplit(link)
+            if target.scheme or target.netloc:
+                continue
+            path = unquote(target.path)
+            destination = posixpath.normpath(posixpath.join(posixpath.dirname(name), path)) if path else name
+            if destination not in members:
+                raise ValueError(f"broken packaged documentation link in {name}: {link}")
+
+
 def build(project, directory, version, arch):
     validate_version(version)
     if sys.platform != "darwin" or platform.machine() != {"arm64": "arm64", "amd64": "x86_64"}[arch]:
@@ -51,7 +70,9 @@ def build(project, directory, version, arch):
     directory.mkdir(parents=True, exist_ok=True)
     archive = directory / archive_name(version, arch)
     members = {"casklet": project / "bin/casklet"}
-    members.update({name: project / name for name in ("LICENSE", "README.md", "README.zh-CN.md")})
+    documents = ("LICENSE", "README.md", "README.zh-CN.md", "ARCHITECTURE.md",
+                 "guides/usage.md", "guides/development.md")
+    members.update({name: project / name for name in documents})
     with tarfile.open(archive, "w:gz") as package:
         for name, path in members.items():
             package.add(path, arcname=name, recursive=False)
@@ -60,6 +81,7 @@ def build(project, directory, version, arch):
         entries = package.getmembers()
         if sorted(entry.name for entry in entries) != sorted(members) or not all(entry.isfile() for entry in entries):
             raise ValueError("unexpected release archive contents")
+        validate_documentation_links(package)
         if package.getmember("casklet").mode & 0o111 == 0:
             raise ValueError("release executable is not executable")
         binary = Path(temporary) / "casklet"

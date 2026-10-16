@@ -245,8 +245,11 @@ changing `draft` to `false`. A moved tag or replaced draft requires a new run.
 The hosted checks also build native downloadable packages on `macos-15` (arm64)
 and `macos-15-intel` (amd64). Trusted packaging controls build the selected source
 and version, then execute the archived client offline to verify its version,
-commit and bundled Linux engine bytes. Archives contain `casklet`, `LICENSE` and
-both READMEs; no local configuration or standalone guest engine is shipped.
+commit and bundled Linux engine bytes. Archives contain `casklet`, `LICENSE`, both READMEs, `ARCHITECTURE.md`, and the
+usage/development guides under `guides/`, preserving their relative links for
+offline reading. Packaging checks every inline local Markdown link against the
+archive members. Local configuration, private notes, and standalone guest engines
+are excluded.
 Each architecture's transfer checksum is checked before generating `SHA256SUMS`.
 Only the final job uploads both archives and that manifest to the existing draft,
 replacing same-named assets on a retry. It rechecks draft/tag identity again after
