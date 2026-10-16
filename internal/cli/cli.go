@@ -43,7 +43,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	if r.Action == "version" {
 		return executeVersion(r, stdout, stderr)
 	}
-	if r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
+	if r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
 		return executeProject(r, stdout, stderr)
 	}
 	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {

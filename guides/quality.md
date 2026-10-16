@@ -28,6 +28,22 @@ bytes unchanged, applying drift still needs selection, selected replacement work
 and legacy field details are not guessed. Formatting, unit/vet/race and native
 build checks passed; shared-VM integration and focused Mac regression passed.
 
+## 2026-10-16: Validate project configuration offline
+
+Added `project validate --config FILE [--json]` using the existing deployment
+parser, including strict fields, dependencies, resource scoping, conflicts, option
+limits and config-relative env-files. Execution returns before guest-call or
+project-store setup. Summaries expose project/service keys only; invalid input
+keeps the existing sanitized parser diagnostics and scoped help. Both help forms,
+the usage guide, architecture and bilingual quick starts describe the boundaries.
+
+Validation: regressions reproduced the missing command before implementation.
+Host-local tests run with Lima absent and machine state unavailable, verify no
+state is created, validate dependency order and suppress environment/command
+values. Invalid fields, dependencies, duplicate keys, missing env-files and flags
+fail with focused help. Formatting, complete Go unit/vet/race checks and native
+macOS command validation pass; CI also validates both guest architectures.
+
 ## 2026-10-16: Retain structured container exit reasons
 
 Managed runtime completion now returns an observed reason and OOM flag separately

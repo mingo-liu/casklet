@@ -101,6 +101,7 @@ casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo
 和启动依赖：
 
 ```sh
+casklet project validate --config project.json
 casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo

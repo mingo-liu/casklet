@@ -413,6 +413,7 @@ Examples:
 	"project": `Usage: casklet project COMMAND
 
 Commands:
+  validate  Check a local project file without Lima or a VM
   up    Deploy services from a local JSON project file
   down  Stop and remove managed containers and owned networks
   ps    Show all retained containers belonging to a project
@@ -426,6 +427,25 @@ Examples:
   casklet project up --config project.json
   casklet project ps demo
   casklet project down demo
+`,
+	"project validate": `Usage: casklet project validate --config FILE [--json]
+
+Options:
+  --config  Local strict JSON project file, at most 1 MiB
+  --json    Print valid, project name and dependency-ordered service keys as JSON
+
+Notes:
+  Uses the same configuration parsing as project up, including env-files.
+  Checks fields, dependencies, resource references, port/alias conflicts and limits.
+  Relative rootfs, bind sources, and env-files use the project file directory.
+  No Lima, VM, registry, Keychain or project-state access; no files are written.
+  Does not check runtime/source readiness, occupied ports, guest resources or drift.
+  Output excludes environment values, commands and expanded run configuration.
+  Success returns 0; invalid configuration returns 125 with scoped help.
+
+Examples:
+  casklet project validate --config project.json
+  casklet project validate --config project.json --json
 `,
 	"project up": `Usage: casklet project up --config FILE [--recreate SERVICE]... [--dry-run] [--wait] [--timeout DURATION] [--json]
 
