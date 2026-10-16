@@ -113,6 +113,8 @@ casklet project down demo
 
 使用 `project logs --follow demo` 查看带服务名前缀的聚合日志。
 
+使用 `doctor --json` 查看版本、VM 状态、磁盘余量和诊断检查。
+
 ## 功能概览
 
 完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。

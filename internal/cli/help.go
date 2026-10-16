@@ -928,7 +928,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 			notes = "  Uses builtin:busybox by default. Explicit rootfs paths refer to Mac directories.\n  Creates or starts the product VM and checks runtime capabilities inside it.\n  Run as your regular Mac user; install Lima with brew install lima.\n"
 			examples = "  casklet doctor\n  casklet doctor --rootfs ./rootfs/busybox\n"
 		}
-		return "Usage: " + syntax + "\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n\nNotes:\n" + notes + "\nExamples:\n" + examples, nil
+		return "Usage: " + syntax + " [--json]\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n  --json    Print one diagnostic JSON object (schema_version: 1)\n\nNotes:\n" + notes + "  Reports client/engine versions, VM metadata and guest data filesystem bytes.\n  Checks include template/isolation/cgroups and filesystem availability.\n  Failed checks return 125; low space is advisory. Progress uses stderr.\n\nExamples:\n" + examples + "  " + strings.Replace(syntax, " [--rootfs DIRECTORY]", "", 1) + " --json\n", nil
 	}
 	if text, exists := commandHelp[topic]; exists {
 		switch topic {

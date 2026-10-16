@@ -25,6 +25,9 @@ func parseRun(r Request, args []string) (Request, error) {
 		fs.String("env-file", "", "environment assignments file")
 		fs.String("config", "", "JSON run configuration")
 	}
+	if r.Action == "doctor" {
+		fs.BoolVar(&r.JSON, "json", false, "print a diagnostic report")
+	}
 	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
 	if r.Action == "run" {

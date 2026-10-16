@@ -1377,3 +1377,26 @@ fail. Stream or output failure cancels and joins other readers. Partial final
 lines flush at EOF; lines exceeding 32 KiB split into prefixed chunks. At most
 64 services are read concurrently; stdout/stderr from each container remain
 combined, as with `logs`.
+
+### Doctor reports
+
+```sh
+casklet doctor
+casklet doctor --json
+```
+
+Doctor retains automatic VM/template preparation. Its text and JSON reports
+include client and installed engine build identities, bundled engine identity,
+Lima version, current VM state/configured resources, and the guest data
+filesystem's total/free/available bytes. `checks` records named success/error
+results; `ok` summarizes them and `schema_version` is 1. The internal Linux
+engine reports its own identity, runtime check and filesystem only. Runtime
+checks cover the rootfs template, delegated cgroups and namespace/security probe.
+Filesystem capacity uses `/var/lib`, without walking workload trees.
+
+Failed checks return 125 while still emitting a report, including host preparation
+failures on macOS. Argument errors use normal stderr diagnostics. Low space
+(below 1 GiB or 10% available) is advisory. Setup progress stays on stderr;
+JSON stdout contains exactly one object. VM metadata excludes host shares and
+SSH paths. Error messages can contain local paths; review before sharing a report.
+`version --json` remains the offline query that does not start a VM.

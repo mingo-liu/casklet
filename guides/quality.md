@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-17: Report structured doctor diagnostics
+
+Doctor retains automatic VM preparation and now emits text or schema-versioned
+JSON with client/engine identities, bounded Lima metadata, configured resources,
+guest data filesystem bytes and named runtime/filesystem/preparation checks.
+Failed checks return 125 with a report; low space remains advisory. Progress stays
+on stderr and local shares/SSH paths are excluded from VM metadata. The Linux
+engine reports guest information only. Filesystem sampling does not walk state.
+
+Validation: report success/failure/low-space and writer failures, no-Lima JSON,
+option/path ordering, read-only machine metadata and scoped help regressions.
+Complete formatting/unit/vet/race checks, native build and real macOS JSON/text,
+missing-Lima, invalid-template and help tests passed. Linux arm64 unit/vet and
+CLI/machine race checks passed; the full privileged suite passed 162 tests via
+the shared-VM preservation wrapper, with only the optional pinned legacy case
+unconfigured. Final doctor/launch regressions passed after the metadata change.
+The destructive macOS provisioning fault test remained gated to a disposable VM.
+
 ## 2026-10-17: Aggregate project service logs
 
 Added project logs with repeatable logical service selection, per-service tails
