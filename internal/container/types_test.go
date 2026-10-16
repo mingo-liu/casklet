@@ -41,6 +41,10 @@ func TestRecordValidation(t *testing.T) {
 	}
 	for _, mutate := range []func(*Record){
 		func(r *Record) { r.Version = 2 },
+		func(r *Record) { r.ExitReason = "private /path" },
+		func(r *Record) { r.OOMKilled = true },
+		func(r *Record) { r.ExitReason = "oom_killed" },
+		func(r *Record) { r.PreviousExit = &ExecutionResult{ExitReason: "invalid"} },
 		func(r *Record) { r.BootID = "not-a-UUID" },
 		func(r *Record) { r.BootID = "ABCDEF01-2345-6789-abcd-ef0123456789" },
 		func(r *Record) { r.ID = "../escape" },

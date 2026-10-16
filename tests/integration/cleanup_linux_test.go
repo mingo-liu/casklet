@@ -45,7 +45,7 @@ func testCleanupFailureRetainsExitStatus(t *testing.T, exitCode int) {
 		t.Fatal("recovery receipt removed:", err)
 	}
 	inspection := inspectBackground(t, id)
-	if len(inspection.CleanupFailures) != 1 || inspection.CleanupFailures[0] != "cgroup.remove" || inspection.ExitCode == nil || *inspection.ExitCode != exitCode {
+	if inspection.ExitReason != "exited" || inspection.OOMKilled || len(inspection.CleanupFailures) != 1 || inspection.CleanupFailures[0] != "cgroup.remove" || inspection.ExitCode == nil || *inspection.ExitCode != exitCode {
 		t.Fatalf("inspection did not separate command and cleanup results: %+v", inspection)
 	}
 	code, out, diagnostic := backgroundCLI(t, "wait", id)

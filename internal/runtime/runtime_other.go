@@ -39,6 +39,6 @@ func Init() int {
 
 func Probe() int { return Init() }
 
-func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, error) {
-	return Run(cfg, stdin, stdout, stderr)
+func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, ExitStatus, error) {
+	return 125, ExitStatus{}, Check("")
 }

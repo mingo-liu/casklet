@@ -17,7 +17,7 @@ type workloadCleanup interface {
 	Close() error
 }
 
-func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer) error {
+func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), stopGrace)
 	defer cancel()
 	var result error
@@ -26,9 +26,13 @@ func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer)
 	}
 	if err := group.WaitEmpty(ctx); err != nil {
 		run.keep = true
-		return errors.Join(result, cleanupFailure("cgroup.empty", err))
+		return false, errors.Join(result, cleanupFailure("cgroup.empty", err))
 	}
-	if oom, err := group.OOMKilled(); err == nil && oom {
+	oom, oomErr := group.OOMKilled()
+	if oomErr != nil {
+		oom = false
+	}
+	if oom {
 		fmt.Fprintln(stderr, "casklet: container exceeded its memory limit (OOM)")
 	}
 	if err := group.Close(); err != nil {
@@ -36,5 +40,5 @@ func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer)
 		run.keep = true
 		result = errors.Join(result, cleanupFailure("cgroup.remove", err))
 	}
-	return result
+	return oom, result
 }

@@ -66,7 +66,7 @@ func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
 	record := createTestRecord(t, store, "receipt-recovery")
 	code := 11
 	now := time.Now().UTC()
-	saved := ExecutionResult{CleanupFailures: []string{"cgroup.remove"}, Generation: 0, StartedAt: &now, FinishedAt: &now, ExitCode: &code}
+	saved := ExecutionResult{ExitReason: "oom_killed", OOMKilled: true, CleanupFailures: []string{"cgroup.remove"}, Generation: 0, StartedAt: &now, FinishedAt: &now, ExitCode: &code}
 	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), saved, maxRecordBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := store.Get(context.Background(), record.ID)
-	if err != nil || recovered.ExitCode == nil || *recovered.ExitCode != 11 || recovered.State != StateExited || len(recovered.CleanupFailures) != 1 || recovered.CleanupFailures[0] != "cgroup.remove" {
+	if err != nil || recovered.ExitReason != "oom_killed" || !recovered.OOMKilled || recovered.ExitCode == nil || *recovered.ExitCode != 11 || recovered.State != StateExited || len(recovered.CleanupFailures) != 1 || recovered.CleanupFailures[0] != "cgroup.remove" {
 		t.Fatalf("receipt recovery=%+v error=%v", recovered, err)
 	}
 }
@@ -171,5 +171,42 @@ func TestRetainedRootFSRemovalDoesNotFollowSymlinks(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("removal traversed retained symlink")
+	}
+}
+
+func TestExitReasonSurvivesRestartAndReceiptRecovery(t *testing.T) {
+	store := testStore(t)
+	record := createTestRecord(t, store, "exit-reason")
+	code := 137
+	if err := store.Complete(context.Background(), record.ID, 0, func(r *Record) {
+		now := time.Now().UTC()
+		r.State, r.StartedAt, r.FinishedAt, r.ExitCode = StateExited, &now, &now, &code
+		r.ExitReason, r.OOMKilled = "oom_killed", true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operation, err := store.AcquireOperation(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer operation.Close()
+	next, err := store.BeginExecution(context.Background(), record.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ExitReason != "" || next.OOMKilled || next.PreviousExit == nil || next.PreviousExit.ExitReason != "oom_killed" || !next.PreviousExit.OOMKilled {
+		t.Fatalf("incorrect reset or previous status: %+v", next)
+	}
+	result, done, err := store.Completion(context.Background(), record.ID, 0)
+	if err != nil || !done || result.ExitReason != "oom_killed" || !result.OOMKilled || result.ExitCode == nil || *result.ExitCode != 137 {
+		t.Fatalf("completion=%+v done=%v err=%v", result, done, err)
+	}
+	// Reject invalid persisted reasons instead of displaying arbitrary metadata.
+	result.ExitReason = "invalid"
+	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), result, maxRecordBytes); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Completion(context.Background(), record.ID, 0); err == nil {
+		t.Fatal("accepted invalid exit receipt")
 	}
 }

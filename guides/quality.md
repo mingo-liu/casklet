@@ -6,6 +6,30 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-16: Retain structured container exit reasons
+
+Managed runtime completion now returns an observed reason and OOM flag separately
+from command status and cleanup errors. Detached records, public inspection,
+JSON listings and generation receipts preserve both. Reasons distinguish completed
+commands, kernel OOM, configured timeout, forwarded stop, startup/runtime failure
+and supervisor loss. Numeric exits 124/137 do not imply timeout/OOM. Kernel OOM
+is sampled before cgroup deletion and takes precedence when observed.
+
+Restart clears the current result and retains it in `previous_exit`; interrupted
+completion restores reason/flag from the existing receipt. Legacy records with
+no reason remain valid. Bounded reason validation rejects unknown/inconsistent
+metadata. Existing command statuses, cleanup failures and restart policies retain
+their semantics. Help, usage, architecture and both READMEs describe the fields.
+
+Validation: macOS arm64 formatting, complete unit/vet/race checks and native
+client/embedded-engine build passed. Linux arm64 unit/vet and runtime/container
+race checks passed. All 160 privileged Linux integration tests passed through the
+shared-VM preservation wrapper; final reason, supervisor-loss and cleanup tests
+passed again after the last schema/test changes. Four real macOS tests passed,
+including reason/history transport, lifecycle retention, wait/listing and exact
+foreground streams. The optional pinned legacy-supervisor case was not configured;
+Intel native execution is covered by hosted CI where applicable.
+
 ## 2026-10-16: Condense the bilingual project overview
 
 Both READMEs now focus on project scope, installation, first use, container/data

@@ -139,6 +139,7 @@ func rollbackStart(store *Store, id string, generation uint64, cause error) erro
 		if !record.Terminal() {
 			finished := time.Now().UTC()
 			record.State, record.FinishedAt, record.Error = StateFailed, &finished, cause.Error()
+			record.ExitReason = "startup_failed"
 		}
 	}))
 }
@@ -191,6 +192,7 @@ func refreshRecord(ctx context.Context, store *Store, record Record, launched bo
 		finished := time.Now().UTC()
 		record.State, record.FinishedAt = StateFailed, &finished
 		record.Error = "supervisor exited without recording completion"
+		record.ExitReason = "supervisor_lost"
 		// systemd's status belongs to the supervisor, not the user command.
 		// Leave the command exit code unknown after an abrupt supervisor loss.
 	})

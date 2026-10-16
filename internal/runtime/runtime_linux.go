@@ -34,16 +34,25 @@ func RunWithObserver(cfg config.Config, stdin, stdout, stderr *os.File, observer
 
 // RunWithExec publishes pinned resources for managed container execution.
 func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor) (int, error) {
-	return runWithExec(cfg, stdin, stdout, stderr, observer, executor, "", nil)
+	return runWithExec(cfg, stdin, stdout, stderr, observer, executor, "", nil, &ExitStatus{})
 }
 
 // RunManaged retains the private rootfs while isolating transient run resources.
-func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, error) {
-	return runWithExec(cfg, stdin, stdout, stderr, observer, executor, retainedRoot, stoppingTimeout)
+func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, ExitStatus, error) {
+	status := ExitStatus{}
+	code, err := runWithExec(cfg, stdin, stdout, stderr, observer, executor, retainedRoot, stoppingTimeout, &status)
+	return code, status, err
 }
 
-func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (code int, runErr error) {
+func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration, status *ExitStatus) (code int, runErr error) {
 	code = 125
+	started := false
+	defer func() {
+		if !started && runErr == nil && code >= 128 && status.ExitReason == "" {
+			status.ExitReason = "stopped"
+		}
+		status.finish(started)
+	}()
 	if err := cfg.ValidateExecution(); err != nil {
 		return code, err
 	}
@@ -197,7 +206,9 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		return code, err
 	}
 	defer func() {
-		runErr = errors.Join(runErr, cleanupWorkload(group, run, stderr))
+		oom, err := cleanupWorkload(group, run, stderr)
+		status.OOMKilled = oom
+		runErr = errors.Join(runErr, err)
 	}()
 	if err := run.record(group.Path()); err != nil {
 		return code, err
@@ -359,7 +370,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			killTimer.Stop()
 		}
 	}()
-	authorized, started, mainExited, stopping, timedOut := false, false, false, false, false
+	authorized, mainExited, stopping, timedOut := false, false, false, false
 	var terminalErrors <-chan error
 	recordStarted := func() error {
 		if started {
@@ -474,13 +485,22 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 				return 124, nil
 			}
 			if mainExited {
+				if status.ExitReason == "" {
+					status.ExitReason = "exited"
+				}
 				return commandExit, nil
 			}
 			if !started && !stopping {
 				return 125, fmt.Errorf("init exited before starting the command: %v", err)
 			}
+			if status.ExitReason == "" {
+				status.ExitReason = "exited"
+			}
 			return processExitCode(cmd.ProcessState), nil
 		case sig := <-signals:
+			if !mainExited && status.ExitReason == "" {
+				status.ExitReason = "stopped"
+			}
 			if !authorized {
 				// No command can have started before authorization. Abort setup
 				// promptly rather than leaving init blocked on its start message.
@@ -507,6 +527,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		case err := <-terminalErrors:
 			return 125, fmt.Errorf("terminal I/O: %w", err)
 		case <-timeout:
+			status.ExitReason = "timeout"
 			timedOut, stopping, timeout = true, true, nil
 			_ = cmd.Process.Signal(syscall.SIGTERM)
 			killTimer = time.NewTimer(cfg.StoppingTimeout())

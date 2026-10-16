@@ -29,6 +29,8 @@ type backgroundRecord struct {
 	FinishedAt      *time.Time `json:"finished_at"`
 	ExitCode        *int       `json:"exit_code"`
 	Error           string     `json:"error"`
+	ExitReason      string     `json:"exit_reason"`
+	OOMKilled       bool       `json:"oom_killed"`
 	Command         []string   `json:"command"`
 	LogTruncated    bool       `json:"log_truncated"`
 	RunPath         string     `json:"run_path"`
@@ -550,7 +552,7 @@ func TestBackgroundSupervisorDeathRecovery(t *testing.T) {
 		t.Fatalf("kill supervisor: %v: %s", err, output)
 	}
 	record := waitBackground(t, id, "failed")
-	if record.ExitCode != nil || record.Error == "" || record.FinishedAt == nil {
+	if record.ExitReason != "supervisor_lost" || record.OOMKilled || record.ExitCode != nil || record.Error == "" || record.FinishedAt == nil {
 		t.Fatalf("lost supervisor did not retain an unknown command exit: %+v", record)
 	}
 	assertBackgroundUnitStopped(t, id)

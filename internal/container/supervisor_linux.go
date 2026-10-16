@@ -47,10 +47,14 @@ func Supervisor(id string, generations ...uint64) int {
 	if err != nil || record.Terminal() || record.Generation != generation {
 		return 125
 	}
-	code, runErr, truncated := supervise(store, id, generation)
+	code, runErr, truncated, outcome := supervise(store, id, generation)
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := store.Complete(ctx, id, generation, func(record *Record) {
+		record.ExitReason, record.OOMKilled = outcome.ExitReason, outcome.OOMKilled
+		if record.ExitReason == "" {
+			record.ExitReason = "startup_failed"
+		}
 		record.CleanupFailures = containerruntime.CleanupStages(runErr)
 		if record.Health != nil {
 			record.Health.Status = HealthStopped
@@ -73,7 +77,7 @@ func Supervisor(id string, generations ...uint64) int {
 	return code
 }
 
-func supervise(store *Store, id string, generation uint64) (int, error, bool) {
+func supervise(store *Store, id string, generation uint64) (int, error, bool, containerruntime.ExitStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := store.Update(ctx, id, func(record *Record) error {
 		if record.Generation != generation || record.Terminal() {
@@ -83,34 +87,34 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 		return nil
 	}); err != nil {
 		cancel()
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	cfg, err := store.Config(ctx, id)
 	cancel()
 	if err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	root, err := store.RootFS(context.Background(), id)
 	if err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	if err := store.cleanupRootFSStages(id); err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	record, err := store.Get(context.Background(), id)
 	if err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	previouslyTruncated := record.LogTruncated
 
 	input, err := os.Open("/dev/null")
 	if err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	defer input.Close()
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		return 125, err, false
+		return 125, err, false, containerruntime.ExitStatus{}
 	}
 	defer reader.Close()
 	type captureResult struct {
@@ -155,7 +159,7 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 		}
 		return err
 	}
-	code, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, executor, root, func() time.Duration {
+	code, outcome, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, executor, root, func() time.Duration {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		record, err := store.Get(ctx, id)
@@ -170,10 +174,10 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool) {
 	closeErr := writer.Close()
 	select {
 	case result := <-completed:
-		return code, errors.Join(runErr, closeErr, result.err), result.truncated
+		return code, errors.Join(runErr, closeErr, result.err), result.truncated, outcome
 	case <-time.After(5 * time.Second):
 		reader.Close()
-		return code, errors.Join(runErr, errors.New("log capture did not finish after container cleanup")), true
+		return code, errors.Join(runErr, errors.New("log capture did not finish after container cleanup")), true, outcome
 	}
 }
 

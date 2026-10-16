@@ -73,7 +73,7 @@ func (store *Store) Completion(ctx context.Context, id string, generation uint64
 	var result ExecutionResult
 	err = store.readJSON(filepath.Join(store.root, id, receiptName(generation)), maxRecordBytes, &result)
 	if err == nil {
-		if result.Generation != generation || result.ExitCode != nil && (*result.ExitCode < 0 || *result.ExitCode > 255) || validateCleanupFailures(result.CleanupFailures) != nil {
+		if result.Generation != generation || result.ExitCode != nil && (*result.ExitCode < 0 || *result.ExitCode > 255) || validateCleanupFailures(result.CleanupFailures) != nil || validateExitStatus(result.ExitReason, result.OOMKilled) != nil {
 			return result, false, errors.New("invalid execution receipt")
 		}
 		return result, true, nil
@@ -121,11 +121,12 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	var saved ExecutionResult
 	receiptErr := store.readJSON(filepath.Join(path, receiptName(generation)), maxRecordBytes, &saved)
 	if receiptErr == nil {
-		if saved.Generation != generation || saved.ExitCode != nil && (*saved.ExitCode < 0 || *saved.ExitCode > 255) || validateCleanupFailures(saved.CleanupFailures) != nil {
+		if saved.Generation != generation || saved.ExitCode != nil && (*saved.ExitCode < 0 || *saved.ExitCode > 255) || validateCleanupFailures(saved.CleanupFailures) != nil || validateExitStatus(saved.ExitReason, saved.OOMKilled) != nil {
 			return errors.New("invalid execution receipt identity")
 		}
 		record.StartedAt, record.FinishedAt, record.ExitCode = saved.StartedAt, saved.FinishedAt, saved.ExitCode
 		record.CleanupFailures = append([]string(nil), saved.CleanupFailures...)
+		record.ExitReason, record.OOMKilled = saved.ExitReason, saved.OOMKilled
 		record.State = StateFailed
 		if saved.StartedAt != nil {
 			record.State = StateExited
@@ -199,6 +200,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	record.StartedAt, record.FinishedAt, record.ExitCode = nil, nil, nil
 	record.Error, record.RunPath, record.Cgroup = "", "", ""
 	record.CleanupFailures = nil
+	record.ExitReason, record.OOMKilled = "", false
 	record.StopTimeout = nil
 	record.RetainRootFS = true
 	if err := store.writeJSON(filepath.Join(store.root, id), "state.json", record, maxRecordBytes); err != nil {

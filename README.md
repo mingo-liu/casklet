@@ -91,8 +91,10 @@ casklet stop redis
 casklet rm redis
 ```
 
-Commands accept container names, full IDs, or unique ID prefixes. Stop/start and
-restart preserve private files; `rm` deletes them. Bind mounts and named volumes
+`inspect` reports exit reasons (including OOM and timeout) and preserves the
+previous result after restart. Commands accept container names, full IDs, or unique
+ID prefixes. Stop/start and restart preserve private files; `rm` deletes them.
+Bind mounts and named volumes
 preserve data independently of containers. Your Mac home directory is shared
 with the VM; other directories need an explicit share.
 

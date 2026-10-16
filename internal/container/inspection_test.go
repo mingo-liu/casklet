@@ -15,8 +15,11 @@ func TestInspectionPublicConfiguration(t *testing.T) {
 		Env: []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="}, Memory: 64 << 20, PidsLimit: 32,
 		TmpSize: 32 << 20, ShmSize: 96 << 20, CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
 	record := Record{ID: "id", Name: "worker", State: StateFailed, CreatedAt: time.Now(),
-		RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error", CleanupFailures: []string{"cgroup.remove"}}
+		ExitReason: "oom_killed", OOMKilled: true, RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error", CleanupFailures: []string{"cgroup.remove"}}
 	got := inspectRecord(record, cfg)
+	if got.ExitReason != "oom_killed" || !got.OOMKilled {
+		t.Fatalf("missing exit status: %+v", got)
+	}
 	if len(got.CleanupFailures) != 1 || got.CleanupFailures[0] != "cgroup.remove" {
 		t.Fatal("inspection omitted cleanup failures")
 	}

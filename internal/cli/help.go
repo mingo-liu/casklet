@@ -535,6 +535,10 @@ Options:
 Notes:
   Prints JSON configuration and lifecycle state for a container reference.
   Includes restart_policy, restart_count, restart_at, and stopped_by_user.
+  exit_reason and oom_killed describe termination separately from exit_code.
+  Reasons: exited, oom_killed, timeout, stopped, startup_failed, runtime_error,
+  supervisor_lost. Empty means active or unavailable in older records.
+  previous_exit preserves the previous execution result after start/restart.
   Health includes status, consecutive failures, and five recent probe results.
   Probe output is discarded; unhealthy does not change the restart policy.
   Labels are exposed as metadata, independently of the workload environment.
