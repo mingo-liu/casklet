@@ -32,9 +32,7 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-The archive includes the client with its matching Linux engine, both READMEs,
-usage/development guides, architecture documentation, and the license. Go and Make
-are unnecessary.
+The client bundles its matching Linux engine; Go and Make are unnecessary.
 Release binaries are not Developer ID signed or notarized, so macOS may require
 approval in **System Settings > Privacy & Security** after a browser download.
 
@@ -93,10 +91,8 @@ casklet stop redis
 casklet rm redis
 ```
 
-`inspect` reports exit reasons (including OOM and timeout) and preserves the
-previous result after restart. Commands accept container names, full IDs, or unique
-ID prefixes. Stop/start and restart preserve private files; `rm` deletes them.
-Bind mounts and named volumes
+Commands accept container names, full IDs, or unique ID prefixes. Stop/start and
+restart preserve private files; `rm` deletes them. Bind mounts and named volumes
 preserve data independently of containers. Your Mac home directory is shared
 with the VM; other directories need an explicit share.
 
@@ -110,21 +106,13 @@ Deploy multiple services from a [project configuration](guides/usage.md#project-
 with networks, volumes, and startup dependencies:
 
 ```sh
-casklet project validate --config project.json
 casklet project up --config project.json --wait --timeout 1m
 casklet project ps demo
 casklet project down demo
 ```
 
-Preview deployment reasons and changed field names with `project up --config
-project.json --dry-run`; applying changed services requires `--recreate SERVICE`.
 Use the guide's `demo` configuration for this example. `project down` preserves
 data volumes; `--volumes` also removes project-owned volumes.
-
-Use `project logs --follow demo` for service-prefixed output.
-`project up --wait` samples service readiness in one guest call per pass.
-
-Use `doctor --json` for versions, VM state, disk space and diagnostic checks.
 
 ## Capabilities
 
