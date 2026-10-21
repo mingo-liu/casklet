@@ -57,6 +57,9 @@ func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
 		if output.overflow {
 			return nil, errors.New("project operation output exceeds 8 MiB")
 		}
+		if args[0] == "__project-reservations" {
+			return platformProjectReservations(output.data)
+		}
 		return output.data, nil
 	}, nil
 }

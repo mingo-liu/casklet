@@ -3,11 +3,33 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/project"
 )
+
+func TestMacProjectReservationsTranslateGuestForwardingAddresses(t *testing.T) {
+	page := project.ReservationPage{Next: strings.Repeat("1", 32), Records: []project.Reservation{{ID: strings.Repeat("1", 32), Generation: 3,
+		Publish: []config.PortMapping{{HostIP: "127.0.0.2", HostPort: 39123, ContainerPort: 80, Protocol: "tcp"}, {HostIP: "127.0.0.3", HostPort: 39124, ContainerPort: 81, Protocol: "udp"}, {HostIP: "192.0.2.1", HostPort: 39125, ContainerPort: 82, Protocol: "tcp"}}}}}
+	data, _ := json.Marshal(page)
+	translated, err := platformProjectReservations(data)
+	var result project.ReservationPage
+	if err != nil || json.Unmarshal(translated, &result) != nil {
+		t.Fatalf("translation: %v %s", err, translated)
+	}
+	ports := result.Records[0].Publish
+	if ports[0].HostIP != "0.0.0.0" || ports[1].HostIP != "127.0.0.1" || ports[2].HostIP != "192.0.2.1" || ports[1].Protocol != "udp" || result.Next != page.Next || result.Records[0].Generation != 3 {
+		t.Fatalf("changed reservation identity/ports: %+v", result)
+	}
+	if _, err := platformProjectReservations([]byte("{")); err == nil {
+		t.Fatal("invalid batch JSON accepted")
+	}
+}
 
 func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 	out, err := os.CreateTemp(t.TempDir(), "output")

@@ -66,7 +66,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return 125
 	case "network-create", "network-ls", "network-inspect", "network-rm":
 		return executeManagement(r, stdout, stderr)
-	case "project-records", "project-status", "project-resource", "project-replace", "project-preflight", "project-start-preflight":
+	case "project-reservations", "project-records", "project-status", "project-resource", "project-replace", "project-preflight", "project-start-preflight":
 		return executeManagement(r, stdout, stderr)
 	case "system-df":
 		return executeManagement(r, stdout, stderr)

@@ -62,12 +62,7 @@ func probePortAddress(mapping config.PortMapping, hostIP string) error {
 func hostPortMappings(ports []config.PortMapping) ([]config.PortMapping, error) {
 	result := append([]config.PortMapping(nil), ports...)
 	for i := range result {
-		switch result[i].HostIP {
-		case "127.0.0.2":
-			result[i].HostIP = "0.0.0.0"
-		case "127.0.0.3":
-			result[i].HostIP = "127.0.0.1"
-		}
+		result[i].HostIP = HostPortAddress(result[i].HostIP)
 		if err := validateMacPort(result[i]); err != nil {
 			return nil, err
 		}

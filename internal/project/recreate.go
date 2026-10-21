@@ -38,37 +38,30 @@ func (runner *Runner) checkConflicts(ctx context.Context, plan Plan, all []conta
 			removed[record.ID] = true
 		}
 	}
-	for _, record := range all {
-		if removed[record.ID] {
-			continue
-		}
-		data, err := runner.Call(ctx, "inspect", record.ID)
-		if err != nil {
-			return err
-		}
-		var saved container.Inspection
-		if json.Unmarshal(data, &saved) != nil || saved.ID != record.ID || saved.Generation != record.Generation {
-			return fmt.Errorf("container %q changed during project preflight", record.Name)
-		}
+	reservations, err := runner.reservations(ctx, all, removed)
+	if err != nil {
+		return err
+	}
+	for _, saved := range reservations {
 		for _, service := range plan.Services {
-			if current, found := existing[service.Key]; found && !selected[service.Key] && (current.ID == record.ID || current.State == container.StateRunning || current.State == container.StateStarting) {
+			if current, found := existing[service.Key]; found && !selected[service.Key] && (current.ID == saved.ID || current.State == container.StateRunning || current.State == container.StateStarting) {
 				// Unchanged running services keep their actual saved configuration.
 				continue
 			}
-			if config.IsNamedNetwork(service.Config.Network) && saved.Config.Network == service.Config.Network {
+			if config.IsNamedNetwork(service.Config.Network) && saved.Network == service.Config.Network {
 				for _, wanted := range append([]string{service.Name}, service.Config.NetworkAliases...) {
-					for _, occupied := range append([]string{record.Name}, saved.Config.NetworkAliases...) {
+					for _, occupied := range append([]string{saved.Name}, saved.NetworkAliases...) {
 						if wanted == occupied {
-							return fmt.Errorf("service %q network alias %q is reserved by container %q", service.Key, wanted, record.Name)
+							return fmt.Errorf("service %q network alias %q is reserved by container %q", service.Key, wanted, saved.Name)
 						}
 					}
 				}
 			}
-			if record.State == container.StateRunning || record.State == container.StateStarting {
+			if saved.State == container.StateRunning || saved.State == container.StateStarting {
 				for _, wanted := range service.Config.Publish {
-					for _, occupied := range saved.Config.Publish {
+					for _, occupied := range saved.Publish {
 						if config.PortsConflict(wanted, occupied) {
-							return fmt.Errorf("service %q host port conflicts with container %q", service.Key, record.Name)
+							return fmt.Errorf("service %q host port conflicts with container %q", service.Key, saved.Name)
 						}
 					}
 				}

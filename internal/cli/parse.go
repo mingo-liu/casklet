@@ -104,6 +104,9 @@ func Parse(args []string) (request Request, err error) {
 	if r.Action == "__project-records" {
 		return parseProjectRecords(args[1:])
 	}
+	if r.Action == "__project-reservations" {
+		return parseProjectReservations(args[1:])
+	}
 	if r.Action == "__project-resource" {
 		return parseProjectResource(args[1:])
 	}

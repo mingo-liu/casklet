@@ -468,6 +468,17 @@ private roots/logs are discarded. Removed old records are not automatically
 restored after partial failure. Existing transaction-token rollback removes only
 new records/resources; retry creates absent services.
 
+Preview and recreation reservation checks use ID-ordered private pages of at
+most 64 snapshots per guest call. Each snapshot reads lifecycle identity and
+configuration together under the existing metadata lock, returning only the
+network, aliases, published ports, name, full ID, state and generation. Selected
+old IDs are excluded before opening configurations. The host converts Lima
+forwarding addresses with the same mapping as inspection, validates pages and
+every initial ID/name/generation, and rejects missing or changed executions.
+Initial running/starting port claims stay conservative across sampling.
+Configuration reads release the metadata lock between records; existing source,
+host-port and removal fences still run.
+
 `project up --dry-run` shares inventory/ownership checks and reports resource
 creation plus service create/reuse/start/recreate actions, reasons, and sorted
 changed field names. Unselected drift is reportable during preview but still

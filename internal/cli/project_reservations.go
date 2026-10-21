@@ -1,0 +1,80 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"sort"
+
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/project"
+)
+
+func parseProjectReservations(args []string) (Request, error) {
+	if len(args) < 1 || len(args) > 65 {
+		return Request{}, errors.New("invalid project reservation selection")
+	}
+	r := Request{Action: "project-reservations", Cursor: args[0]}
+	if r.Cursor == "-" {
+		r.Cursor = ""
+	} else if r.Cursor == "" || !validProjectCursor(r.Cursor) {
+		return Request{}, errors.New("invalid project reservation cursor")
+	}
+	seen := map[string]bool{}
+	for _, id := range args[1:] {
+		if id == "" || !validProjectCursor(id) || seen[id] {
+			return Request{}, errors.New("invalid project reservation exclusion")
+		}
+		seen[id] = true
+		r.References = append(r.References, id)
+	}
+	return r, nil
+}
+
+func executeProjectReservations(ctx context.Context, r Request, out io.Writer) error {
+	records, err := container.List(ctx, true)
+	if err != nil {
+		return err
+	}
+	store, err := container.OpenStore()
+	if err != nil {
+		return err
+	}
+	return writeProjectReservations(ctx, out, records, r.Cursor, r.References, store.Snapshot)
+}
+
+func writeProjectReservations(ctx context.Context, out io.Writer, records []container.Record, cursor string, excluded []string, snapshot func(context.Context, string) (container.Record, config.Config, error)) error {
+	skip := map[string]bool{}
+	for _, id := range excluded {
+		skip[id] = true
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+	page := project.ReservationPage{Records: []project.Reservation{}}
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if record.ID <= cursor || skip[record.ID] {
+			continue
+		}
+		if len(page.Records) == project.ReservationPageSize {
+			page.Next = page.Records[len(page.Records)-1].ID
+			break
+		}
+		current, cfg, err := snapshot(ctx, record.ID)
+		if err != nil {
+			return err
+		}
+		if current.ID != record.ID || current.Generation != record.Generation {
+			return errors.New("container execution changed during reservation sampling")
+		}
+		page.Records = append(page.Records, project.Reservation{ID: current.ID, Name: current.Name, State: current.State, Generation: current.Generation,
+			Network: cfg.Network, NetworkAliases: cfg.NetworkAliases, Publish: cfg.Publish})
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(page)
+}
