@@ -26,8 +26,12 @@ type Runner struct {
 	Preview []Change
 }
 
-func (runner *Runner) Records(ctx context.Context) ([]container.Record, error) {
-	data, err := runner.Call(ctx, "ps", "-a", "--json")
+func (runner *Runner) Records(ctx context.Context, names ...string) ([]container.Record, error) {
+	args := []string{"ps", "-a", "--json"}
+	if len(names) > 0 {
+		args = append(args, "--filter", "label="+LabelName+"="+names[0])
+	}
+	data, err := runner.Call(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +414,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			return nil, err
 		}
 	}
-	all, err = runner.Records(ctx)
+	all, err = runner.Records(ctx, plan.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +446,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 }
 
 func (runner *Runner) rollback(ctx context.Context, name, token string, created []Resource) error {
-	records, err := runner.Records(ctx)
+	records, err := runner.Records(ctx, name)
 	var failures []error
 	if err != nil {
 		failures = append(failures, err)
@@ -488,7 +492,7 @@ func (runner *Runner) removeResource(ctx context.Context, resource Resource) err
 }
 
 func (runner *Runner) Down(ctx context.Context, name string, removeVolumes bool) error {
-	records, err := runner.Records(ctx)
+	records, err := runner.Records(ctx, name)
 	if err != nil {
 		return err
 	}

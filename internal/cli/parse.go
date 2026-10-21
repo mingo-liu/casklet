@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	Cursor        string
 	Services      []string
 	Recreate      []string
 	Project       project.Plan
@@ -99,6 +100,9 @@ func Parse(args []string) (request Request, err error) {
 		}
 		r.Action, r.Reference = "project-status", args[1]
 		return r, project.ValidateName(r.Reference)
+	}
+	if r.Action == "__project-records" {
+		return parseProjectRecords(args[1:])
 	}
 	if r.Action == "__project-resource" {
 		return parseProjectResource(args[1:])

@@ -107,10 +107,11 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if err != nil {
 		return 125, preparationError(err)
 	}
+	call = projectRecordCalls(name, call)
 	// Read-only status must remain available while up waits for a dependency.
 	if r.Action == "project-ps" || r.Action == "project-logs" {
 		runner := project.Runner{Call: call}
-		records, err := runner.Records(ctx)
+		records, err := runner.Records(ctx, name)
 		if err != nil {
 			return 125, preparationError(err)
 		}
