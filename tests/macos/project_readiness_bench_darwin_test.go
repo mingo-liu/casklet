@@ -58,6 +58,10 @@ func BenchmarkProjectReadinessSampling(b *testing.B) {
 			if err := json.Unmarshal(call("project", "ps", "--json", name), &records); err != nil || len(records) != count {
 				b.Fatalf("records: %v %v", records, err)
 			}
+			statusArgs := []string{"__project-status", name}
+			for _, record := range records {
+				statusArgs = append(statusArgs, record.ID)
+			}
 			for _, strategy := range []string{"LegacyInspect", "BatchStatus"} {
 				b.Run(strategy, func(b *testing.B) {
 					b.ResetTimer()
@@ -74,7 +78,7 @@ func BenchmarkProjectReadinessSampling(b *testing.B) {
 							}
 						} else {
 							var values []project.ServiceStatus
-							if err := json.Unmarshal(call("__project-status", name), &values); err != nil || len(values) != count {
+							if err := json.Unmarshal(call(statusArgs...), &values); err != nil || len(values) != count {
 								b.Fatal("invalid batch sample", err)
 							}
 							identities := map[string]project.ServiceStatus{}

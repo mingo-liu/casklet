@@ -16,7 +16,7 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 	case "network-create", "network-ls", "network-inspect", "network-rm":
 		return executeNetwork(ctx, r, stdout)
 	case "project-status":
-		return 0, executeProjectStatus(ctx, r.Reference, stdout)
+		return 0, executeProjectStatus(ctx, r, stdout)
 	case "project-records":
 		return 0, executeProjectRecords(ctx, r, stdout)
 	case "project-reservations":

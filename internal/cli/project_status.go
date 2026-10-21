@@ -10,12 +10,36 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func executeProjectStatus(ctx context.Context, name string, out io.Writer) error {
-	records, err := container.List(ctx, true)
+func parseProjectStatus(args []string) (Request, error) {
+	if len(args) < 1 || len(args) > 1+container.RecordPageSize {
+		return Request{}, errors.New("project status requires a project name and at most 64 full IDs")
+	}
+	if err := project.ValidateName(args[0]); err != nil {
+		return Request{}, err
+	}
+	seen := map[string]bool{}
+	for _, id := range args[1:] {
+		if id == "" || !validProjectCursor(id) || seen[id] {
+			return Request{}, errors.New("invalid project status ID selection")
+		}
+		seen[id] = true
+	}
+	return Request{Action: "project-status", Reference: args[0], References: args[1:]}, nil
+}
+
+func executeProjectStatus(ctx context.Context, r Request, out io.Writer) error {
+	var records []container.Record
+	var err error
+	if len(r.References) == 0 {
+		// Retain the private name-only sampler for existing diagnostic callers.
+		records, err = container.List(ctx, true)
+	} else {
+		records, err = container.ListIDs(ctx, r.References)
+	}
 	if err != nil {
 		return err
 	}
-	return writeProjectStatus(out, project.Managed(records, name))
+	return writeProjectStatus(out, project.Managed(records, r.Reference))
 }
 
 func writeProjectStatus(out io.Writer, records []container.Record) error {

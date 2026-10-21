@@ -6,6 +6,37 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-21: Sample readiness from pinned service IDs
+
+Whole-project readiness passes send the startup-pinned full container IDs to the
+existing minimal batch status command. The guest validates at most 64 unique IDs
+before lookup, reads and refreshes only those records, and releases metadata
+locks before lifecycle recovery. Missing or concurrently removed IDs remain
+missing in the response and fail the existing host fence. Project/service labels,
+execution generations, effective health, shared deadlines, dependency resampling
+and rollback semantics remain unchanged. The private name-only diagnostic sampler
+remains supported. Store opening still enumerates transaction directory names;
+this change removes unrelated state decoding and lifecycle queries from each pass.
+
+With one running project service and 256 stopped unrelated records, real Linux
+CLI sampling opens state files 257 times with the name-only sampler and once
+with pinned IDs, returning the same ID/generation/state. The bounded inotify
+regression extends the existing oversized-history fixture and retains previous
+inventory/reservation read-count assertions. Unit regressions cover exact 16/64
+service requests, full-ID bounds, duplicate/name/prefix rejection before reads,
+unrelated corrupt state, effective health, refresh lock release, missing/removal,
+cancellation, refresh failures and the existing host generation/ownership fences.
+The opt-in macOS sampling benchmark now exercises the pinned request.
+
+Validation: native macOS arm64 client/embedded-engine build, formatting, complete
+unit/vet and CLI/project race checks passed. Linux arm64 complete unit/vet and
+container/CLI/project race checks passed. All eight privileged project integration
+cases passed through the shared-store preservation wrapper, including readiness,
+rollback, preview/recreation, offline images and retained-history read counts.
+All 14 scoped real macOS project tests passed through SSH/VM. Intel execution,
+the opt-in timing benchmark and the complete privileged/macOS end-to-end suites
+were not run for this change.
+
 ## 2026-10-21: Page project records at the storage boundary
 
 Project inventory and reservation calls use storage-level ID cursors instead of

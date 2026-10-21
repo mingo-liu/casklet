@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,8 +32,12 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 		calls := 0
 		runner := Runner{Call: func(ctx context.Context, args ...string) ([]byte, error) {
 			calls++
-			if strings.Join(args, " ") != "__project-status demo" {
-				t.Fatalf("unscoped sample: %v", args)
+			expected := []string{"__project-status", "demo"}
+			for _, service := range plan.Services {
+				expected = append(expected, executions[service.Key].ID)
+			}
+			if !slices.Equal(args, expected) {
+				t.Fatalf("sample did not pin service IDs: %v", args)
 			}
 			return json.Marshal(records)
 		}}

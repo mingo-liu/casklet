@@ -78,6 +78,27 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 	if json.Unmarshal([]byte(output), &records) != nil || len(records) != 1 || len(records[0].Command) == 0 {
 		t.Fatalf("project listing lost member data: %s", output)
 	}
+	t.Run("pinned readiness state reads", func(t *testing.T) {
+		all := append(append([]string(nil), ids...), records[0].ID)
+		reads := watchContainerStateReads(t, all)
+		var previous, pinned []struct {
+			ID         string `json:"id"`
+			Generation uint64 `json:"generation"`
+			State      string `json:"state"`
+		}
+		if err := json.Unmarshal([]byte(backgroundSuccess(t, "__project-status", name)), &previous); err != nil {
+			t.Fatal(err)
+		}
+		before := reads()
+		if err := json.Unmarshal([]byte(backgroundSuccess(t, "__project-status", name, records[0].ID)), &pinned); err != nil {
+			t.Fatal(err)
+		}
+		after := reads()
+		if before != 257 || after != 1 || len(previous) != 1 || len(pinned) != 1 || pinned[0] != previous[0] || pinned[0].ID != records[0].ID || pinned[0].Generation != records[0].Generation || pinned[0].State != container.StateRunning {
+			t.Fatalf("readiness reads=%d -> %d, previous=%+v pinned=%+v", before, after, previous, pinned)
+		}
+		t.Logf("one service with 256 unrelated records: state opens %d -> %d per readiness sample", before, after)
+	})
 	if output := backgroundSuccess(t, "project", "logs", name); !strings.Contains(output, "[app] inventory-ready") {
 		t.Fatalf("project logs: %s", output)
 	}
@@ -93,7 +114,7 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 	}
 }
 
-func assertProjectPageReads(t *testing.T, ids, firstArgs []string, want int) {
+func watchContainerStateReads(t *testing.T, ids []string) func() int {
 	t.Helper()
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
@@ -105,23 +126,13 @@ func assertProjectPageReads(t *testing.T, ids, firstArgs []string, want int) {
 			t.Fatal(err)
 		}
 	}
-	args := append([]string(nil), firstArgs...)
-	reads, pages := 0, 0
-	for {
-		var page struct {
-			Records []json.RawMessage `json:"records"`
-			Next    string            `json:"next"`
-		}
-		output := backgroundSuccess(t, args...)
-		if err := json.Unmarshal([]byte(output), &page); err != nil {
-			t.Fatal(err)
-		}
-		pages++
+	return func() int {
+		reads := 0
 		buffer := make([]byte, 64<<10)
 		for {
 			n, err := unix.Read(fd, buffer)
 			if errors.Is(err, unix.EAGAIN) {
-				break
+				return reads
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -137,6 +148,25 @@ func assertProjectPageReads(t *testing.T, ids, firstArgs []string, want int) {
 				offset += unix.SizeofInotifyEvent + int(encodingbinary.NativeEndian.Uint32(buffer[offset+12:]))
 			}
 		}
+	}
+}
+
+func assertProjectPageReads(t *testing.T, ids, firstArgs []string, want int) {
+	t.Helper()
+	stateReads := watchContainerStateReads(t, ids)
+	args := append([]string(nil), firstArgs...)
+	reads, pages := 0, 0
+	for {
+		var page struct {
+			Records []json.RawMessage `json:"records"`
+			Next    string            `json:"next"`
+		}
+		output := backgroundSuccess(t, args...)
+		if err := json.Unmarshal([]byte(output), &page); err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		reads += stateReads()
 		if page.Next == "" {
 			break
 		}
