@@ -24,6 +24,9 @@ func (*Store) Update(context.Context, string, func(*Record) error) error { retur
 func (*Store) Config(context.Context, string) (config.Config, error) {
 	return config.Config{}, errUnsupportedStore
 }
+func (*Store) Snapshot(context.Context, string) (Record, config.Config, error) {
+	return Record{}, config.Config{}, errUnsupportedStore
+}
 func (*Store) AcquireLease(context.Context, string) (*os.File, error) {
 	return nil, errUnsupportedStore
 }

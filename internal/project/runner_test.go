@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,23 +16,51 @@ import (
 )
 
 type fakeProject struct {
-	records   []container.Record
-	resources map[string]Resource
-	mutations []string
-	waits     []string
-	failRun   string
-	failWait  bool
-	saves     int
-	nextID    int
+	reservations map[string]Reservation
+	records      []container.Record
+	resources    map[string]Resource
+	mutations    []string
+	waits        []string
+	failRun      string
+	failWait     bool
+	saves        int
+	nextID       int
 }
 
-func newFakeProject() *fakeProject { return &fakeProject{resources: map[string]Resource{}} }
+func newFakeProject() *fakeProject {
+	return &fakeProject{resources: map[string]Resource{}, reservations: map[string]Reservation{}}
+}
 func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	encode := func(value any) ([]byte, error) { return json.Marshal(value) }
 	switch args[0] {
+	case "__project-reservations":
+		skip := map[string]bool{}
+		for _, id := range args[2:] {
+			skip[id] = true
+		}
+		after := args[1]
+		if after == "-" {
+			after = ""
+		}
+		records := slices.Clone(fake.records)
+		sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+		page := ReservationPage{Records: []Reservation{}}
+		for _, record := range records {
+			if record.ID <= after || skip[record.ID] {
+				continue
+			}
+			if len(page.Records) == ReservationPageSize {
+				page.Next = page.Records[len(page.Records)-1].ID
+				break
+			}
+			saved := fake.reservations[record.ID]
+			saved.ID, saved.Name, saved.State, saved.Generation = record.ID, record.Name, record.State, record.Generation
+			page.Records = append(page.Records, saved)
+		}
+		return encode(page)
 	case "__project-status":
 		values := []ServiceStatus{}
 		for _, record := range Managed(fake.records, args[1]) {

@@ -4,6 +4,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,8 +12,23 @@ import (
 	"syscall"
 
 	"github.com/mingo-liu/casklet/internal/machine"
+	"github.com/mingo-liu/casklet/internal/project"
 	"github.com/mingo-liu/casklet/internal/registryauth"
 )
+
+func platformProjectReservations(data []byte) ([]byte, error) {
+	var page project.ReservationPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, fmt.Errorf("invalid project reservation response")
+	}
+	for i := range page.Records {
+		for j := range page.Records[i].Publish {
+			port := &page.Records[i].Publish[j]
+			port.HostIP = machine.HostPortAddress(port.HostIP)
+		}
+	}
+	return json.Marshal(page)
+}
 
 func platformArguments(args []string) []string {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {

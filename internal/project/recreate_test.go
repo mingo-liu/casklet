@@ -162,18 +162,10 @@ func TestRecreateChecksActualSavedPortAndAliasReservations(t *testing.T) {
 		plan.Services[1].Config.NetworkAliases = []string{"new"}
 		port, _ := config.ParsePortMapping("39123:80")
 		plan.Services[1].Config.Publish = []config.PortMapping{port}
-		runner.Call = func(ctx context.Context, args ...string) ([]byte, error) {
-			if args[0] == "inspect" && args[1] == fake.records[0].ID {
-				cfg := container.InspectionConfig{}
-				if kind == "port" {
-					cfg.Publish = []config.PortMapping{port}
-				} else {
-					cfg.Network = "cp-demo-default"
-					cfg.NetworkAliases = []string{"new"}
-				}
-				return json.Marshal(container.Inspection{ID: args[1], Generation: fake.records[0].Generation, Config: cfg})
-			}
-			return fake.call(ctx, args...)
+		if kind == "port" {
+			fake.reservations[fake.records[0].ID] = Reservation{Network: "bridge", Publish: []config.PortMapping{port}}
+		} else {
+			fake.reservations[fake.records[0].ID] = Reservation{Network: "cp-demo-default", NetworkAliases: []string{"new"}}
 		}
 		if _, err := runner.Up(context.Background(), plan, UpOptions{Recreate: []string{"api"}}); err == nil || !strings.Contains(err.Error(), kind) || len(fake.mutations) != 0 {
 			t.Fatalf("%s err=%v mutations=%v", kind, err, fake.mutations)

@@ -12,6 +12,17 @@ import (
 
 const maxInspectionBytes = 4 << 20
 
+// HostPortAddress translates Lima's dedicated guest forwarding addresses.
+func HostPortAddress(address string) string {
+	switch address {
+	case "127.0.0.2":
+		return "0.0.0.0"
+	case "127.0.0.3":
+		return "127.0.0.1"
+	}
+	return address
+}
+
 // inspectionOutput bounds a nonstreaming response while continuing to drain SSH.
 // A guest failure must retain its exit status even if its output is oversized.
 type inspectionOutput struct {
@@ -116,12 +127,7 @@ func presentInspection(instance Instance, data []byte, stdout io.Writer) error {
 			if field == "mounts" {
 				value = instance.macPath(value)
 			} else {
-				switch value {
-				case "127.0.0.2":
-					value = "0.0.0.0"
-				case "127.0.0.3":
-					value = "127.0.0.1"
-				}
+				value = HostPortAddress(value)
 			}
 			entry[key], _ = json.Marshal(value)
 		}

@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-21: Batch project reservation preflight
+
+Preview and selected recreation replace per-container full inspections with
+private ID-ordered pages of at most 64 configuration snapshots. Only network,
+aliases, published ports and lifecycle identity cross the transport. Selected
+old IDs are excluded before configuration reads. Existing metadata snapshots
+bound each read, without holding a global lock across a page. The host retains
+initial name/generation fences, detects missing records and malformed pages,
+keeps conservative initial port claims and honors cancellation between pages.
+Mac ports use inspection's existing guest-to-host address mapping. Legacy alias,
+source readiness, selected-port and lifecycle removal checks remain unchanged.
+
+The 128-container preview regression reproduced 128 inspect calls before the
+change and now requires two reservation calls with no per-container inspect.
+Additional regressions cover bounded snapshots, excluded selections, private
+payloads, missing/changed/duplicate identities, invalid ports/states/cursors,
+write errors, cancellation and Mac forwarding-address conversion. Empty/excluded
+inventories require no reservation call. Full macOS formatting/unit/vet/race
+checks and native client/embedded-engine build passed. Ten real Mac project tests
+passed, including a new unrelated localhost-port/alias conflict test that keeps
+the selected ID/generation running through preview and apply rejection. The new
+test passed again against the final build. Linux arm64 unit/vet and CLI/project
+race checks plus eight privileged project cases passed through the shared-store
+preservation wrapper. Intel Mac execution was not run locally.
+
 ## 2026-10-21: Page project inventory without unrelated command payloads
 
 Project operations page their private guest inventory by full container ID, at
