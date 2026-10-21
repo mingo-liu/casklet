@@ -49,6 +49,10 @@ func (runner *Runner) inspectService(ctx context.Context, key, id string) (conta
 // Sample all services again after each wait so a dependency that stopped while
 // a leaf was becoming healthy cannot leave the whole project falsely ready.
 func (runner *Runner) waitServices(ctx context.Context, plan Plan, executions map[string]serviceExecution) error {
+	args := []string{"__project-status", plan.Name}
+	for _, service := range plan.Services {
+		args = append(args, executions[service.Key].ID)
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -57,7 +61,7 @@ func (runner *Runner) waitServices(ctx context.Context, plan Plan, executions ma
 		}
 		// One guest invocation samples minimal lifecycle/health state for the
 		// project. Keep per-service ID and execution fencing from startup.
-		data, err := runner.Call(ctx, "__project-status", plan.Name)
+		data, err := runner.Call(ctx, args...)
 		if err != nil {
 			return fmt.Errorf("sample project readiness: %w", err)
 		}

@@ -497,8 +497,14 @@ snapshot; lifecycle generation fences and live port checks still run at apply.
 `project up --wait` applies one deadline after parsing to local lock acquisition,
 VM preparation, startup and readiness. The runner pins each service ID/generation
 after startup using sanitized inspection, including image-inherited checks.
-Each wait pass samples lifecycle/health records with one project-scoped minimal guest response, validating each pinned full ID, service label and generation. Services without enabled checks require running
-state. Each pass revisits all services; stopped or changed executions fail. Final
+Each wait pass sends at most 64 pinned full IDs in one private status request.
+The guest reads and refreshes only those records; it validates complete unique
+IDs before lookup and releases metadata locks before supervisor recovery.
+Unrelated state files and configurations are not opened. Missing IDs are omitted
+and fail the host's existing identity fence. The minimal response retains project
+and service labels, generation and effective health, which the host validates
+against startup identities. The private name-only sampler remains available for
+diagnostic callers. Services without enabled checks require running state. Each pass revisits all services; stopped or changed executions fail. Final
 records recheck the pinned executions and readiness. Timeout returns 124 after the
 existing independent bounded rollback; reused/resumed services remain.
 

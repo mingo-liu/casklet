@@ -95,11 +95,7 @@ func Parse(args []string) (request Request, err error) {
 		return parseProject(r, args[1:])
 	}
 	if r.Action == "__project-status" {
-		if len(args) != 2 {
-			return r, fmt.Errorf("project status requires one project name")
-		}
-		r.Action, r.Reference = "project-status", args[1]
-		return r, project.ValidateName(r.Reference)
+		return parseProjectStatus(args[1:])
 	}
 	if r.Action == "__project-records" {
 		return parseProjectRecords(args[1:])

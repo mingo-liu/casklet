@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,5 +40,24 @@ func TestProjectStatusExcludesUnboundedPrivateFields(t *testing.T) {
 	r, err := Parse([]string{"__project-status", "demo"})
 	if err != nil || r.Action != "project-status" || r.Reference != "demo" {
 		t.Fatalf("parse: %+v %v", r, err)
+	}
+}
+
+func TestProjectStatusPinnedSelectionBounds(t *testing.T) {
+	ids := make([]string, container.RecordPageSize)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%032x", i+1)
+	}
+	for _, count := range []int{1, container.RecordPageSize} {
+		args := append([]string{"__project-status", "demo"}, ids[:count]...)
+		r, err := Parse(args)
+		if err != nil || r.Action != "project-status" || r.Reference != "demo" || !slices.Equal(r.References, ids[:count]) {
+			t.Fatalf("pinned selection: %+v %v", r, err)
+		}
+	}
+	for _, selection := range [][]string{{""}, {ids[0][:12]}, {"container-name"}, {strings.Repeat("A", 32)}, {ids[0], ids[0]}, append(slices.Clone(ids), fmt.Sprintf("%032x", 65))} {
+		if _, err := Parse(append([]string{"__project-status", "demo"}, selection...)); err == nil {
+			t.Fatalf("accepted invalid selection: %v", selection)
+		}
 	}
 }

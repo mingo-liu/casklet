@@ -64,6 +64,9 @@ func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, erro
 	case "__project-status":
 		values := []ServiceStatus{}
 		for _, record := range Managed(fake.records, args[1]) {
+			if len(args) > 2 && !slices.Contains(args[2:], record.ID) {
+				continue
+			}
 			health := ""
 			if record.Health != nil {
 				health = record.Health.Status
