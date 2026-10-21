@@ -18,7 +18,7 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer, input ...io.
 	}
 	if r.Action == "image-save" {
 		if file, ok := stdout.(*os.File); ok {
-			stream, finish, err := cancelableArchiveFile(ctx, file)
+			stream, finish, err := cancelableStreamFile(ctx, file)
 			if err != nil {
 				return 125, err
 			}
@@ -28,7 +28,7 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer, input ...io.
 	}
 	if r.Action == "image-load" && len(input) > 0 {
 		if file, ok := input[0].(*os.File); ok {
-			stream, finish, err := cancelableArchiveFile(ctx, file)
+			stream, finish, err := cancelableStreamFile(ctx, file)
 			if err != nil {
 				return 125, err
 			}

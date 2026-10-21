@@ -14,7 +14,7 @@ import (
 // register them with Go's poller. Closing such a File cannot wake a blocked
 // read/write syscall. Rewrap a nonblocking duplicate so cancellation wakes I/O;
 // keep the caller's File open and restore its shared status flags on return.
-func cancelableArchiveFile(ctx context.Context, original *os.File) (*os.File, func(), error) {
+func cancelableStreamFile(ctx context.Context, original *os.File) (*os.File, func(), error) {
 	raw, err := original.SyscallConn()
 	if err != nil {
 		return nil, nil, err
@@ -43,7 +43,7 @@ func cancelableArchiveFile(ctx context.Context, original *os.File) (*os.File, fu
 	stream := os.NewFile(uintptr(duplicate), original.Name())
 	if stream == nil {
 		unix.Close(duplicate)
-		return nil, nil, errors.New("cannot prepare archive descriptor")
+		return nil, nil, errors.New("cannot prepare stream descriptor")
 	}
 	done := make(chan struct{})
 	finished := make(chan struct{})

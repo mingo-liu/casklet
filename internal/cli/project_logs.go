@@ -74,14 +74,22 @@ func projectLogCall(ctx context.Context, id string, tail int, follow bool, out, 
 }
 
 type lockedProjectWriter struct {
-	mu  sync.Mutex
-	out io.Writer
+	mu      sync.Mutex
+	out     io.Writer
+	onError func(error)
 }
 
 func (w *lockedProjectWriter) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.out.Write(data)
+	n, err := w.out.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		w.onError(err)
+	}
+	return n, err
 }
 
 // Each stream retains at most one bounded unfinished line. Only complete
@@ -128,20 +136,37 @@ func (w *projectLineWriter) Write(data []byte) (int, error) {
 func streamProjectLogs(ctx context.Context, records []container.Record, out, diagnostic io.Writer, stream func(context.Context, string, io.Writer, io.Writer) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	output := &lockedProjectWriter{out: out}
-	diagnostics := &lockedProjectWriter{out: diagnostic}
+	// Close pollable duplicates on cancellation so a full inherited stdout or
+	// stderr pipe cannot keep a writer, cmd.Wait, or peer readers blocked.
+	for _, writer := range []*io.Writer{&out, &diagnostic} {
+		if file, ok := (*writer).(*os.File); ok {
+			stream, finish, err := cancelableStreamFile(ctx, file)
+			if err != nil {
+				return err
+			}
+			defer finish()
+			*writer = stream
+		}
+	}
 	var wg sync.WaitGroup
 	var once sync.Once
 	var failure error
+	fail := func(err error) {
+		if err != nil {
+			once.Do(func() { failure = err; cancel() })
+		}
+	}
+	output := &lockedProjectWriter{out: out, onError: func(err error) { fail(fmt.Errorf("write project logs: %w", err)) }}
+	diagnostics := &lockedProjectWriter{out: diagnostic, onError: func(err error) { fail(fmt.Errorf("write project log diagnostics: %w", err)) }}
 	for _, record := range records {
 		wg.Go(func() {
 			key := record.Labels[project.LabelService]
 			lines := &projectLineWriter{out: output, key: key}
 			err := stream(ctx, record.ID, lines, diagnostics)
-			err = errors.Join(err, lines.flush())
 			if err != nil {
-				once.Do(func() { failure = fmt.Errorf("logs for service %q: %w", key, err); cancel() })
+				fail(fmt.Errorf("logs for service %q: %w", key, err))
 			}
+			fail(lines.flush())
 		})
 	}
 	wg.Wait()

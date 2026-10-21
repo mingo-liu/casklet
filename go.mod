@@ -1,6 +1,6 @@
 module github.com/mingo-liu/casklet
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/ebitengine/purego v0.9.1
