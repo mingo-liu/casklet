@@ -4,7 +4,9 @@ package integration
 
 import (
 	"context"
+	encodingbinary "encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/container"
+	"golang.org/x/sys/unix"
 )
 
 func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
@@ -53,6 +56,14 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 	if output := backgroundSuccess(t, "ps", "-a", "--json"); len(output) <= 8<<20 {
 		t.Fatalf("fixture did not exceed the old response limit: %d", len(output))
 	}
+	t.Run("inventory state reads", func(t *testing.T) {
+		assertProjectPageReads(t, ids, []string{"__project-records", name, "inventory"}, 256)
+	})
+	t.Run("reservation state reads", func(t *testing.T) {
+		// Each selected record is read once for lifecycle state and once by
+		// the generation-fenced configuration snapshot.
+		assertProjectPageReads(t, ids, []string{"__project-reservations", "-"}, 512)
+	})
 	file := filepath.Join(t.TempDir(), "project.json")
 	document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{
 		"app": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sh", "-c", "echo inventory-ready; sleep 300"}}},
@@ -80,4 +91,65 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 			t.Fatalf("unrelated history changed: %v", err)
 		}
 	}
+}
+
+func assertProjectPageReads(t *testing.T, ids, firstArgs []string, want int) {
+	t.Helper()
+	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { unix.Close(fd) })
+	for _, id := range ids {
+		if _, err := unix.InotifyAddWatch(fd, filepath.Join("/var/lib/casklet/containers", id, "state.json"), unix.IN_OPEN|unix.IN_CLOSE_NOWRITE); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := append([]string(nil), firstArgs...)
+	reads, pages := 0, 0
+	for {
+		var page struct {
+			Records []json.RawMessage `json:"records"`
+			Next    string            `json:"next"`
+		}
+		output := backgroundSuccess(t, args...)
+		if err := json.Unmarshal([]byte(output), &page); err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		buffer := make([]byte, 64<<10)
+		for {
+			n, err := unix.Read(fd, buffer)
+			if errors.Is(err, unix.EAGAIN) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for offset := 0; offset < n; {
+				mask := encodingbinary.NativeEndian.Uint32(buffer[offset+4:])
+				if mask&unix.IN_Q_OVERFLOW != 0 {
+					t.Fatal("state read watch overflowed")
+				}
+				if mask&unix.IN_OPEN != 0 {
+					reads++
+				}
+				offset += unix.SizeofInotifyEvent + int(encodingbinary.NativeEndian.Uint32(buffer[offset+12:]))
+			}
+		}
+		if page.Next == "" {
+			break
+		}
+		if pages > len(ids) || len(page.Records) != 64 {
+			t.Fatal("invalid page continuation")
+		}
+		args = append(append([]string(nil), firstArgs[:len(firstArgs)-1]...), page.Next)
+		if firstArgs[0] == "__project-records" {
+			args = append(append([]string(nil), firstArgs...), page.Next)
+		}
+	}
+	if reads != want {
+		t.Fatalf("%d history records across %d pages: state opens=%d want=%d", len(ids), pages, reads, want)
+	}
+	t.Logf("%d history records across %d pages: %d state opens", len(ids), pages, reads)
 }
