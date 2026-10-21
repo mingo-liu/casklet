@@ -17,6 +17,8 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 		return executeNetwork(ctx, r, stdout)
 	case "project-status":
 		return 0, executeProjectStatus(ctx, r.Reference, stdout)
+	case "project-records":
+		return 0, executeProjectRecords(ctx, r, stdout)
 	case "project-start-preflight":
 		return executeProjectStartPreflight(ctx, r)
 	case "project-replace":

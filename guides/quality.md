@@ -6,6 +6,32 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-21: Page project inventory without unrelated command payloads
+
+Project operations page their private guest inventory by full container ID, at
+most 64 records per response. Initial inventory preserves complete project member
+records and minimal unrelated name/state/generation/creation identities for ownership and
+reservation checks. Final records, rollback, down, ps and logs use project-scoped
+pages. Each response keeps the 8 MiB operation limit, while total retained
+history no longer has to fit one response. Public member JSON remains complete.
+
+The host validates page size, increasing full IDs, project scope and advancing
+continuations, and checks cancellation between pages. Existing per-container
+generation and ownership validation still handles live inventory changes.
+Validation includes oversized unrelated command history, private-field exclusion,
+full member preservation, unrelated name ownership, malformed pages/cursors,
+empty results, creation-order rollback, cancellation and writer errors. A real
+Linux regression creates 256 retained records exceeding 8 MiB: the previous
+engine fails before startup, while the updated engine completes up/wait, ps,
+logs, preview and down while preserving all unrelated records.
+
+Validation: full macOS formatting/unit/vet/race checks and native build passed.
+Nine real Mac project tests passed, including preview/recreation, readiness,
+logs and cancellation; final rollback tests passed again after preserving
+creation order. Linux arm64 unit/vet and CLI/project race checks passed, as did
+eight privileged project cases through the shared-VM preservation wrapper.
+Intel Mac execution was not run locally.
+
 ## 2026-10-21: Cancel project logs through blocked output pipes
 
 Project log aggregation reuses the archive stream's pollable descriptor helper

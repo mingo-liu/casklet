@@ -492,6 +492,18 @@ records recheck the pinned executions and readiness. Timeout returns 124 after t
 existing independent bounded rollback; reused/resumed services remain.
 
 A stable cancelable lock serializes each project in the local machine state directory.
+Project record transport uses ID-ordered pages of at most 64 records. Initial
+inventory keeps complete records for the selected project and only names, IDs,
+states, generations and creation times for unrelated containers, preserving
+name ownership and global reservation checks without transporting unrelated
+commands or labels.
+Final listings, rollback, down, status and log selection request project-scoped
+pages. Every page retains the existing per-operation response bound; the host
+validates increasing identities and continuation cursors before joining pages.
+Joined records retain creation order, including reverse-order rollback.
+Pagination is a live inventory rather than an atomic snapshot, and subsequent
+ownership and generation fences remain authoritative.
+
 Atomic synced receipt writes record successfully created resources. Private bounded
 host/guest resource commands use exclusive creation and timestamp-conditional
 removal, with the identity comparison under the existing network/volume metadata
