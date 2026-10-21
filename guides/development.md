@@ -4,7 +4,7 @@
 
 ## macOS client
 
-Install Go 1.27.2+, Make, and Lima 2.0+ on macOS 13.5+:
+Install Go 1.27.3+, Make, and Lima 2.0+ on macOS 13.5+:
 
 ```sh
 brew install lima

@@ -24,6 +24,11 @@ the selected privileged project and image/volume archive cases through the
 shared-VM preservation wrapper. Caller descriptor preservation remains covered
 by the shared stream regressions. Intel Mac execution was not run locally.
 
+The PR vulnerability gate found GO-2026-6809 in the existing Go 1.27.2 Linux
+engine. The minimum Go version, fresh-development archive checksums and bilingual
+build prerequisites now use Go 1.27.3. Checksums come from the official Go
+download manifest; final validation uses that patched toolchain.
+
 ## 2026-10-17: Batch project readiness sampling
 
 The readiness wait loop uses one project-scoped minimal guest response per pass,
