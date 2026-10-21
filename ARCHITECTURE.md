@@ -511,6 +511,16 @@ commands or labels.
 Final listings, rollback, down, status and log selection request project-scoped
 pages. Every page retains the existing per-operation response bound; the host
 validates increasing identities and continuation cursors before joining pages.
+Guest storage enumerates IDs but decodes only records after the cursor, skipping
+excluded replacement IDs before state reads. Immutable project labels select
+members before supervisor recovery and effective-health sampling. Refresh runs
+outside the metadata lock; concurrently removed records are skipped and refilled
+without shortening a continuation page. Scoped pages may end with an empty final
+page when remaining IDs belong to other projects. Directory enumeration remains
+per page; selection reads each retained state record once over a complete
+traversal rather than rereading all records for each page. Reservation snapshots
+still read each selected record again with its configuration for generation
+validation.
 Joined records retain creation order, including reverse-order rollback.
 Pagination is a live inventory rather than an atomic snapshot, and subsequent
 ownership and generation fences remain authoritative.

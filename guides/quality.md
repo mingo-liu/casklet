@@ -6,6 +6,36 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-21: Page project records at the storage boundary
+
+Project inventory and reservation calls use storage-level ID cursors instead of
+loading and refreshing the entire store before slicing each response. The store
+skips preceding and excluded IDs before reading state, applies immutable label
+selection before lifecycle refresh, and retains at most 64 selected records.
+Supervisor recovery and effective-health sampling run after the metadata lock is
+released. Concurrent removal refills short pages; filtered traversals can end
+with an empty final page. Host cursor validation, private-field redaction,
+creation-order rollback and generation-fenced reservation snapshots are retained.
+Directory names are still enumerated per page; no persistent index is introduced.
+
+Linux inotify regressions count actual state-file opens. With 256 stopped history
+records across four real CLI pages, the previous engine opens state 1,024 times
+for inventory and 1,280 times for reservations; the updated engine needs 256 and
+512 respectively. Reservation snapshots intentionally reread their selected state
+with configuration. Both read-count assertions fail against the previous engine.
+Other regressions cover sparse immutable selection, skipped corrupt prior/excluded
+state, selected-state validation, refresh lock ordering, concurrent-removal refill,
+empty final pages, cancellation and refresh failures.
+
+Validation: native macOS client/embedded-engine build, full macOS unit/vet and
+formatting checks, and CLI/project race checks passed. Linux arm64 full unit/vet
+and container/CLI/project race checks passed. All eight privileged project cases,
+including oversized history, offline images, preview/recreation, readiness and
+rollback, passed through the shared-store preservation wrapper. All 14 scoped
+real macOS project tests passed through SSH/VM, including deployment, preview,
+recreation, logs, port/alias rejection, cancellation and rollback. Intel execution
+and the complete privileged/macOS end-to-end suites were not run for this change.
+
 ## 2026-10-21: Batch project reservation preflight
 
 Preview and selected recreation replace per-container full inspections with

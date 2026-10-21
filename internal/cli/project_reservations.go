@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sort"
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/container"
@@ -34,7 +33,7 @@ func parseProjectReservations(args []string) (Request, error) {
 }
 
 func executeProjectReservations(ctx context.Context, r Request, out io.Writer) error {
-	records, err := container.List(ctx, true)
+	page, err := container.ListPage(ctx, container.RecordPageOptions{After: r.Cursor, ExcludeIDs: r.References})
 	if err != nil {
 		return err
 	}
@@ -42,26 +41,14 @@ func executeProjectReservations(ctx context.Context, r Request, out io.Writer) e
 	if err != nil {
 		return err
 	}
-	return writeProjectReservations(ctx, out, records, r.Cursor, r.References, store.Snapshot)
+	return writeProjectReservations(ctx, out, page, store.Snapshot)
 }
 
-func writeProjectReservations(ctx context.Context, out io.Writer, records []container.Record, cursor string, excluded []string, snapshot func(context.Context, string) (container.Record, config.Config, error)) error {
-	skip := map[string]bool{}
-	for _, id := range excluded {
-		skip[id] = true
-	}
-	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	page := project.ReservationPage{Records: []project.Reservation{}}
-	for _, record := range records {
+func writeProjectReservations(ctx context.Context, out io.Writer, records container.RecordPage, snapshot func(context.Context, string) (container.Record, config.Config, error)) error {
+	page := project.ReservationPage{Records: []project.Reservation{}, Next: records.Next}
+	for _, record := range records.Records {
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		if record.ID <= cursor || skip[record.ID] {
-			continue
-		}
-		if len(page.Records) == project.ReservationPageSize {
-			page.Next = page.Records[len(page.Records)-1].ID
-			break
 		}
 		current, cfg, err := snapshot(ctx, record.ID)
 		if err != nil {

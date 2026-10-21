@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestProjectRecordPagesExcludeUnrelatedPayloadsAndPreserveMembers(t *testing
 				t.Fatalf("selection: %v %+v %v", args, r, err)
 			}
 			out := &boundedProjectOutput{limit: 8 << 20}
-			if err := writeProjectRecords(out, records, r.Reference, r.Cursor, r.All); err != nil || out.overflow {
+			if err := writeProjectRecords(out, testRecordPage(records, r.Cursor, r.Reference, r.All, nil), r.Reference); err != nil || out.overflow {
 				t.Fatalf("page overflow: %v", err)
 			}
 			if bytes.Contains(out.data, []byte("unrelated-private")) || bytes.Contains(out.data, []byte(strings.Repeat(" ", 1024))) {
@@ -63,27 +64,33 @@ func TestProjectRecordPagesExcludeUnrelatedPayloadsAndPreserveMembers(t *testing
 }
 
 func TestProjectRecordPagesPreserveCreationOrderForRollback(t *testing.T) {
-	records := make([]container.Record, 65)
-	for i := range records {
-		records[i] = container.Record{ID: fmt.Sprintf("%032x", i+1), CreatedAt: time.Unix(int64(100-i), 0), Labels: map[string]string{project.LabelName: "demo"}}
-	}
-	call := projectRecordCalls("demo", func(_ context.Context, args ...string) ([]byte, error) {
-		r, err := Parse(args)
-		if err != nil {
-			return nil, err
+	for _, count := range []int{64, 65} {
+		records := make([]container.Record, count+1)
+		for i := range records {
+			records[i] = container.Record{ID: fmt.Sprintf("%032x", i+1), CreatedAt: time.Unix(int64(100-i), 0), Labels: map[string]string{project.LabelName: "demo"}}
 		}
-		var out bytes.Buffer
-		err = writeProjectRecords(&out, records, r.Reference, r.Cursor, r.All)
-		return out.Bytes(), err
-	})
-	runner := project.Runner{Call: call}
-	got, err := runner.Records(context.Background(), "demo")
-	if err != nil || len(got) != 65 {
-		t.Fatalf("listing: %d %v", len(got), err)
-	}
-	for i := 1; i < len(got); i++ {
-		if !got[i].CreatedAt.After(got[i-1].CreatedAt) {
-			t.Fatal("ID traversal changed reverse-creation rollback order")
+		// An unrelated trailing ID can require an empty final scoped page.
+		records[count].Labels = nil
+		calls := 0
+		call := projectRecordCalls("demo", func(_ context.Context, args ...string) ([]byte, error) {
+			calls++
+			r, err := Parse(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			err = writeProjectRecords(&out, testRecordPage(records, r.Cursor, r.Reference, r.All, nil), r.Reference)
+			return out.Bytes(), err
+		})
+		runner := project.Runner{Call: call}
+		got, err := runner.Records(context.Background(), "demo")
+		if err != nil || len(got) != count || calls != 2 {
+			t.Fatalf("listing: %d records, %d calls, %v", len(got), calls, err)
+		}
+		for i := 1; i < len(got); i++ {
+			if !got[i].CreatedAt.After(got[i-1].CreatedAt) {
+				t.Fatal("ID traversal changed reverse-creation rollback order")
+			}
 		}
 	}
 }
@@ -117,11 +124,11 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 			t.Fatalf("accepted %v", args)
 		}
 	}
-	if err := writeProjectRecords(failingWriter{}, nil, "demo", "", false); err == nil {
+	if err := writeProjectRecords(failingWriter{}, projectRecordPage{Records: []container.Record{}}, "demo"); err == nil {
 		t.Fatal("output error lost")
 	}
 	var out bytes.Buffer
-	if err := writeProjectRecords(&out, nil, "demo", "", false); err != nil || out.String() != "{\"records\":[]}\n" {
+	if err := writeProjectRecords(&out, projectRecordPage{Records: []container.Record{}}, "demo"); err != nil || out.String() != "{\"records\":[]}\n" {
 		t.Fatalf("empty page: %s %v", out.String(), err)
 	}
 }
@@ -134,7 +141,7 @@ func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 				t.Fatalf("ownership preflight reached mutation/resource call: %v", args)
 			}
 			var out bytes.Buffer
-			err := writeProjectRecords(&out, []container.Record{record}, "demo", "", true)
+			err := writeProjectRecords(&out, projectRecordPage{Records: []container.Record{record}}, "demo")
 			return out.Bytes(), err
 		})
 		runner := project.Runner{Call: call}
@@ -143,4 +150,29 @@ func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 			t.Fatalf("name conflict was lost: %v", err)
 		}
 	}
+}
+
+// Fake the guest storage pages for transport tests. Linux storage tests exercise
+// the actual disk cursor, read bounds, selection and lifecycle refresh.
+func testRecordPage(records []container.Record, cursor, name string, inventory bool, excluded []string) container.RecordPage {
+	records = append([]container.Record(nil), records...)
+	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+	skip := map[string]bool{}
+	for _, id := range excluded {
+		skip[id] = true
+	}
+	page := container.RecordPage{Records: []container.Record{}}
+	for _, record := range records {
+		if record.ID <= cursor || skip[record.ID] {
+			continue
+		}
+		if len(page.Records) == container.RecordPageSize {
+			page.Next = page.Records[len(page.Records)-1].ID
+			break
+		}
+		if inventory || record.Labels[project.LabelName] == name {
+			page.Records = append(page.Records, record)
+		}
+	}
+	return page
 }

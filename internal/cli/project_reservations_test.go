@@ -34,7 +34,7 @@ func TestProjectReservationsBoundSnapshotsAndExcludePrivateData(t *testing.T) {
 	for i, expected := range []int{64, 63} {
 		var out bytes.Buffer
 		before := calls
-		if err := writeProjectReservations(context.Background(), &out, records, cursor, excluded, snapshot); err != nil {
+		if err := writeProjectReservations(context.Background(), &out, testRecordPage(records, cursor, "", true, excluded), snapshot); err != nil {
 			t.Fatal(err)
 		}
 		if calls-before != expected || out.Len() > 64<<10 || strings.Contains(out.String(), "private") || strings.Contains(out.String(), "TOKEN") {
@@ -73,7 +73,7 @@ func TestProjectReservationsRejectSnapshotChangesAndInvalidSelections(t *testing
 			cancel()
 		}
 		var out bytes.Buffer
-		if err := writeProjectReservations(ctx, &out, []container.Record{record}, "", nil, snapshot); err == nil || out.Len() != 0 {
+		if err := writeProjectReservations(ctx, &out, container.RecordPage{Records: []container.Record{record}}, snapshot); err == nil || out.Len() != 0 {
 			t.Fatalf("scenario=%s output=%s err=%v", scenario, out.String(), err)
 		}
 		cancel()
@@ -86,7 +86,7 @@ func TestProjectReservationsRejectSnapshotChangesAndInvalidSelections(t *testing
 	if r, err := Parse([]string{"__project-reservations", "-", record.ID}); err != nil || r.Cursor != "" || len(r.References) != 1 {
 		t.Fatalf("valid selection: %+v %v", r, err)
 	}
-	if err := writeProjectReservations(context.Background(), failingWriter{}, nil, "", nil, nil); err == nil {
+	if err := writeProjectReservations(context.Background(), failingWriter{}, container.RecordPage{}, nil); err == nil {
 		t.Fatal("output error lost")
 	}
 }

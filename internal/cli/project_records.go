@@ -13,12 +13,9 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-const projectRecordPageSize = 64
+const projectRecordPageSize = container.RecordPageSize
 
-type projectRecordPage struct {
-	Records []container.Record `json:"records"`
-	Next    string             `json:"next,omitempty"`
-}
+type projectRecordPage = container.RecordPage
 
 func validProjectCursor(cursor string) bool {
 	if cursor == "" {
@@ -49,30 +46,24 @@ func parseProjectRecords(args []string) (Request, error) {
 }
 
 func executeProjectRecords(ctx context.Context, r Request, out io.Writer) error {
-	records, err := container.List(ctx, true)
+	options := container.RecordPageOptions{After: r.Cursor}
+	if !r.All {
+		options.Labels = map[string]string{project.LabelName: r.Reference}
+	}
+	page, err := container.ListPage(ctx, options)
 	if err != nil {
 		return err
 	}
-	return writeProjectRecords(out, records, r.Reference, r.Cursor, r.All)
+	return writeProjectRecords(out, page, r.Reference)
 }
 
-func writeProjectRecords(out io.Writer, records []container.Record, name, cursor string, inventory bool) error {
-	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	page := projectRecordPage{Records: []container.Record{}}
-	for _, record := range records {
-		if record.ID <= cursor || !inventory && record.Labels[project.LabelName] != name {
-			continue
-		}
-		if len(page.Records) == projectRecordPageSize {
-			page.Next = page.Records[len(page.Records)-1].ID
-			break
-		}
+func writeProjectRecords(out io.Writer, page projectRecordPage, name string) error {
+	for i, record := range page.Records {
 		if record.Labels[project.LabelName] != name {
 			// Only name ownership and reservation identity are needed outside
 			// the project. Commands, labels and private diagnostics stay guest-local.
-			record = container.Record{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, CreatedAt: record.CreatedAt}
+			page.Records[i] = container.Record{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, CreatedAt: record.CreatedAt}
 		}
-		page.Records = append(page.Records, record)
 	}
 	return json.NewEncoder(out).Encode(page)
 }
