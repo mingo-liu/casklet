@@ -534,6 +534,7 @@ Notes:
   Pins existing full container IDs once; replacement containers are not followed.
   No matches succeed without output; explicitly missing or duplicate services fail.
   Does not hold the deployment lock. Stream failure cancels the other readers.
+  Cancellation interrupts blocked stdout/stderr pipes and joins all readers.
   Unterminated output is flushed at EOF; lines over 32 KiB split into prefixed chunks.
 
 Examples:

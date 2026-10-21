@@ -1376,6 +1376,8 @@ fail. Stream or output failure cancels and joins other readers. Partial final
 lines flush at EOF; lines exceeding 32 KiB split into prefixed chunks. At most
 64 services are read concurrently; stdout/stderr from each container remain
 combined, as with `logs`.
+Cancellation interrupts blocked stdout/stderr pipes and waits for every reader
+to finish without stopping the workloads.
 
 ### Readiness sampling
 

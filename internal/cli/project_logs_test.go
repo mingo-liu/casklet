@@ -18,6 +18,12 @@ func logRecord(id, key string) container.Record {
 }
 
 func TestProjectLogsSelectionAndArguments(t *testing.T) {
+	for _, mac := range []bool{false, true} {
+		help, err := scopedUsage("project logs", mac)
+		if err != nil || !strings.Contains(help, "blocked stdout/stderr pipes") {
+			t.Fatalf("missing cancellation help: %v %s", err, help)
+		}
+	}
 	records := []container.Record{logRecord("one", "api"), logRecord("two", "db")}
 	selected, err := selectProjectLogs(records, "demo", []string{"db", "db"})
 	if err != nil || len(selected) != 1 || selected[0].ID != "two" {
@@ -107,5 +113,29 @@ func TestProjectLogsFailureCancelsAndJoinsReaders(t *testing.T) {
 	case <-finished:
 	default:
 		t.Fatal("reader not joined")
+	}
+}
+
+func TestProjectLogsWriteFailureCancelsBeforeStreamReturns(t *testing.T) {
+	for _, diagnostic := range []bool{false, true} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		out, diagnostics := io.Writer(failedLogOutput{}), io.Writer(io.Discard)
+		if diagnostic {
+			out, diagnostics = io.Discard, failedLogOutput{}
+		}
+		err := streamProjectLogs(ctx, []container.Record{logRecord("one", "api")}, out, diagnostics, func(ctx context.Context, _ string, w, d io.Writer) error {
+			if diagnostic {
+				_, _ = io.WriteString(d, "diagnostic\n")
+			} else {
+				_, _ = io.WriteString(w, "hello\n")
+			}
+			// A subprocess waits for cancellation after its output copy fails.
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		if !errors.Is(err, io.ErrClosedPipe) || ctx.Err() != nil {
+			t.Fatalf("diagnostic=%v error=%v parent=%v", diagnostic, err, ctx.Err())
+		}
+		cancel()
 	}
 }

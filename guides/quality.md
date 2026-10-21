@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-21: Cancel project logs through blocked output pipes
+
+Project log aggregation reuses the archive stream's pollable descriptor helper
+for stdout and stderr, closing private duplicates on cancellation and restoring
+caller descriptor flags after all readers join. Output failures cancel readers
+immediately, before waiting for subprocess completion; stream failures cancel
+before attempting a final partial-line flush. Workloads remain running.
+
+Validation: inherited full stdout/stderr pipe regressions failed before the fix
+and pass afterward. Writer-failure tests verify cancellation before stream return.
+The real macOS client/SSH/VM tests pass normal selection/following, SIGTERM status
+143 and cancellation with a full output pipe while preserving the workload.
+Formatting, full macOS unit/vet/race checks and native client/embedded-engine
+build passed. Linux arm64 unit/vet and CLI/project race checks passed, as did
+the selected privileged project and image/volume archive cases through the
+shared-VM preservation wrapper. Caller descriptor preservation remains covered
+by the shared stream regressions. Intel Mac execution was not run locally.
+
 ## 2026-10-17: Batch project readiness sampling
 
 The readiness wait loop uses one project-scoped minimal guest response per pass,

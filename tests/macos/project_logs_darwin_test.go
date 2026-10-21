@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,5 +79,62 @@ func TestProjectLogsSelectionFollowAndCancellation(t *testing.T) {
 	}
 	if !strings.Contains(success(t, "project", "ps", name), "running") {
 		t.Fatal("cancellation stopped workloads")
+	}
+}
+
+func TestProjectLogsCancelsWithFullOutputPipe(t *testing.T) {
+	client(t)
+	name := fmt.Sprintf("log-pipe-%x", time.Now().UnixNano())
+	file := filepath.Join(t.TempDir(), "project.json")
+	body := `{"name":"` + name + `","networks":[],"services":{"app":{"run":{"network":"none","command":["/bin/sh","-c","head -c 1048576 /dev/zero | tr '\\000' x; echo; sleep 300"]}}}}`
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { success(t, "project", "down", name) })
+	success(t, "project", "up", "--config", file)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, client(t), "project", "logs", "--follow", name)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	cmd.Stdout = writer
+	var diagnostic bytes.Buffer
+	cmd.Stderr = &diagnostic
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	ready := make(chan error, 1)
+	go func() { _, err := io.CopyN(io.Discard, reader, 32<<10); ready <- err }()
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("no log output before deadline")
+	}
+	// Leave the pipe undrained while the bounded one-MiB snapshot fills it.
+	time.Sleep(200 * time.Millisecond)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 143 {
+			t.Fatalf("cancel: %v %s", err, diagnostic.String())
+		}
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+		t.Fatalf("blocked output prevented cancellation: %s", diagnostic.String())
+	}
+	if !strings.Contains(success(t, "project", "ps", name), "running") {
+		t.Fatal("log cancellation stopped the workload")
 	}
 }

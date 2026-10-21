@@ -44,7 +44,7 @@ func TestArchiveInheritedPipeCancellation(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "original status: %v %v\n", err, statusErr)
 			os.Exit(1)
 		}
-		stream, finish, err := cancelableArchiveFile(ctx, file)
+		stream, finish, err := cancelableStreamFile(ctx, file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -117,7 +117,7 @@ func TestArchiveFileSetupRestoresStatusWithoutIO(t *testing.T) {
 			return value
 		}
 		before := flags()
-		_, finish, err := cancelableArchiveFile(context.Background(), file)
+		_, finish, err := cancelableStreamFile(context.Background(), file)
 		if err != nil {
 			t.Fatal(err)
 		}
