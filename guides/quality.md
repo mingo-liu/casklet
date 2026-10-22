@@ -17,12 +17,18 @@ The Mac presentation restores wildcard and localhost addresses from Lima's
 dedicated guest loopback addresses, including paged project listings. Help and
 both README translations document the display.
 
+Port lookup holds the shared store lock while reading only published fields
+from configuration. It does not reopen lifecycle state, preserving the existing
+inventory, reservation and readiness state-read bounds with large histories.
+
 Validation: complete macOS and Linux unit suites, vet, formatting, focused macOS
 race checks, and the real Mac client/VM TCP/UDP forwarding and port-listing tests
 passed. Regressions cover stopped and active containers, absent and multiple
 mappings, TCP/UDP, JSON/full IDs, host-address translation, legacy records,
-cancellation, removal, and paged project listings. The full macOS VM suite was
-not rerun; hosted CI runs both privileged Linux suites.
+cancellation, removal, and paged project listings. The privileged shared-VM
+large-history regression also passed, preserving 256 inventory state reads,
+512 reservation reads, and one pinned readiness read; daily data was restored.
+The full macOS VM suite was not rerun; hosted CI runs both privileged Linux suites.
 
 ## 2026-10-22: Grant draft inspection its required GitHub permission
 

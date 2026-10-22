@@ -124,6 +124,23 @@ func TestRecordPagesReadEachStateOnce(t *testing.T) {
 	t.Logf("256 records across four pages: state opens %d -> %d", legacyReads, pageReads)
 }
 
+func TestRefreshedPagesReadEachStateOnceWithPorts(t *testing.T) {
+	store, records := paginationStore(t, 2)
+	reads := watchRecordReads(t, store, records)
+	page, err := refreshedPage(context.Background(), store, RecordPageOptions{}, func(_ context.Context, record Record) (Record, error) {
+		return record, nil
+	})
+	if err != nil || len(page.Records) != 2 {
+		t.Fatalf("listing: %+v %v", page, err)
+	}
+	if got := reads(); got != 2 {
+		t.Fatalf("state opens=%d, want 2", got)
+	}
+	if len(page.Records[0].Publish) != 1 || page.Records[0].Publish[0].HostPort != 8080 {
+		t.Fatalf("listing lost ports: %+v", page)
+	}
+}
+
 func TestRecordPagesSkipPriorAndExcludedStateFiles(t *testing.T) {
 	store, records := paginationStore(t, 66)
 	for _, index := range []int{0, 64} {

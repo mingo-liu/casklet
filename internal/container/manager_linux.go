@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -266,14 +267,34 @@ func List(ctx context.Context, all bool) ([]Record, error) {
 	return result, nil
 }
 
-// listingRecord reads immutable port configuration for old and new containers.
-// Snapshot pins the full ID and handles removal under the store lock.
+// listingRecord reads only the saved ports without reopening state.json.
+// The shared lock fences removal of the immutable full ID's configuration.
 func listingRecord(ctx context.Context, store *Store, record Record) (Record, error) {
-	_, cfg, err := store.Snapshot(ctx, record.ID)
+	if err := validateID(record.ID); err != nil {
+		return Record{}, err
+	}
+	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return Record{}, err
 	}
-	record.Publish = cfg.Publish
+	defer lock.Close()
+	dir := filepath.Join(store.root, record.ID)
+	if err := store.checkDirectory(dir, true); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Record{}, ErrNotFound
+		}
+		return Record{}, err
+	}
+	var saved struct {
+		Publish []config.PortMapping `json:"publish"`
+	}
+	if err := store.readJSON(filepath.Join(dir, "config.json"), maxConfigBytes, &saved); err != nil {
+		return Record{}, err
+	}
+	if err := config.ValidateNetwork("bridge", nil, saved.Publish, nil); err != nil {
+		return Record{}, err
+	}
+	record.Publish = saved.Publish
 	return record, nil
 }
 
