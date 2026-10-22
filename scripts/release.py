@@ -27,8 +27,9 @@ def candidate(tag):
     validate_version(tag)
     if os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise ValueError("release validation must run from main")
-    if os.environ.get("CASKLET_MACOS_E2E_ENABLED") != "1":
-        raise ValueError("configure an Apple silicon Mac runner and enable CASKLET_MACOS_E2E_ENABLED before releasing")
+    tested_revision = os.environ.get("MACOS_TESTED_REVISION", "")
+    if re.fullmatch(r"[0-9a-f]{40}", tested_revision) is None:
+        raise ValueError("provide the full commit SHA that passed the manual Apple silicon VM suite without skips")
     run("git", "check-ref-format", "refs/tags/" + tag)
     run("git", "fetch", "--no-tags", "origin",
         "+refs/heads/main:refs/remotes/origin/main",
@@ -36,6 +37,8 @@ def candidate(tag):
     tag_oid = run("git", "rev-parse", "--verify", "refs/tags/" + tag)
     revision = run("git", "rev-parse", "--verify", "refs/tags/" + tag + "^{commit}")
     run("git", "merge-base", "--is-ancestor", revision, "origin/main")
+    if revision != tested_revision:
+        raise ValueError("manual Apple silicon VM validation must match the selected tag's commit")
     release = github("release", "view", tag, "--repo", os.environ["GITHUB_REPOSITORY"],
                      "--json", "databaseId,isDraft,tagName")
     if release.get("isDraft") is not True or release.get("tagName") != tag:
@@ -51,11 +54,16 @@ def prepare(tag):
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         for name, value in selected.items():
             output.write(f"{name}={value}\n")
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write(f"Manual Apple silicon VM validation declared for `{selected['revision']}`.\n\n"
+                          "The maintainer confirms the complete suite passed without skips; "
+                          "this workflow checks the revision and runs the hosted release checks.\n")
 
 
 def publish(tag, assets):
-    if any(os.environ.get(name) != "success" for name in ("CHECKS_RESULT", "MACOS_RESULT")):
-        raise ValueError("hosted checks and the Apple silicon Mac suite must succeed before publishing")
+    if os.environ.get("CHECKS_RESULT") != "success":
+        raise ValueError("hosted checks must succeed before publishing")
     expected = {"revision": os.environ.get("RELEASE_REVISION", ""),
                 "tag_oid": os.environ.get("RELEASE_TAG_OID", ""),
                 "release_id": os.environ.get("RELEASE_ID", "")}
@@ -71,7 +79,7 @@ def publish(tag, assets):
     github("api", "--method", "PATCH",
            f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/{expected['release_id']}",
            "-F", "draft=false")
-    print(f"Published {tag} after hosted checks and Apple silicon Mac validation.")
+    print(f"Published {tag} after hosted checks and declared manual Apple silicon VM validation.")
 
 
 def main():

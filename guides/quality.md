@@ -6,6 +6,33 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Validate the release VM path manually before publication
+
+Full native Apple silicon client/Lima VM validation is now a manual pre-release
+step on the existing development Mac. This supersedes the self-hosted runner
+activation and automated Mac release policies below. Removed the dedicated Mac
+workflow, runner inventory/activation helper and its obsolete regressions; no
+runner, separate macOS account or Actions environment/variable is required.
+The disposable VM test helper retains native architecture checks, no-skip
+enforcement, isolated daily state, bounded diagnostics and failure cleanup.
+
+Release dispatch requires the full manually tested commit SHA and verifies it
+against the selected main-ancestor tag during preparation and before/after asset
+upload. The workflow summary records the maintainer declaration, while the guide
+requires release notes and a reviewed suite log for the exact candidate/version.
+This declaration does not automatically prove local execution. Hosted CI, native
+ARM64/Intel package checks, both privileged Linux suites and draft/tag identity
+checks remain mandatory. Both READMEs and the development guide describe the new
+split between hosted checks and manual VM testing.
+
+Validation: all 20 Python script regressions, pinned actionlint, complete macOS
+unit tests, vet and formatting passed. Release regressions reject absent, short,
+malformed or mismatched manual-test SHAs before recording approval or uploading
+assets, retain draft/tag/main ancestry and failed/cancelled/skipped hosted-check
+guards, and accept a matching declaration without any registered runner or enabled
+Mac gate. Runtime behavior and the VM suite are unchanged; no new real-VM run or
+release publication was performed for this workflow/documentation change.
+
 ## 2026-10-22: Require full macOS VM validation only on Apple silicon
 
 The complete macOS client/Lima VM workflow now runs one native ARM64 job.

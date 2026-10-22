@@ -153,69 +153,23 @@ and `CASKLET_REQUIRE_LEGACY_ENGINE=1` before `make test-integration` to enforce
 the same check through the data-preserving shared-VM wrapper. Without these
 settings the old-supervisor case remains optional for ordinary local runs.
 
-## Dedicated macOS end-to-end CI
+## Manual macOS end-to-end release validation
 
-`.github/workflows/macos-e2e.yml` runs the complete `make test-macos` client/VM
-suite weekly, by manual dispatch from `main`, or as a required release gate.
-The complete client/VM suite requires a native Apple silicon (`ARM64`) dedicated
-runner; Rosetta is rejected. Intel retains native archive builds and offline
-package verification, plus the native Linux amd64 integration suite. Intel macOS
-client/VM end-to-end execution is not required for release.
-It is opt-in because GitHub-hosted Mac runners cannot be assumed to support the
-product's Virtualization.framework VM. Before enabling it:
+Before each release, run the complete `make test-macos` client/VM suite manually
+on a native Apple silicon Mac. An existing development Mac and its regular user
+account are sufficient; no additional Mac, macOS account, GitHub runner registration,
+Actions variable or environment is required. Rosetta is rejected for release tests.
+Use macOS 13.5+, Lima 2.0+, Make, Python 3.9+, the Go version in `go.mod`, and network
+access to Ubuntu images and packages. Keep the Mac awake and online until cleanup
+finishes, and run only one full VM suite at a time.
 
-1. Register one dedicated Apple silicon self-hosted Mac runner with labels
-   `self-hosted`, `macOS`, and `casklet-e2e`, plus its automatic `ARM64` label.
-   Use macOS 13.5+ with working Virtualization.framework,
-   Lima 2.0+, Make, Python 3.9+, and network access to Ubuntu images and packages.
-   The job installs the Go version in `go.mod` through `setup-go`.
-2. Run the agent as a regular dedicated Mac account with no personal files,
-   credentials, everyday containers, or other jobs. Product provisioning mounts
-   this account's home writable. The test suite uses free host ports but requires
-   exclusive use of this runner. Do not attach a personal workstation runner.
-3. Create the GitHub environment `macos-e2e`, restrict it to the `main` branch
-   only, and configure reviewer approval if required by your release
-   policy. Limit runner-group access to this repository where supported.
-4. Check the actual repository prerequisites with an authenticated maintainer
-   GitHub CLI, then explicitly enable the existing gate:
-
-   ```sh
-   python3 scripts/check-macos-e2e.py --repo OWNER/REPOSITORY
-   python3 scripts/check-macos-e2e.py --repo OWNER/REPOSITORY --enable
-   gh workflow run macos-e2e.yml --repo OWNER/REPOSITORY --ref main
-   ```
-
-   The first command is read-only. Both emit JSON with matching online ARM64
-   runner IDs, the main-only environment check, readiness and enabled state.
-   A missing/offline ARM64 runner, ambiguous architecture labels and unrestricted,
-   wildcard, tag or additional environment branch policies fail the check.
-   Pagination includes every repository runner. Busy online runners may queue
-   work through the workflow's existing concurrency policy.
-   `--enable` sets `CASKLET_MACOS_E2E_ENABLED=1` only after all prerequisites pass
-   and reads the variable back. A failed prerequisite does not change settings.
-   API/authentication failures return nonzero; no runner is registered and no
-   environment restriction is changed by this script.
-
-   Use a maintainer account that can read repository runner administration,
-   environment policies and Actions variables; enabling additionally needs
-   variable write permission. Keep these privileges out of workflow tokens.
-   The API checks use GitHub's [runner inventory](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
-   and [environment branch policy](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies)
-   endpoints. The ordinary CI token intentionally cannot administer runners.
-   Intel runner presence and availability do not affect readiness. A successful
-   prerequisite check does not prove VM capability or test success: the dispatched
-   workflow must still pass the native Apple silicon client/VM suite with no skips.
-   Release publication independently requires that result.
-   Until enabled, optional weekly runs skip and release preparation fails.
-
-The workflow never runs for pull requests or ordinary pushes. A GitHub-hosted
-gate verifies that the selected immutable revision is an ancestor of `main`
-before any code reaches the persistent Mac. Manual dispatch from another branch
-is refused, release tags must already be merged into `main`, checkout does not
-persist its token, and concurrency queues runs rather than canceling cleanup.
-Protect `main`, release tags, and workflow changes: trusted repository code can
-execute with the runner account's permissions. The environment policy is an
-additional administrative gate, not a substitute for protecting those refs.
+GitHub-hosted Actions continue to run formatting, unit, vet, race, build,
+vulnerability, native macOS package and native Linux arm64/amd64 integration checks.
+The real client/VM suite runs locally because GitHub-hosted Apple silicon runners
+do not support the nested virtualization needed to start the product VM; see
+the [GitHub-hosted runner limitations](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#limitations-for-arm64-macos-runners).
+Intel retains native archive builds, offline package verification and native Linux
+amd64 integration coverage. Full Intel macOS client/VM execution is not required.
 
 `scripts/test-macos-ci.py` creates a fresh short path under `/private/tmp` for
 `LIMA_HOME` and a private temporary directory inside the ordinary shared home for
@@ -225,62 +179,81 @@ path within a configured writable share so the installer can transfer its payloa
 Always pair the two when testing an independent machine: changing host state alone
 does not isolate the VM. The ordinary home share remains available for live-bind tests.
 This is a disposable product VM, not a second permanent development VM; the
-runner never adopts or stops an inherited Lima home or daily product VM.
-The runner enables `CASKLET_MACOS_RESIZE_GROW=1` so the opt-in disk-growth
+script never adopts or stops an inherited Lima home or daily product VM.
+It enables `CASKLET_MACOS_RESIZE_GROW=1` so the opt-in disk-growth
 regression can exercise real expansion once available, only on this temporary VM.
+The account's ordinary home remains shared writable for installation and live-bind
+tests, as it is during ordinary product use.
 
-The workflow checks out the candidate and trusted runner controls separately;
-the controls select the candidate with `--project`, enforce native architecture
-and reject skipped tests. Older candidate scripts cannot disable these checks.
 The suite has a 35-minute outer deadline, retains the existing Go test timeout,
 and terminates its command group on timeout or catchable signals. Bounded
 diagnostics collect suite output, the instance listing, recent guest journal,
 and up to 20 Lima logs (last 4 MiB each). Cleanup forcibly stops and deletes only
-the isolated `casklet-runtime`, then removes both temporary directories. Logs upload
-even when tests fail and are retained for 14 days; disks, SSH keys, and credential
-files are excluded. Inspect artifacts before publishing them externally.
+the isolated `casklet-runtime`, then removes both temporary directories. Local
+artifacts retain logs even when tests fail; disks, SSH keys and credential files
+are excluded. Inspect logs before attaching them to a release.
 
 If teardown fails, the job fails and preserves the temporary directory recorded
 in `run-directory.txt` and `state-directory.txt`. An uncatchable kill, host shutdown, or job cancellation
-can also leave a VM behind. Before reusing the runner, verify the recorded path
+can also leave a VM behind. Before rerunning the suite, verify the recorded path
 belongs to this run, then use `LIMA_HOME=/private/tmp/ck-e2e-EXAMPLE/lima limactl
 delete --force casklet-runtime` and remove only those run and state directories after the VM
-has stopped. Never run recovery against the default Lima home. Runner operators
-must check for abandoned runs after a host interruption; the script does not
+has stopped. Never run recovery against the default Lima home. Check for
+abandoned runs after a host interruption; the script does not
 delete unknown old directories automatically.
 
-To run the same disposable suite manually on a dedicated Mac account:
+After creating the candidate tag, test that exact clean revision and version:
 
 ```sh
-./scripts/test-macos-ci.py
-python3 -B -m unittest discover -s scripts -p '*_test.py' -v
+release_tag=v0.1.0-rc.1
+git fetch origin main --tags
+git switch --detach "$release_tag"
+test -z "$(git status --porcelain)"
+tested_revision=$(git rev-parse HEAD)
+CASKLET_RELEASE_VERSION="$release_tag" \
+CASKLET_MACOS_EXPECT_ARCH=arm64 \
+CASKLET_MACOS_REQUIRE_NO_SKIPS=1 \
+CASKLET_MACOS_CI_ARTIFACTS="$PWD/bin/macos-release-$release_tag" \
+python3 scripts/test-macos-ci.py
 ```
+
+Continue only after the command exits zero, with no skipped tests and successful
+VM cleanup. Record the tag, full `tested_revision`, test date, native architecture,
+and pass/no-skip result in the draft release notes; attach the reviewed `suite.log`
+from the artifact directory. Any source change or moved tag requires testing the
+new candidate again. A previous development test run is not validation for a
+different release revision or version.
 
 Artifacts default to `bin/macos-e2e-artifacts`; set `CASKLET_MACOS_CI_ARTIFACTS`
 to a separate directory per run when retaining multiple runs. Set
 `CASKLET_MACOS_CI_TIMEOUT_SECONDS` (60–3600) to adjust the outer deadline.
 The fake-runner checks cover success, launch/bootstrap/test failure, deadline, SIGTERM, cleanup
 failure, preservation of inherited daily state, and exclusion of SSH keys. They
-run in ordinary macOS CI without virtualization. A passing fake/unit check does
-not establish that the real workflow or VM suite passed.
+run in ordinary hosted CI without virtualization. A passing fake/unit check does
+not establish that the real VM suite passed.
 
 ## Release publication gate
 
 Publish through `.github/workflows/release.yml` from `main`. Prepare an existing
 tag whose commit is already merged into `main`, and an unpublished GitHub draft
 release for that tag. Tags use `vMAJOR.MINOR.PATCH` with an optional prerelease or
-build suffix (for example `v0.1.0-rc.1`). Start the workflow:
+build suffix (for example `v0.1.0-rc.1`). After the manual validation above succeeds,
+start the workflow with the exact tested commit:
 
 ```sh
-gh workflow run release.yml --ref main -f tag=v0.1.0
+gh workflow run release.yml --ref main \
+  -f tag="$release_tag" -f macos_tested_revision="$tested_revision"
 ```
 
-Preparation refuses disabled Mac validation, non-main dispatches, missing drafts
-and unmerged tags. Hosted formatting/unit/vet/race/build/vulnerability and both
-privileged Linux suites run against the selected immutable commit. The native
-Apple silicon Mac must also pass its complete disposable-VM suite with no skipped
-tests. Failed, cancelled or skipped prerequisites cannot publish; a
-missing runner leaves validation pending rather than approving the release.
+Providing `macos_tested_revision` declares that the complete native Apple silicon
+suite passed manually without skips for this tag. Preparation requires its full
+40-character lowercase commit SHA to match the tag's commit, records the declaration
+in the workflow summary, and refuses non-main dispatches, missing drafts and
+unmerged tags. This is a maintainer declaration: Actions verifies the revision,
+not the local test execution or attached log. No self-hosted job is queued.
+Hosted formatting/unit/vet/race/build/vulnerability and both privileged Linux
+suites then run against the selected immutable commit. Failed, cancelled or
+skipped hosted checks cannot publish.
 
 Only the final hosted publication job receives `contents: write`. It rechecks
 the draft release ID, exact tag object, target commit and main ancestry before
@@ -299,7 +272,7 @@ replacing same-named assets on a retry. It rechecks draft/tag identity again aft
 upload before publishing. Missing/corrupt packages or failed uploads leave the
 draft unpublished; a partial upload can be retried. Other draft assets are retained.
 The binaries are not Developer ID signed or notarized. These hosted package
-checks do not replace the mandatory Apple silicon VM suite. Intel package
+checks do not replace the required manual Apple silicon VM suite. Intel package
 verification does not establish Intel client/VM end-to-end coverage.
 
 The same package build runs on every CI invocation. For local native verification
@@ -313,11 +286,6 @@ Use `amd64` on an Intel Mac. Build each archive on its native host.
 GitHub writers who publish directly through the UI/API bypass this workflow, so maintainers must use this publication path and protect release refs.
 See the [GitHub reusable workflow permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)
 and [release API](https://docs.github.com/en/rest/releases/releases#update-a-release).
-
-At the introduction of this gate, no dedicated Mac runners were registered.
-The gate remains disabled and release attempts fail until an Apple silicon runner
-is provisioned and the gate is explicitly enabled. Intel hardware is not required
-for this gate; unit/fake-runner checks do not establish real client/VM compatibility.
 
 ## OCI regression tests
 

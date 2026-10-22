@@ -7,6 +7,10 @@ on:
         description: Existing tag and unpublished draft release to validate and publish
         required: true
         type: string
+      macos_tested_revision:
+        description: Full commit SHA that passed the manual Apple silicon VM suite without skips
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -30,12 +34,12 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Require an enabled Mac gate and an unpublished main-ancestor tag
+      - name: Require manual Mac validation and an unpublished main-ancestor tag
         id: candidate
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-          CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
+          MACOS_TESTED_REVISION: ${{ inputs.macos_tested_revision }}
         run: python3 scripts/release.py prepare --tag "$RELEASE_TAG"
 
   checks:
@@ -46,20 +50,12 @@ jobs:
       revision: ${{ needs.prepare.outputs.revision }}
       version: ${{ inputs.tag }}
 
-  macos:
-    name: Real release client and VM (Apple silicon)
-    needs: prepare
-    uses: ./.github/workflows/macos-e2e.yml
-    with:
-      revision: ${{ needs.prepare.outputs.revision }}
-      version: ${{ inputs.tag }}
-
   publish:
     name: Publish the verified draft
-    needs: [prepare, checks, macos]
+    needs: [prepare, checks]
     if: >-
       needs.prepare.result == 'success' &&
-      needs.checks.result == 'success' && needs.macos.result == 'success'
+      needs.checks.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -83,6 +79,5 @@ jobs:
           RELEASE_TAG_OID: ${{ needs.prepare.outputs.tag_oid }}
           RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
           CHECKS_RESULT: ${{ needs.checks.result }}
-          MACOS_RESULT: ${{ needs.macos.result }}
-          CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
+          MACOS_TESTED_REVISION: ${{ inputs.macos_tested_revision }}
         run: python3 scripts/release.py publish --tag "$RELEASE_TAG" --assets packages
