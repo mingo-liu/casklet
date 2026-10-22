@@ -11,8 +11,10 @@ internal guest component, not a separately supported host platform. This is a
 learning runtime: use trusted workloads; it provides no security guarantee for
 untrusted code.
 
-The full client/VM end-to-end suite runs on Apple silicon. Intel packages retain
-native builds and offline verification, without full Intel client/VM test coverage.
+Before each release, the maintainer manually runs the full client/VM end-to-end
+suite on an Apple silicon Mac. GitHub-hosted Actions run the automated checks;
+no self-hosted runner is required. Intel packages retain native builds and offline
+verification, without full Intel client/VM test coverage.
 
 ## Install
 

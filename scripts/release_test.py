@@ -33,7 +33,8 @@ class ReleaseTests(unittest.TestCase):
         self.git("push", "-q", "origin", "main", "refs/tags/v0.1.0")
         env = {"GITHUB_REF": "refs/heads/main", "GITHUB_REPOSITORY": "owner/repo",
                "GITHUB_OUTPUT": str(self.directory / "output"),
-               "CASKLET_MACOS_E2E_ENABLED": "1", "CHECKS_RESULT": "success", "MACOS_RESULT": "success"}
+               "GITHUB_STEP_SUMMARY": str(self.directory / "summary"),
+               "MACOS_TESTED_REVISION": self.git("rev-parse", "HEAD"), "CHECKS_RESULT": "success"}
         self.patch = patch.dict(os.environ, env)
         self.patch.start()
         self.addCleanup(self.patch.stop)
@@ -84,6 +85,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(selected["revision"], self.git("rev-parse", "HEAD"))
         release.prepare("v0.1.0")
         self.assertIn("revision=" + selected["revision"], (self.directory / "output").read_text())
+        self.assertIn(selected["revision"], (self.directory / "summary").read_text())
+        self.assertIn("declared", (self.directory / "summary").read_text())
         release.publish("v0.1.0", self.assets)
         self.assertEqual(len(self.uploads), 1)
         self.assertEqual(self.uploads[0][3], "v0.1.0")
@@ -93,17 +96,29 @@ class ReleaseTests(unittest.TestCase):
 
     def test_failed_cancelled_missing_or_skipped_checks_never_publish(self):
         self.select()
-        for name in ("CHECKS_RESULT", "MACOS_RESULT"):
-            for status in ("failure", "cancelled", "skipped", "", "in_progress"):
-                with self.subTest(name=name, status=status), patch.dict(os.environ, {name: status}):
-                    with self.assertRaises(ValueError):
-                        release.publish("v0.1.0", self.assets)
-                    self.assert_not_published()
+        for status in ("failure", "cancelled", "skipped", "", "in_progress"):
+            with self.subTest(status=status), patch.dict(os.environ, {"CHECKS_RESULT": status}):
+                with self.assertRaises(ValueError):
+                    release.publish("v0.1.0", self.assets)
+                self.assert_not_published()
 
-    def test_disabled_gate_or_non_main_dispatch_never_publish(self):
+    def test_manual_validation_requires_the_full_matching_commit_before_prepare_or_publish(self):
         self.select()
-        for env in ({"CASKLET_MACOS_E2E_ENABLED": ""}, {"GITHUB_REF": "refs/heads/untrusted"}):
-            with patch.dict(os.environ, env), self.assertRaises(ValueError):
+        for revision in ("", "main", self.git("rev-parse", "--short", "HEAD"), "f" * 40,
+                         self.git("rev-parse", "HEAD").upper(), "a" * 40 + "\n"):
+            with self.subTest(revision=revision), patch.dict(os.environ, {"MACOS_TESTED_REVISION": revision}):
+                with self.assertRaises(ValueError):
+                    release.prepare("v0.1.0")
+                with self.assertRaises(ValueError):
+                    release.publish("v0.1.0", self.assets)
+                self.assertFalse((self.directory / "output").exists())
+                self.assertFalse((self.directory / "summary").exists())
+                self.assert_not_published()
+
+    def test_non_main_dispatch_never_publishes(self):
+        self.select()
+        with patch.dict(os.environ, {"GITHUB_REF": "refs/heads/untrusted"}):
+            with self.assertRaises(ValueError):
                 release.publish("v0.1.0", self.assets)
             self.assert_not_published()
 

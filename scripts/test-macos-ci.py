@@ -136,7 +136,7 @@ def main():
     parser.add_argument("--project", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
     if sys.platform != "darwin" or os.geteuid() == 0:
-        sys.exit("macOS CI requires a regular user on a dedicated Mac")
+        sys.exit("macOS VM tests require a regular user on a Mac")
     if sys.version_info < (3, 9):
         sys.exit("Python 3.9 or newer is required")
     for executable in ("make", "go", "limactl"):
