@@ -83,7 +83,7 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 		if err != nil || strings.Count(ps, "\n") > 25 || !strings.Contains(ps, "--all") || !strings.Contains(ps, "--json") {
 			t.Fatalf("verbose or incomplete ps help: %q %v", ps, err)
 		}
-		for _, detail := range []string{"12 hexadecimal", "exact name", "full ID", "unique ID prefix"} {
+		for _, detail := range []string{"12 hexadecimal", "exact name", "full ID", "unique ID prefix", "PORTS", "HOST_IP:HOST_PORT->CONTAINER_PORT/PROTOCOL", "publish"} {
 			if !strings.Contains(ps, detail) {
 				t.Errorf("ps help missing %q: %q", detail, ps)
 			}
@@ -91,6 +91,10 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 		stats, err := scopedUsage("stats", macOS)
 		if err != nil || !strings.Contains(stats, "12 hexadecimal") || !strings.Contains(stats, "--json retains the full ID") || !strings.Contains(stats, "--watch") || !strings.Contains(stats, "--filter") {
 			t.Fatalf("stats help lacks ID display guidance: %q %v", stats, err)
+		}
+		projectPS, err := scopedUsage("project ps", macOS)
+		if err != nil || !strings.Contains(projectPS, "PORTS") || !strings.Contains(projectPS, "publish") {
+			t.Fatalf("project ps help lacks ports: %q %v", projectPS, err)
 		}
 		projectUp, err := scopedUsage("project up", macOS)
 		if err != nil || !strings.Contains(projectUp, "Reordering network aliases keeps service identity") || !strings.Contains(projectUp, "older deployments") {

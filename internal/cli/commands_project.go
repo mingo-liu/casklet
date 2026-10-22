@@ -60,6 +60,9 @@ func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
 		if args[0] == "__project-reservations" {
 			return platformProjectReservations(output.data)
 		}
+		if args[0] == "__project-records" {
+			return platformProjectRecords(output.data)
+		}
 		return output.data, nil
 	}, nil
 }

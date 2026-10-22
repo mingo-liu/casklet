@@ -64,6 +64,9 @@ type Record struct {
 	Cgroup          string            `json:"cgroup,omitempty"`
 	LogTruncated    bool              `json:"log_truncated,omitempty"`
 	Command         []string          `json:"command"`
+
+	// Publish is populated from the saved configuration for listings.
+	Publish []config.PortMapping `json:"publish,omitempty"`
 }
 
 // Terminal reports whether a supervisor has finished the container.

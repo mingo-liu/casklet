@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -28,6 +29,12 @@ func paginationStore(t *testing.T, count int) (*Store, []Record) {
 			t.Fatal(err)
 		}
 		if err := store.writeJSON(dir, "state.json", record, maxRecordBytes); err != nil {
+			t.Fatal(err)
+		}
+		cfg := testConfig()
+		cfg.Network = "bridge"
+		cfg.Publish = []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}}
+		if err := store.writeJSON(dir, "config.json", cfg, maxConfigBytes); err != nil {
 			t.Fatal(err)
 		}
 		records[i] = record
@@ -117,6 +124,23 @@ func TestRecordPagesReadEachStateOnce(t *testing.T) {
 	t.Logf("256 records across four pages: state opens %d -> %d", legacyReads, pageReads)
 }
 
+func TestRefreshedPagesReadEachStateOnceWithPorts(t *testing.T) {
+	store, records := paginationStore(t, 2)
+	reads := watchRecordReads(t, store, records)
+	page, err := refreshedPage(context.Background(), store, RecordPageOptions{}, func(_ context.Context, record Record) (Record, error) {
+		return record, nil
+	})
+	if err != nil || len(page.Records) != 2 {
+		t.Fatalf("listing: %+v %v", page, err)
+	}
+	if got := reads(); got != 2 {
+		t.Fatalf("state opens=%d, want 2", got)
+	}
+	if len(page.Records[0].Publish) != 1 || page.Records[0].Publish[0].HostPort != 8080 {
+		t.Fatalf("listing lost ports: %+v", page)
+	}
+}
+
 func TestRecordPagesSkipPriorAndExcludedStateFiles(t *testing.T) {
 	store, records := paginationStore(t, 66)
 	for _, index := range []int{0, 64} {
@@ -165,6 +189,9 @@ func TestRefreshedPagesFilterBeforeRefreshAndRefillRemovals(t *testing.T) {
 	})
 	if err != nil || calls != 65 || len(page.Records) != 64 || page.Next != records[128].ID || page.Records[0].ID != records[2].ID || page.Records[0].Health.Status != HealthStopped {
 		t.Fatalf("refill: records=%d calls=%d next=%q err=%v", len(page.Records), calls, page.Next, err)
+	}
+	if len(page.Records[0].Publish) != 1 || page.Records[0].Publish[0].HostPort != 8080 {
+		t.Fatalf("page lost saved port mappings: %+v", page.Records[0])
 	}
 	options.After = page.Next
 	final, err := refreshedPage(ctx, store, options, func(context.Context, Record) (Record, error) {

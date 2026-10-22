@@ -6,15 +6,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/machine"
 	"github.com/mingo-liu/casklet/internal/project"
 	"github.com/mingo-liu/casklet/internal/registryauth"
 )
+
+func hostPublishedPorts(records []container.Record) {
+	for i := range records {
+		for j := range records[i].Publish {
+			port := &records[i].Publish[j]
+			port.HostIP = machine.HostPortAddress(port.HostIP)
+		}
+	}
+}
+
+func platformProjectRecords(data []byte) ([]byte, error) {
+	var page projectRecordPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, fmt.Errorf("invalid project record response")
+	}
+	hostPublishedPorts(page.Records)
+	return json.Marshal(page)
+}
+
+func executeDarwinPS(ctx context.Context, args []string, r Request, stdin, stdout, stderr *os.File) (int, error) {
+	// Render on the host so Lima's forwarding addresses never appear as Mac ports.
+	file, err := os.CreateTemp("", "casklet-ps-*")
+	if err != nil {
+		return 125, err
+	}
+	defer os.Remove(file.Name())
+	defer file.Close()
+	args = append(append([]string(nil), args...), "--json=true")
+	code, err := machine.Execute(ctx, machine.Invocation{Args: args, RequireRunning: os.Getenv(projectPreviewEnvironment) == "1"}, stdin, file, stderr)
+	if err != nil || code != 0 {
+		return code, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return 125, err
+	}
+	var records []container.Record
+	if err := json.NewDecoder(file).Decode(&records); err != nil {
+		return 125, fmt.Errorf("invalid guest container listing: %w", err)
+	}
+	hostPublishedPorts(records)
+	if err := writeRecords(stdout, records, r.JSON); err != nil {
+		return 125, err
+	}
+	return 0, nil
+}
 
 func platformProjectReservations(data []byte) ([]byte, error) {
 	var page project.ReservationPage
@@ -94,6 +141,13 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 	defer cancel()
 	if request.Action == "doctor" {
 		return true, executeDarwinDoctor(ctx, args, request, stdin, stdout, stderr)
+	}
+	if request.Action == "ps" {
+		code, err := executeDarwinPS(ctx, args, request, stdin, stdout, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "casklet: %v\n", err)
+		}
+		return true, code
 	}
 	paths, err := hostPathArguments(args, request.Action)
 	if err != nil {

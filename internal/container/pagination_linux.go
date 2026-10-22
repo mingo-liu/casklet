@@ -108,6 +108,13 @@ func refreshedPage(ctx context.Context, store *Store, options RecordPageOptions,
 			if err != nil {
 				return RecordPage{}, err
 			}
+			record, err = listingRecord(ctx, store, record)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return RecordPage{}, err
+			}
 			record.Health = record.effectiveHealth()
 			result.Records = append(result.Records, record)
 		}

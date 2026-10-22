@@ -10,8 +10,31 @@ import (
 	"testing"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/project"
 )
+
+func TestMacListingPortsTranslateGuestForwardingAddresses(t *testing.T) {
+	page := projectRecordPage{Next: strings.Repeat("a", 32), Records: []container.Record{{ID: strings.Repeat("a", 32),
+		Publish: []config.PortMapping{
+			{HostIP: "127.0.0.2", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+			{HostIP: "127.0.0.3", HostPort: 5353, ContainerPort: 53, Protocol: "udp"},
+			{HostIP: "192.0.2.1", HostPort: 8081, ContainerPort: 81, Protocol: "tcp"},
+		}}}}
+	data, _ := json.Marshal(page)
+	translated, err := platformProjectRecords(data)
+	var got projectRecordPage
+	if err != nil || json.Unmarshal(translated, &got) != nil {
+		t.Fatalf("translation: %s %v", translated, err)
+	}
+	ports := got.Records[0].Publish
+	if got.Next != page.Next || got.Records[0].ID != page.Records[0].ID || ports[0].HostIP != "0.0.0.0" || ports[1].HostIP != "127.0.0.1" || ports[2].HostIP != "192.0.2.1" || ports[1].Protocol != "udp" {
+		t.Fatalf("translated listing: %+v", got)
+	}
+	if _, err := platformProjectRecords([]byte("{")); err == nil {
+		t.Fatal("invalid record JSON accepted")
+	}
+}
 
 func TestMacProjectReservationsTranslateGuestForwardingAddresses(t *testing.T) {
 	page := project.ReservationPage{Next: strings.Repeat("1", 32), Records: []project.Reservation{{ID: strings.Repeat("1", 32), Generation: 3,

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
 )
@@ -22,7 +23,7 @@ func writeRecords(out io.Writer, records []container.Record, asJSON bool) error 
 		return json.NewEncoder(out).Encode(records)
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tHEALTH\tEXIT\tCREATED\tCOMMAND"); err != nil {
+	if _, err := fmt.Fprintln(w, "ID\tNAME\tSTATUS\tHEALTH\tEXIT\tPORTS\tCREATED\tCOMMAND"); err != nil {
 		return err
 	}
 	for _, record := range records {
@@ -34,11 +35,22 @@ func writeRecords(out io.Writer, records []container.Record, asJSON bool) error 
 		if record.Health != nil {
 			health = record.Health.Status
 		}
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", displayID(record.ID), record.Name, record.State, health, exit, record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", displayID(record.ID), record.Name, record.State, health, exit, displayPorts(record.Publish), record.CreatedAt.UTC().Format(time.RFC3339), displayCommand(record.Command)); err != nil {
 			return err
 		}
 	}
 	return w.Flush()
+}
+
+func displayPorts(ports []config.PortMapping) string {
+	if len(ports) == 0 {
+		return "-"
+	}
+	parts := make([]string, len(ports))
+	for i, port := range ports {
+		parts[i] = fmt.Sprintf("%s:%d->%d/%s", port.HostIP, port.HostPort, port.ContainerPort, port.Protocol)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func displayCommand(command []string) string {
