@@ -102,5 +102,19 @@ jobs:
         env:
           CASKLET_DEDICATED_VM: "1"
         run: ./scripts/prepare-integration-vm.sh
+      - name: Build pinned pre-named-network engine
+        env:
+          LEGACY_REVISION: e470555a6df39f95823c1ab50dc9978f335b38f5
+        run: |
+          git fetch --no-tags --depth=1 origin "$LEGACY_REVISION"
+          test "$(git rev-parse FETCH_HEAD)" = "$LEGACY_REVISION"
+          legacy_source=$(mktemp -d "$RUNNER_TEMP/casklet-legacy.XXXXXXXX")
+          git archive "$LEGACY_REVISION" | tar -x -C "$legacy_source"
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          cd "$legacy_source"
+          CGO_ENABLED=0 GOTOOLCHAIN=local go build -buildvcs=false -trimpath -o "$GITHUB_WORKSPACE/bin/casklet-legacy-engine" ./cmd/casklet
       - name: Prepare template and run privileged Linux suite
+        env:
+          CASKLET_LEGACY_ENGINE: ${{ github.workspace }}/bin/casklet-legacy-engine
+          CASKLET_REQUIRE_LEGACY_ENGINE: '1'
         run: make rootfs test-integration

@@ -23,11 +23,17 @@ case "$native_arch" in
     *) fail 'only Linux arm64 and amd64 are supported' ;;
 esac
 readelf -h "$binary" | grep -F "$machine" >/dev/null || fail "runtime must be a native Linux $native_arch executable; rebuild with GOOS=linux GOARCH=$native_arch"
+if [ "${CASKLET_REQUIRE_LEGACY_ENGINE:-}" = 1 ] || [ -n "${CASKLET_LEGACY_ENGINE:-}" ]; then
+    legacy=$(realpath -e -- "${CASKLET_LEGACY_ENGINE:-}" 2>/dev/null) || fail 'configure an existing CASKLET_LEGACY_ENGINE'
+    [ -x "$legacy" ] || fail 'legacy engine must be executable'
+    readelf -h "$legacy" | grep -F "$machine" >/dev/null || fail "legacy engine must be a native Linux $native_arch executable"
+    export CASKLET_LEGACY_ENGINE="$legacy"
+fi
 mkdir -p bin
 CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go test -c -o bin/integration.test ./tests/integration
 CGO_ENABLED=0 GOOS=linux GOARCH="$native_arch" go build -o bin/integration-helper ./tests/integration/testdata
 helper=$project/bin/integration-helper
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" CASKLET_LEGACY_ENGINE="${CASKLET_LEGACY_ENGINE:-}" "$project/scripts/test-shared-vm.sh" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
+    exec sudo env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" CASKLET_LEGACY_ENGINE="${CASKLET_LEGACY_ENGINE:-}" CASKLET_REQUIRE_LEGACY_ENGINE="${CASKLET_REQUIRE_LEGACY_ENGINE:-}" "$project/scripts/test-shared-vm.sh" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"
 fi
 exec env CASKLET_INTEGRATION=1 CASKLET_BINARY="$binary" CASKLET_ROOTFS="$rootfs" CASKLET_HELPER="$helper" "$project/scripts/test-shared-vm.sh" "$project/bin/integration.test" -test.v -test.timeout=10m "$@"

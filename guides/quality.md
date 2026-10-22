@@ -1862,3 +1862,22 @@ Validation:
   empty parent directory remained; no cleanup assertion was weakened. The same
   recovery test also passed 30 runs with the pre-named-network engine.
 - Intel Mac execution and Linux amd64 privileged execution were not performed.
+
+## 2026-10-22: Require pinned mixed-generation upgrade validation in CI
+
+Both native Linux privileged jobs build the exact pre-named-network revision
+`e470555a6df39f95823c1ab50dc9978f335b38f5` in a private source directory using
+the current patched Go toolchain. The shared-VM entry point validates the baseline's
+native ELF architecture and preserves the required flag across sudo. CI requires
+the existing pinned-supervisor network/forwarding regression to execute; missing
+baseline configuration and occupied bridge journals fail rather than skip. Local
+runs retain their optional baseline behavior unless explicitly required.
+
+Validation: macOS formatting, complete unit tests and vet, and pinned actionlint
+passed. Both native privileged CI architectures passed their complete suites,
+including the required mixed-generation case with no skips. The same pinned case
+passed locally through the Linux arm64 shared-store preservation wrapper. The
+entry-point regressions also reject missing, nonexecutable and wrong-architecture
+baselines before compilation or VM state access, and verify the requirement
+survives sudo environment reset. The first local full suite encountered an
+unrelated lifecycle timestamp assertion after VM startup; its daily data was restored and its artifacts were retained.
