@@ -24,6 +24,9 @@ jobs:
     name: Validate draft and trusted revision
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      # GitHub exposes draft releases only to tokens with push access.
+      contents: write
     outputs:
       revision: ${{ steps.candidate.outputs.revision }}
       tag_oid: ${{ steps.candidate.outputs.tag_oid }}
