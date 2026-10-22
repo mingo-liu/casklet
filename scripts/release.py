@@ -72,6 +72,11 @@ def publish(tag, assets):
     if candidate(tag) != expected:
         raise ValueError("draft release or tag changed after validation; start a new release run")
     paths = verify(assets, tag)
+    license_path = assets / "LICENSE"
+    license_path.write_bytes(subprocess.run(
+        ["git", "show", expected["revision"] + ":LICENSE"], cwd=ROOT, check=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60).stdout)
+    paths.append(license_path)
     run("gh", "release", "upload", tag, *map(str, paths), "--clobber",
         "--repo", os.environ["GITHUB_REPOSITORY"])
     if candidate(tag) != expected:

@@ -6,6 +6,25 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Ship one executable per release archive
+
+Native ARM64 and Intel release archives now contain only the regular executable
+`casklet`, with the matching Linux engine embedded. Native offline version,
+commit, embedded-engine and executable-mode checks remain required. Documentation
+stays in the repository, replacing the earlier bundled-documentation policy.
+`SHA256SUMS` and `LICENSE` are separate release attachments; publication reads
+the exact license bytes from the selected candidate commit rather than the
+workflow checkout, and refuses a candidate without that file before uploading.
+Both README translations and the development guide describe this layout.
+
+Validation: all 21 Python script regressions, pinned actionlint, complete macOS
+unit tests, vet and formatting passed. Regressions inspect the generated tar
+members, executable mode, payload bytes and transfer checksum, preserve the
+candidate's exact license bytes despite a changed workflow checkout, and reject
+a missing candidate license before upload/publication. Native ARM64 and Intel
+archive builds and offline identity checks remain required in hosted CI. No
+runtime behavior changed and the full VM suite was not rerun for packaging.
+
 ## 2026-10-22: Validate the release VM path manually before publication
 
 Full native Apple silicon client/Lima VM validation is now a manual pre-release

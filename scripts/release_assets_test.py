@@ -1,6 +1,5 @@
 """Check release filenames, architecture completeness and transferred bytes."""
 from pathlib import Path
-import io
 import tarfile
 import tempfile
 import types
@@ -12,7 +11,7 @@ from release_assets import archive_name, checksum, verify
 
 
 class ReleaseAssetTests(unittest.TestCase):
-    def test_downloaded_archive_contains_linked_documentation(self):
+    def test_downloaded_archive_contains_only_the_executable(self):
         documents = {
             "LICENSE": "License",
             "README.md": "[Usage](guides/usage.md#run) [中文](README.zh-CN.md)\n",
@@ -41,24 +40,13 @@ class ReleaseAssetTests(unittest.TestCase):
                 release_assets.build(source, root / "packages", "v1.2.3", "arm64")
             archive = root / "packages" / archive_name("v1.2.3", "arm64")
             with tarfile.open(archive) as package:
-                self.assertEqual(set(package.getnames()), {"casklet", *documents})
-                self.assertTrue(all(entry.isfile() for entry in package.getmembers()))
-                for name, text in documents.items():
-                    self.assertEqual(package.extractfile(name).read().decode(), text)
+                self.assertEqual(package.getnames(), ["casklet"])
+                entry = package.getmember("casklet")
+                self.assertTrue(entry.isfile())
+                self.assertNotEqual(entry.mode & 0o111, 0)
+                self.assertEqual(package.extractfile(entry).read(), binary.read_bytes())
             self.assertEqual(run.call_count, 2)
             self.assertEqual(archive.with_name(archive.name + ".sha256").read_text(), checksum(archive))
-
-    def test_packaged_links_reject_missing_and_escaping_targets(self):
-        for link in ("guides/missing.md#run", "../outside.md", "guides/deleted%20guide.md"):
-            with self.subTest(link=link), tempfile.TemporaryDirectory() as temporary:
-                archive = Path(temporary) / "archive.tar.gz"
-                with tarfile.open(archive, "w:gz") as package:
-                    body = f"[Missing]({link})".encode()
-                    entry = tarfile.TarInfo("README.md")
-                    entry.size = len(body)
-                    package.addfile(entry, io.BytesIO(body))
-                with tarfile.open(archive) as package, self.assertRaisesRegex(ValueError, "broken packaged documentation link"):
-                    release_assets.validate_documentation_links(package)
 
     def test_manifest_matches_both_downloads(self):
         with tempfile.TemporaryDirectory() as temporary:
