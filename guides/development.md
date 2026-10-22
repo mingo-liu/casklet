@@ -161,9 +161,36 @@ product's Virtualization.framework VM. Before enabling it:
 3. Create the GitHub environment `macos-e2e`, restrict it to the `main` branch
    only, and configure reviewer approval if required by your release
    policy. Limit runner-group access to this repository where supported.
-4. Set repository Actions variable `CASKLET_MACOS_E2E_ENABLED` to `1` only after
-   both capable runners and the environment exist. Until then, optional weekly
-   runs skip; release preparation explicitly fails and cannot publish.
+4. Check the actual repository prerequisites with an authenticated maintainer
+   GitHub CLI, then explicitly enable the existing gate:
+
+   ```sh
+   python3 scripts/check-macos-e2e.py --repo OWNER/REPOSITORY
+   python3 scripts/check-macos-e2e.py --repo OWNER/REPOSITORY --enable
+   gh workflow run macos-e2e.yml --repo OWNER/REPOSITORY --ref main
+   ```
+
+   The first command is read-only. Both emit JSON with online runner IDs for each
+   architecture, the main-only environment check, readiness and enabled state.
+   Missing/offline runners, ambiguous architecture labels and unrestricted,
+   wildcard, tag or additional environment branch policies fail the check.
+   Pagination includes every repository runner. Busy online runners may queue
+   work through the workflow's existing concurrency policy.
+   `--enable` sets `CASKLET_MACOS_E2E_ENABLED=1` only after all prerequisites pass
+   and reads the variable back. A failed prerequisite does not change settings.
+   API/authentication failures return nonzero; no runner is registered and no
+   environment restriction is changed by this script.
+
+   Use a maintainer account that can read repository runner administration,
+   environment policies and Actions variables; enabling additionally needs
+   variable write permission. Keep these privileges out of workflow tokens.
+   The API checks use GitHub's [runner inventory](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
+   and [environment branch policy](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies)
+   endpoints. The ordinary CI token intentionally cannot administer runners.
+   A successful prerequisite check does not prove VM capability or test success:
+   the dispatched workflow must still pass both native, real client/VM suites
+   with no skips. Release publication independently requires those results.
+   Until enabled, optional weekly runs skip and release preparation fails.
 
 The workflow never runs for pull requests or ordinary pushes. A GitHub-hosted
 gate verifies that the selected immutable revision is an ancestor of `main`

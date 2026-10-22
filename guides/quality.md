@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Inspect dedicated Mac release prerequisites before enabling CI
+
+Added an operator-only GitHub CLI check for online ARM64 and X64 dedicated Mac
+runner labels and an environment restricted to the main branch alone. Paginated
+runner/policy inspection rejects missing/offline/ambiguously labeled runners and
+wildcard, tag or extra branch rules. Read-only JSON reports prerequisite and gate
+state. Explicit --enable writes the existing Actions variable only after all
+checks pass and verifies it by reading it back. The tool does not register hosts,
+change environment restrictions or replace the existing native real-VM release
+validation. Maintainer administration credentials stay outside workflow tokens.
+
+Validation: all 21 Python script tests passed, covering pagination, incomplete
+infrastructure, branch-policy refusal, read-only execution, API failures and failed
+variable persistence. A live read-only check found the main-only environment
+correctly configured, both dedicated runner architectures absent, and the gate
+still disabled. Real dual-Mac validation remains pending operator-provided hosts;
+no gate was enabled and no Intel execution is claimed.
+
 ## 2026-10-21: Sample readiness from pinned service IDs
 
 Whole-project readiness passes send the startup-pinned full container IDs to the
