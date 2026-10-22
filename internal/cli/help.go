@@ -448,11 +448,12 @@ Examples:
   casklet project validate --config project.json
   casklet project validate --config project.json --json
 `,
-	"project up": `Usage: casklet project up --config FILE [--recreate SERVICE]... [--dry-run] [--wait] [--timeout DURATION] [--json]
+	"project up": `Usage: casklet project up --config FILE [--recreate SERVICE]... [--remove-orphans] [--dry-run] [--wait] [--timeout DURATION] [--json]
 
 Options:
   --config   Local strict JSON project file, at most 1 MiB
   --recreate Replace a logical service even if its desired config matches (repeatable)
+  --remove-orphans Remove verified project services absent from the configuration
   --dry-run  Preview actions, reasons and changed field names without deployment mutations
   --wait     Wait for all services to become ready within the whole deployment deadline
   --timeout  Each dependency health wait, or whole deployment with --wait (default: 30s)
@@ -470,7 +471,12 @@ Notes:
   Local files are expanded before VM operations; volume sources remain names.
   Reuses matching running services and starts matching stopped services.
   Reordering network aliases keeps service identity, including older deployments.
-  Applying changed unselected configs, removed services or unowned resources fails before changes.
+  Applying changed unselected configs or unowned resources fails before changes.
+  Removed services require --remove-orphans or project down; preview needs the flag too.
+  Orphans are removed by pinned ID/generation/labels after source/resource preflight.
+  Their private roots/logs are deleted; all networks, volumes and bind data are retained.
+  Orphans use reverse creation order; the old dependency graph is not retained.
+  Removed orphan containers are not restored on failure; inspect and retry up.
   --recreate checks sources/resources and stopped services before selected removal.
   Only identical selected running host bindings skip the first host check.
   Changed host address scopes are checked conservatively before removal.
@@ -481,7 +487,7 @@ Notes:
   Refresh an image tag explicitly with image pull, then --recreate its service.
   --dry-run reports configuration drift even without --recreate; applying it still requires selection.
   Reasons distinguish missing resources/services, matching config, stopped services,
-  changed configuration and explicit same-config recreation.
+  changed configuration, explicit same-config recreation and removed services (service_removed).
   changed_fields lists sorted configuration field names only; values and comparison digests are never shown.
   requires_recreate marks drift that needs an explicit --recreate selection.
   details_unavailable marks absent/stale comparison history; field differences are not guessed.
@@ -503,6 +509,8 @@ Examples:
   casklet project up --config project.json --wait --timeout 1m --json
   casklet project up --config project.json --recreate api --dry-run
   casklet project up --config project.json --recreate api --wait --timeout 1m
+  casklet project up --config project.json --remove-orphans --dry-run
+  casklet project up --config project.json --remove-orphans --wait
 `,
 	"project down": `Usage: casklet project down [--volumes] NAME
 

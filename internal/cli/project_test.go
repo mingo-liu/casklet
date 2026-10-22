@@ -400,8 +400,8 @@ func TestProjectExternalVolumeHelp(t *testing.T) {
 
 func TestProjectRecreateAndPreviewParsingAndHelp(t *testing.T) {
 	file := projectConfigFile(t, `{"name":"demo","services":{"api":{"run":{"image":"app:1"}},"db":{"run":{"image":"db:1"}}}}`)
-	request, err := Parse([]string{"project", "up", "--config", file, "--recreate", "api", "--recreate=db", "--dry-run", "--json"})
-	if err != nil || !request.DryRun || !request.JSON || len(request.Recreate) != 2 {
+	request, err := Parse([]string{"project", "up", "--config", file, "--recreate", "api", "--recreate=db", "--remove-orphans", "--dry-run", "--json"})
+	if err != nil || !request.DryRun || !request.JSON || !request.RemoveOrphans || len(request.Recreate) != 2 {
 		t.Fatalf("request=%+v err=%v", request, err)
 	}
 	for _, names := range [][]string{{"--recreate", "missing"}, {"--recreate", "api", "--recreate", "api"}, {"--recreate", ""}} {
@@ -421,7 +421,7 @@ func TestProjectRecreateAndPreviewParsingAndHelp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, term := range []string{"--recreate", "--dry-run", "private root", "no automatic", "running VM", "missing services"} {
+	for _, term := range []string{"--recreate", "--remove-orphans", "service_removed", "--dry-run", "private root", "no automatic", "running VM", "missing services"} {
 		if !strings.Contains(help, term) {
 			t.Errorf("missing help %q", term)
 		}

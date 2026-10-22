@@ -1251,9 +1251,41 @@ hashes are verified against their saved alias order and can be reused after an
 upgrade without recreation. Applying environment/config changes on unselected services fails
 before deployment mutations; explicitly recreate changed services or use `down`. Image tags retain
 their cached version; pin a digest for reproducibility. A retained service keeps its
-immutable image across reuse. Services removed from the file require `down` before deploying
+immutable image across reuse. Services removed from the file require explicit `--remove-orphans` or `down` before deploying
 again. Managed resources are reused only when their creation receipts match local
 project ownership; manually created same-name resources are never adopted.
+
+Use `--remove-orphans` to remove managed services that are no longer declared,
+while keeping matching running services and their execution generations:
+
+```sh
+casklet project up --config project.json --remove-orphans --dry-run --json
+casklet project up --config project.json --remove-orphans --wait --timeout 1m
+```
+
+The flag is required for both preview and apply when orphan services exist.
+Preview reports `action: "remove"`, `reason: "service_removed"`, logical service
+names and pinned full IDs without changing workloads or ownership receipts.
+Only records with matching project labels and the original generated service name
+are eligible; duplicate or renamed orphan identities fail before mutations.
+Unselected configuration drift still requires `--recreate SERVICE`.
+
+Source/resource checks and reservation preflight finish before removal. Orphans
+and explicitly recreated services may release aliases and identical host endpoints
+for new services; the complete host-port check runs again after removal. Each
+removal checks the full ID, generation and project/service/configuration labels
+under the existing guest lifecycle lock. Orphans are removed in reverse creation
+order (full ID breaks timestamp ties); their old dependency graph is not retained.
+At most 64 existing service records may be selected for removal in one invocation.
+
+Removed containers lose private writable roots and logs. All named/external volumes,
+binds and networks are retained, including owned resources no longer declared in
+the file; their receipts remain available for explicit `project down` cleanup.
+New services still use the configuration's normal volume/network declarations.
+Removal is not transactional: failure or cancellation can leave already removed
+orphans absent. Bounded rollback removes only this invocation's new verified
+containers/resources, never restores deleted orphans, and preserves existing
+services and data. Inspect `project ps`, fix the failure and retry `up`.
 
 Use repeatable `--recreate SERVICE` with logical service keys to replace selected
 services, including when their desired configuration hash is unchanged:
@@ -1308,7 +1340,7 @@ where applicable, adding `reason`, optional sorted `changed_fields`,
 `requires_recreate` and `details_unavailable`.
 
 Reasons are `resource_missing`, `service_missing`, `configuration_matches`,
-`service_stopped`, `configuration_changed` and `explicit_recreate`. A changed
+`service_stopped`, `configuration_changed`, `explicit_recreate` and `service_removed`. A changed
 service can be previewed without selecting it; `requires_recreate: true` means
 applying it still needs `--recreate SERVICE`. Actual unselected drift remains an
 error before mutations. Explicit selection with matching configuration reports

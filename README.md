@@ -113,6 +113,9 @@ casklet project down demo
 
 Use the guide's `demo` configuration for this example. `project down` preserves
 data volumes; `--volumes` also removes project-owned volumes.
+After removing services from the configuration, use `project up --remove-orphans`
+to delete those containers while retaining matching running services and persistent
+data. Add `--dry-run` to preview the removals first.
 
 ## Capabilities
 

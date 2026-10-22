@@ -6,6 +6,43 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Remove orphan project services explicitly
+
+Added project up --remove-orphans and remove/service_removed preview actions.
+Absent-from-config services still fail without explicit selection. Selection
+requires matching generated names and project labels, rejects duplicate/renamed
+identities and bounds existing removals to 64. Orphans participate in the existing
+reservation and source preflight, then use full-ID/generation/ownership-fenced
+removal under the guest lifecycle lock. Old aliases and identical host endpoints
+can be transferred to new services; complete host checks run after removal.
+
+Orphans are removed in reverse creation order because the old dependency graph
+is not stored. Private roots/logs are discarded, while existing service executions,
+all networks, named/external volumes and bind data are preserved. Undeclared owned
+resource receipts remain available for explicit down cleanup; removed service
+comparison receipts are discarded. Failed startup or cancellation does not restore
+removed orphans; existing transaction rollback removes only new verified resources.
+Focused help, architecture, usage and both README translations describe these
+boundaries and preview/apply examples.
+
+Validation: native macOS client/embedded-engine build, complete formatting/unit/
+vet/race checks passed. Unit regressions cover explicit selection, immutable preview,
+foreign/unverified records, source failure, cancellation and ownership/generation
+changes, removal bounds/order, stopped records, reservation reuse, recreation,
+rollback and retry. Linux arm64 complete unit/vet/race and all 165 privileged
+integration tests passed through the shared-store preservation wrapper, including
+the new real orphan-removal and existing pinned legacy-supervisor cases without
+skips. The initial local run hit the existing two-second project-readiness fixture
+deadline; the complete final rerun passed. Both real macOS orphan-removal and
+selected-recreation cases passed through SSH/VM, covering receipt preservation,
+new-service alias reuse, source preflight, retained IDs/generations and data, stopped
+orphans and explicit cleanup of undeclared resources. The complete native Apple silicon suite also passed in a disposable VM in
+370.890 seconds with no skips, including cold initialization, provisioning fault
+recovery, VM reboot and disk growth; the runner removed its VM and isolated host
+state. Intel real-VM execution remains pending dedicated hardware. After combining
+the independent CI branches, all 23 Python regressions and pinned actionlint
+passed; final native dual-Linux CI remains required before merge.
+
 ## 2026-10-22: Inspect dedicated Mac release prerequisites before enabling CI
 
 Added an operator-only GitHub CLI check for online ARM64 and X64 dedicated Mac
