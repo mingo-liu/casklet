@@ -77,6 +77,9 @@ casklet logs --tail 20 redis
 casklet exec -it redis -- /bin/sh
 ```
 
+The `ps` table includes `PORTS`, for example `127.0.0.1:6379->6379/tcp`.
+`ps -a` also shows saved mappings for stopped containers; `-` means none.
+
 Use `exit` to leave the exec shell; Redis keeps running. OCI/Docker images are
 pulled automatically for the native Linux architecture and cached for offline
 use. `image pull` refreshes cached tags. Put explicit command arguments after

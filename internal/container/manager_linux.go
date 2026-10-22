@@ -252,11 +252,29 @@ func List(ctx context.Context, all bool) ([]Record, error) {
 			return nil, err
 		}
 		if all || !record.Terminal() {
+			record, err = listingRecord(ctx, store, record)
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
 			record.Health = record.effectiveHealth()
 			result = append(result, record)
 		}
 	}
 	return result, nil
+}
+
+// listingRecord reads immutable port configuration for old and new containers.
+// Snapshot pins the full ID and handles removal under the store lock.
+func listingRecord(ctx context.Context, store *Store, record Record) (Record, error) {
+	_, cfg, err := store.Snapshot(ctx, record.ID)
+	if err != nil {
+		return Record{}, err
+	}
+	record.Publish = cfg.Publish
+	return record, nil
 }
 
 // Stop lets the runtime forward SIGTERM and clean up; systemd enforces a final

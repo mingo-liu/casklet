@@ -555,7 +555,8 @@ Options:
   --json  Print managed container records with full IDs as a JSON array
 
 Notes:
-  Includes running and completed project containers, with health status.
+  Includes running and completed project containers, with health status and PORTS.
+  PORTS shows saved mappings, including stopped containers; JSON includes publish.
   Reads reserved project labels; unrelated user project labels are excluded.
 
 Examples:
@@ -572,6 +573,8 @@ Options:
 
 Notes:
   Table IDs show the first 12 hexadecimal characters; JSON retains full IDs.
+  PORTS shows saved HOST_IP:HOST_PORT->CONTAINER_PORT/PROTOCOL mappings, or -.
+  Completed containers retain mappings; JSON includes them in publish.
   Container operations accept an exact name, full ID, or unique ID prefix.
   Every filter must match, including repeated filters of the same type (AND).
   status: created, starting, running, stopping, exited, failed; use -a for terminal states.

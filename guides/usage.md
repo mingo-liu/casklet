@@ -627,7 +627,17 @@ casklet rm 406e742c72ac
 `--tail 0 -f` starts following at the current end without reading historical output.
 Rotated segments, partial lines and execution-generation boundaries are preserved.
 
-`ps` lists active containers; `-a` includes completed ones. `stop` sends the configured stop signal
+`ps` lists active containers; `-a` includes completed ones. Its `PORTS` column shows
+saved published mappings as `HOST_IP:HOST_PORT->CONTAINER_PORT/PROTOCOL`, for example
+`127.0.0.1:6379->6379/tcp, 0.0.0.0:5353->53/udp`. No mappings displays `-`.
+Completed containers retain their saved mappings in this column; their ports are
+not active. On macOS, addresses refer to the Mac, matching `inspect` rather than
+Lima's internal forwarding addresses. `ps --json` includes mappings in `publish`
+when configured, with `host_ip`, `host_port`, `container_port`, and `protocol`.
+Existing containers use their saved configuration without recreation. Image
+`EXPOSE` metadata alone does not create a mapping. `project ps` uses the same display.
+
+`stop` sends the configured stop signal
 and forces shutdown after the grace period. `wait` prints and returns the exit
 code for the execution it observed. `start` and `restart` keep the private rootfs
 but recreate transient namespaces, cgroups, and temporary storage. `rm` requires

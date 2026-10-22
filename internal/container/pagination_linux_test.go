@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -28,6 +29,12 @@ func paginationStore(t *testing.T, count int) (*Store, []Record) {
 			t.Fatal(err)
 		}
 		if err := store.writeJSON(dir, "state.json", record, maxRecordBytes); err != nil {
+			t.Fatal(err)
+		}
+		cfg := testConfig()
+		cfg.Network = "bridge"
+		cfg.Publish = []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}}
+		if err := store.writeJSON(dir, "config.json", cfg, maxConfigBytes); err != nil {
 			t.Fatal(err)
 		}
 		records[i] = record
@@ -165,6 +172,9 @@ func TestRefreshedPagesFilterBeforeRefreshAndRefillRemovals(t *testing.T) {
 	})
 	if err != nil || calls != 65 || len(page.Records) != 64 || page.Next != records[128].ID || page.Records[0].ID != records[2].ID || page.Records[0].Health.Status != HealthStopped {
 		t.Fatalf("refill: records=%d calls=%d next=%q err=%v", len(page.Records), calls, page.Next, err)
+	}
+	if len(page.Records[0].Publish) != 1 || page.Records[0].Publish[0].HostPort != 8080 {
+		t.Fatalf("page lost saved port mappings: %+v", page.Records[0])
 	}
 	options.After = page.Next
 	final, err := refreshedPage(ctx, store, options, func(context.Context, Record) (Record, error) {

@@ -8,8 +8,44 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
 )
+
+func TestContainerListingPorts(t *testing.T) {
+	ports := []config.PortMapping{
+		{HostIP: "127.0.0.1", HostPort: 6379, ContainerPort: 6379, Protocol: "tcp"},
+		{HostIP: "0.0.0.0", HostPort: 5353, ContainerPort: 53, Protocol: "udp"},
+	}
+	for _, state := range []string{container.StateRunning, container.StateExited} {
+		t.Run(state, func(t *testing.T) {
+			records := []container.Record{
+				{ID: strings.Repeat("a", 32), Name: "mapped", State: state, Publish: ports, Command: []string{"server"}},
+				{ID: strings.Repeat("b", 32), Name: "unmapped", State: state, Command: []string{"sleep", "60"}},
+			}
+			var out bytes.Buffer
+			if err := writeRecords(&out, records, false); err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+			if got := strings.Fields(lines[0]); !reflect.DeepEqual(got, []string{"ID", "NAME", "STATUS", "HEALTH", "EXIT", "PORTS", "CREATED", "COMMAND"}) {
+				t.Fatalf("headers: %q", got)
+			}
+			if !strings.Contains(lines[1], "127.0.0.1:6379->6379/tcp, 0.0.0.0:5353->53/udp") || strings.Fields(lines[2])[5] != "-" {
+				t.Fatalf("ports: %s", out.String())
+			}
+			out.Reset()
+			if err := writeRecords(&out, records, true); err != nil {
+				t.Fatal(err)
+			}
+			var decoded []container.Record
+			if err := json.Unmarshal(out.Bytes(), &decoded); err != nil || !reflect.DeepEqual(decoded[0].Publish, ports) || decoded[0].ID != records[0].ID || len(decoded[1].Publish) != 0 {
+				t.Fatalf("JSON ports: %s (%v)", out.String(), err)
+			}
+		})
+	}
+}
 
 func TestImageListingTable(t *testing.T) {
 	created := time.Date(2026, 10, 9, 10, 11, 12, 0, time.FixedZone("local", 3600))

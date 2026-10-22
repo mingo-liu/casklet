@@ -72,6 +72,9 @@ casklet logs --tail 20 redis
 casklet exec -it redis -- /bin/sh
 ```
 
+`ps` 表格的 `PORTS` 列显示端口映射，例如 `127.0.0.1:6379->6379/tcp`。
+`ps -a` 也会显示已停止容器保存的映射；`-` 表示没有端口映射。
+
 使用 `exit` 退出 exec shell，Redis 会继续运行。OCI/Docker 镜像按本机对应的
 Linux 架构自动拉取，缓存后可离线使用；`image pull` 可刷新缓存的标签版本。
 显式命令参数放在 `--` 后；使用镜像默认启动命令时，可省略命令和分隔符。

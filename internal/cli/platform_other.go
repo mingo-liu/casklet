@@ -8,6 +8,7 @@ import (
 )
 
 func platformProjectReservations(data []byte) ([]byte, error) { return data, nil }
+func platformProjectRecords(data []byte) ([]byte, error)      { return data, nil }
 
 func platformArguments(args []string) []string { return args }
 func platformUsage(topic string) (string, error) {
