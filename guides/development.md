@@ -255,7 +255,10 @@ Hosted formatting/unit/vet/race/build/vulnerability and both privileged Linux
 suites then run against the selected immutable commit. Failed, cancelled or
 skipped hosted checks cannot publish.
 
-Only the final hosted publication job receives `contents: write`. It rechecks
+Draft preparation and final publication receive `contents: write`: GitHub exposes
+draft releases only to tokens with push access, even for read-only inspection.
+Hosted test and package jobs retain `contents: read`. Preparation validates the
+draft without modifying it. The final hosted publication job rechecks
 the draft release ID, exact tag object, target commit and main ancestry before
 changing `draft` to `false`. A moved tag or replaced draft requires a new run.
 The hosted checks also build native downloadable packages on `macos-15` (arm64)

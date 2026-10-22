@@ -6,6 +6,24 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Grant draft inspection its required GitHub permission
+
+The first live release attempt reached the draft lookup with a contents:read
+workflow token and failed despite an existing unpublished draft. GitHub only
+exposes draft releases to tokens with push access. Grant contents:write to the
+prepare job alone, matching the existing publication job; hosted test and package
+jobs remain read-only. Preparation still performs no release mutation and all
+tag/draft identity, main ancestry, manual-test revision and publication guards
+remain enforced. The development guide supersedes its earlier claim that only
+the publication job needs write permission. The tested RC tag is unchanged.
+
+Validation: the first live run failed at gh release view with a read-only token.
+All 21 Python script regressions, pinned actionlint, complete macOS unit tests,
+vet and formatting passed after the permission change. Publishing still requires
+a successful live dispatch using the corrected workflow. The selected RC product
+commit already passed all 71 native Apple silicon VM tests with no skips and
+verified temporary VM cleanup; this fix changes only release controls and docs.
+
 ## 2026-10-22: Ship one executable per release archive
 
 Native ARM64 and Intel release archives now contain only the regular executable
