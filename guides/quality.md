@@ -20,7 +20,9 @@ Validation: macOS formatting, complete unit tests and vet, and pinned actionlint
 passed. Both native privileged CI architectures passed their complete suites,
 including the required mixed-generation case with no skips. The same pinned case
 passed locally through the Linux arm64 shared-store preservation wrapper. The
-first local full suite encountered an unrelated lifecycle timestamp assertion
+entry-point regressions also reject missing, nonexecutable and wrong-architecture
+baselines before compilation or VM state access, and verify the requirement
+survives sudo environment reset. The first local full suite encountered an unrelated lifecycle timestamp assertion
 after VM startup; its daily data was restored and its artifacts were retained.
 
 ## 2026-10-21: Sample readiness from pinned service IDs
