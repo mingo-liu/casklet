@@ -6,6 +6,28 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Require full macOS VM validation only on Apple silicon
+
+The complete macOS client/Lima VM workflow now runs one native ARM64 job.
+Release preparation, publication diagnostics and operator readiness checks require
+Apple silicon only. This supersedes the earlier dual-Mac end-to-end policy;
+Intel runner presence or availability no longer gates activation or publication.
+Native architecture/Rosetta checks, skipped-test rejection, trusted main-only
+execution, isolated VM cleanup and publication failure guards remain enforced.
+Intel archives still require native macOS builds and offline executable verification,
+and Linux amd64 retains its complete privileged integration suite. The development
+guide and both README translations state the difference in host VM test coverage.
+
+Validation: all 24 Python script regressions, pinned actionlint, complete macOS
+unit tests, vet and formatting passed. Regressions enable the gate with only an
+ARM64 runner, find ARM64 across API pages despite online/offline Intel runners,
+and reject missing/offline/ambiguously labeled ARM64 or Intel-only inventory.
+Existing release regressions still reject missing/corrupt Intel packages and
+failed/cancelled/skipped Apple silicon validation. Live read-only inspection
+reports only the ARM64 runner and main-only environment checks; the environment
+passes, the runner remains unregistered and the gate remains disabled. No runtime
+code changed and no real VM suite or release was rerun for this policy change.
+
 ## 2026-10-22: Remove orphan project services explicitly
 
 Added project up --remove-orphans and remove/service_removed preview actions.

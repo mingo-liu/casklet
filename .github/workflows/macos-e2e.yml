@@ -46,7 +46,7 @@ jobs:
           CASKLET_MACOS_E2E_ENABLED: ${{ vars.CASKLET_MACOS_E2E_ENABLED }}
         run: |
           set -eu
-          test "$CASKLET_MACOS_E2E_ENABLED" = 1 || { echo 'Configure both dedicated Mac architectures and enable CASKLET_MACOS_E2E_ENABLED'; exit 1; }
+          test "$CASKLET_MACOS_E2E_ENABLED" = 1 || { echo 'Configure a dedicated Apple silicon Mac runner and enable CASKLET_MACOS_E2E_ENABLED'; exit 1; }
           if [ -n "$SELECTED_REVISION" ]; then REVISION=$SELECTED_REVISION; fi
           printf '%s\n' "$REVISION" | grep -Eq '^[0-9a-f]{40}$'
           git cat-file -e "$REVISION^{commit}"
@@ -54,17 +54,9 @@ jobs:
           printf 'revision=%s\n' "$REVISION" >> "$GITHUB_OUTPUT"
 
   macos-e2e:
-    name: Real client and Lima VM (${{ matrix.arch }})
+    name: Real client and Lima VM (Apple silicon)
     needs: trusted-source
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: ARM64
-            goarch: arm64
-          - arch: X64
-            goarch: amd64
-    runs-on: [self-hosted, macOS, casklet-e2e, '${{ matrix.arch }}']
+    runs-on: [self-hosted, macOS, casklet-e2e, ARM64]
     environment: macos-e2e
     timeout-minutes: 45
     steps:
@@ -84,8 +76,8 @@ jobs:
           go-version-file: source/go.mod
       - name: Run disposable macOS end-to-end suite
         env:
-          CASKLET_MACOS_CI_ARTIFACTS: ${{ runner.temp }}/casklet-macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.goarch }}
-          CASKLET_MACOS_EXPECT_ARCH: ${{ matrix.goarch }}
+          CASKLET_MACOS_CI_ARTIFACTS: ${{ runner.temp }}/casklet-macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          CASKLET_MACOS_EXPECT_ARCH: arm64
           CASKLET_MACOS_REQUIRE_NO_SKIPS: '1'
           CASKLET_RELEASE_VERSION: ${{ inputs.version }}
         run: python3 gate/scripts/test-macos-ci.py --project "$GITHUB_WORKSPACE/source"
@@ -93,7 +85,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.goarch }}
-          path: ${{ runner.temp }}/casklet-macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.goarch }}
+          name: macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-arm64
+          path: ${{ runner.temp }}/casklet-macos-e2e-${{ github.run_id }}-${{ github.run_attempt }}-arm64
           if-no-files-found: warn
           retention-days: 14

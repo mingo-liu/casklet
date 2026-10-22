@@ -11,7 +11,7 @@ spec.loader.exec_module(gate)
 
 class GateTests(unittest.TestCase):
     def setUp(self):
-        self.runners = [self.runner(1, "ARM64"), self.runner(2, "X64")]
+        self.runners = [self.runner(1, "ARM64")]
         self.environment = {"deployment_branch_policy": {"custom_branch_policies": True, "protected_branches": False}}
         self.policies = [{"name": "main", "type": "branch"}]
         self.variables = []
@@ -47,17 +47,31 @@ class GateTests(unittest.TestCase):
     def test_incomplete_wrong_or_offline_runners_never_enable(self):
         for scenario in ("missing", "offline", "labels", "ambiguous"):
             with self.subTest(scenario=scenario):
-                self.runners = [self.runner(1, "ARM64"), self.runner(2, "X64")]
+                self.runners = [self.runner(1, "ARM64")]
                 if scenario == "missing":
                     self.runners.pop()
                 elif scenario == "offline":
-                    self.runners[1]["status"] = "offline"
+                    self.runners[0]["status"] = "offline"
                 elif scenario == "labels":
-                    self.runners[1]["labels"] = [{"name": "X64"}]
+                    self.runners[0] = self.runner(2, "X64")
                 else:
-                    self.runners[1]["labels"].append({"name": "ARM64"})
+                    self.runners[0]["labels"].append({"name": "X64"})
                 with patch.object(gate, "github", side_effect=self.api), patch.object(gate, "run") as run:
                     self.assertFalse(gate.check("owner/repo", enable=True)["ready"])
+                    run.assert_not_called()
+
+    def test_intel_presence_or_availability_does_not_gate_arm64(self):
+        for status in ("online", "offline"):
+            with self.subTest(status=status):
+                intel = self.runner(2, "X64")
+                intel["status"] = status
+                # Put the required ARM64 match on the second API page.
+                self.runners = [intel, self.runner(1, "ARM64")]
+                with patch.object(gate, "github", side_effect=self.api), patch.object(gate, "run") as run:
+                    report = gate.check("owner/repo")
+                    self.assertTrue(report["ready"])
+                    self.assertEqual(report["checks"][0]["runner_ids"], [1])
+                    self.assertEqual(len(report["checks"]), 2)
                     run.assert_not_called()
 
     def test_unrestricted_wildcard_tag_or_extra_environment_rules_never_enable(self):

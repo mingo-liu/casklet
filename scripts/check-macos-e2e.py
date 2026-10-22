@@ -21,17 +21,13 @@ def github(path, paginate=False):
 
 
 def prerequisites(runners, environment, policies):
-    checks = []
-    base = {"self-hosted", "macos", "casklet-e2e"}
-    for arch in ("arm64", "x64"):
-        matches = []
-        for runner in runners:
-            labels = {label["name"].lower() for label in runner["labels"]}
-            if (runner.get("status") == "online" and base | {arch} <= labels
-                    and len(labels & {"arm64", "x64"}) == 1):
-                matches.append(runner["id"])
-        checks.append({"name": "runner_" + arch, "ok": bool(matches),
-                       "runner_ids": sorted(matches)})
+    matches = []
+    required = {"self-hosted", "macos", "casklet-e2e", "arm64"}
+    for runner in runners:
+        labels = {label["name"].lower() for label in runner["labels"]}
+        if runner.get("status") == "online" and required <= labels and "x64" not in labels:
+            matches.append(runner["id"])
+    checks = [{"name": "runner_arm64", "ok": bool(matches), "runner_ids": sorted(matches)}]
     policy = environment.get("deployment_branch_policy")
     checks.append({"name": "main_only_environment", "ok": (
         isinstance(policy, dict) and policy.get("custom_branch_policies") is True
@@ -72,7 +68,7 @@ def main():
         report = check(args.repo, args.enable)
         print(json.dumps(report, sort_keys=True))
         if not report["ready"]:
-            print("macOS gate: register online ARM64/X64 dedicated Mac runners and restrict macos-e2e to the main branch; no settings were changed", file=sys.stderr)
+            print("macOS gate: register an online ARM64 dedicated Mac runner and restrict macos-e2e to the main branch; no settings were changed", file=sys.stderr)
         return 0 if report["ready"] else 1
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
         # gh receives authentication through its own environment/configuration;

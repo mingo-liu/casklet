@@ -11,6 +11,9 @@ internal guest component, not a separately supported host platform. This is a
 learning runtime: use trusted workloads; it provides no security guarantee for
 untrusted code.
 
+The full client/VM end-to-end suite runs on Apple silicon. Intel packages retain
+native builds and offline verification, without full Intel client/VM test coverage.
+
 ## Install
 
 ```sh

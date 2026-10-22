@@ -47,7 +47,7 @@ jobs:
       version: ${{ inputs.tag }}
 
   macos:
-    name: Real release clients and VMs
+    name: Real release client and VM (Apple silicon)
     needs: prepare
     uses: ./.github/workflows/macos-e2e.yml
     with:
