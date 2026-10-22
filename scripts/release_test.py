@@ -25,7 +25,9 @@ class ReleaseTests(unittest.TestCase):
         self.git("config", "user.name", "Release Test")
         self.git("config", "user.email", "release@example.invalid")
         (self.repo / "source").write_text("trusted source\n")
-        self.git("add", "source")
+        self.license = b"Candidate copyright and license\n\n"
+        (self.repo / "LICENSE").write_bytes(self.license)
+        self.git("add", "source", "LICENSE")
         self.git("commit", "-qm", "test: seed main")
         self.git("clone", "-q", "--bare", ".", str(self.directory / "remote"))
         self.git("remote", "add", "origin", str(self.directory / "remote"))
@@ -90,9 +92,29 @@ class ReleaseTests(unittest.TestCase):
         release.publish("v0.1.0", self.assets)
         self.assertEqual(len(self.uploads), 1)
         self.assertEqual(self.uploads[0][3], "v0.1.0")
-        for name in ("casklet_v0.1.0_darwin_arm64.tar.gz", "casklet_v0.1.0_darwin_amd64.tar.gz", "SHA256SUMS"):
+        for name in ("casklet_v0.1.0_darwin_arm64.tar.gz", "casklet_v0.1.0_darwin_amd64.tar.gz", "SHA256SUMS", "LICENSE"):
             self.assertIn(str(self.assets / name), self.uploads[0])
+        self.assertEqual((self.assets / "LICENSE").read_bytes(), self.license)
         self.github.assert_called_with("api", "--method", "PATCH", "repos/owner/repo/releases/42", "-F", "draft=false")
+
+    def test_license_is_read_from_the_selected_commit(self):
+        self.select()
+        (self.repo / "LICENSE").write_text("Newer publisher checkout license\n")
+        self.git("commit", "-qam", "test: change publisher license")
+        release.publish("v0.1.0", self.assets)
+        self.assertEqual((self.assets / "LICENSE").read_bytes(), self.license)
+        self.assertEqual(len(self.uploads), 1)
+
+    def test_missing_candidate_license_never_uploads_or_publishes(self):
+        self.git("rm", "-q", "LICENSE")
+        self.git("commit", "-qm", "test: remove candidate license")
+        self.git("tag", "-fa", "v0.1.0", "-m", "candidate without license")
+        self.git("push", "-q", "--force", "origin", "main", "refs/tags/v0.1.0")
+        os.environ["MACOS_TESTED_REVISION"] = self.git("rev-parse", "HEAD")
+        self.select()
+        with self.assertRaises(subprocess.CalledProcessError):
+            release.publish("v0.1.0", self.assets)
+        self.assert_not_published()
 
     def test_failed_cancelled_missing_or_skipped_checks_never_publish(self):
         self.select()

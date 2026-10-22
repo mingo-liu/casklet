@@ -20,8 +20,8 @@ Lima Linux 虚拟机，通过 Linux 命名空间、cgroups v2 和进程监督机
 brew install lima
 ```
 
-从[版本页面](https://github.com/mingo-liu/casklet/releases)将对应架构的安装包和
-`SHA256SUMS` 下载到空目录。将下面的版本号改为实际下载版本；Apple 芯片使用
+从[版本页面](https://github.com/mingo-liu/casklet/releases)将对应架构的安装包、
+`SHA256SUMS` 和 `LICENSE` 下载到空目录。将下面的版本号改为实际下载版本；Apple 芯片使用
 `arm64`，Intel 使用 `amd64`。校验显示 `OK` 后再继续安装：
 
 ```sh
@@ -34,8 +34,9 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-安装包包含内置匹配 Linux 引擎的客户端、中英文 README、使用与开发指南、架构说明
-和许可证，无需 Go 或 Make。发布的程序未经 Developer ID
+每个安装包只包含 `casklet`，已内嵌匹配的 Linux 引擎，无需 Go 或 Make。
+文档在本仓库中查看，`SHA256SUMS` 和 `LICENSE` 作为独立发布附件提供。
+发布的程序未经 Developer ID
 签名或公证，通过浏览器下载后，macOS 可能要求在**系统设置 > 隐私与安全性**中批准运行。
 
 也可以安装 **Go 1.27.3+** 和 Make，在仓库目录中从源码构建：

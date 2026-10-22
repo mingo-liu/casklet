@@ -22,7 +22,7 @@ verification, without full Intel client/VM test coverage.
 brew install lima
 ```
 
-Download the matching archive and `SHA256SUMS` from
+Download the matching archive, `SHA256SUMS`, and `LICENSE` from
 [Releases](https://github.com/mingo-liu/casklet/releases) into an empty directory.
 Set the downloaded version below; use `arm64` for Apple silicon or `amd64` for
 Intel. Continue only if the checksum reports `OK`:
@@ -37,7 +37,9 @@ shasum -a 256 --ignore-missing -c SHA256SUMS &&
 casklet --version
 ```
 
-The client bundles its matching Linux engine; Go and Make are unnecessary.
+Each archive contains only `casklet`, with its matching Linux engine embedded;
+Go and Make are unnecessary. Documentation is available in this repository.
+`SHA256SUMS` and `LICENSE` are separate release attachments.
 Release binaries are not Developer ID signed or notarized, so macOS may require
 approval in **System Settings > Privacy & Security** after a browser download.
 

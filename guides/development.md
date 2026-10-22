@@ -138,7 +138,7 @@ delegation. Do not use that provisioning script on a shared self-hosted runner.
 All jobs run for pushes, pull requests, and manual dispatch; integration failures
 fail CI rather than being ignored. Configure these checks as required in the
 repository's branch/release rules. Local macOS end-to-end tests run through the
-same Lima VM with `make test-macos`; dedicated CI uses the isolation described below.
+same Lima VM with `make test-macos`; pre-release validation uses the isolation described below.
 
 Both privileged CI architectures also build the pre-named-network engine at
 `e470555a6df39f95823c1ab50dc9978f335b38f5` with the current patched Go toolchain.
@@ -261,14 +261,15 @@ changing `draft` to `false`. A moved tag or replaced draft requires a new run.
 The hosted checks also build native downloadable packages on `macos-15` (arm64)
 and `macos-15-intel` (amd64). Trusted packaging controls build the selected source
 and version, then execute the archived client offline to verify its version,
-commit and bundled Linux engine bytes. Archives contain `casklet`, `LICENSE`, both READMEs, `ARCHITECTURE.md`, and the
-usage/development guides under `guides/`, preserving their relative links for
-offline reading. Packaging checks every inline local Markdown link against the
-archive members. Local configuration, private notes, and standalone guest engines
-are excluded.
+commit and bundled Linux engine bytes. Each archive contains exactly one regular
+executable named `casklet`, with the matching Linux engine embedded. Documentation
+remains in the repository. Local configuration, private notes and standalone guest
+engines are excluded.
 Each architecture's transfer checksum is checked before generating `SHA256SUMS`.
-Only the final job uploads both archives and that manifest to the existing draft,
-replacing same-named assets on a retry. It rechecks draft/tag identity again after
+Only the final job uploads both archives, that manifest and a separate `LICENSE`
+attachment to the existing draft. The license bytes come from the selected release
+commit, not the workflow checkout; a missing license fails before asset upload.
+Retries replace same-named assets. The job rechecks draft/tag identity again after
 upload before publishing. Missing/corrupt packages or failed uploads leave the
 draft unpublished; a partial upload can be retried. Other draft assets are retained.
 The binaries are not Developer ID signed or notarized. These hosted package
