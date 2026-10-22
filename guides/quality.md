@@ -6,6 +6,20 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-22: Require pinned mixed-generation upgrade validation in CI
+
+Both native Linux privileged jobs build the exact pre-named-network revision
+`e470555a6df39f95823c1ab50dc9978f335b38f5` in a private source directory using
+the current patched Go toolchain. The shared-VM entry point validates the baseline's
+native ELF architecture and preserves the required flag across sudo. CI requires
+the existing pinned-supervisor network/forwarding regression to execute; missing
+baseline configuration and occupied bridge journals fail rather than skip. Local
+runs retain their optional baseline behavior unless explicitly required.
+
+Validation: macOS formatting, complete unit tests and vet, and pinned actionlint
+passed. Both privileged CI architectures must pass the actual mixed-generation
+case before this change is merged.
+
 ## 2026-10-21: Sample readiness from pinned service IDs
 
 Whole-project readiness passes send the startup-pinned full container IDs to the

@@ -140,6 +140,19 @@ fail CI rather than being ignored. Configure these checks as required in the
 repository's branch/release rules. Local macOS end-to-end tests run through the
 same Lima VM with `make test-macos`; dedicated CI uses the isolation described below.
 
+Both privileged CI architectures also build the pre-named-network engine at
+`e470555a6df39f95823c1ab50dc9978f335b38f5` with the current patched Go toolchain.
+The mixed-generation supervisor regression must execute: missing baselines,
+wrong architectures, or an occupied bridge journal fail rather than skip.
+This covers an old running supervisor's cleanup alongside the new engine's named
+network; it is not a general downgrade guarantee. Change the pinned revision only
+when deliberately changing the supported compatibility baseline.
+
+Locally, set `CASKLET_LEGACY_ENGINE` to an absolute native Linux baseline binary
+and `CASKLET_REQUIRE_LEGACY_ENGINE=1` before `make test-integration` to enforce
+the same check through the data-preserving shared-VM wrapper. Without these
+settings the old-supervisor case remains optional for ordinary local runs.
+
 ## Dedicated macOS end-to-end CI
 
 `.github/workflows/macos-e2e.yml` runs the complete `make test-macos` client/VM

@@ -231,9 +231,15 @@ func TestNamedNetworkPinnedLegacySupervisor(t *testing.T) {
 	require(t)
 	legacyEngine := os.Getenv("CASKLET_LEGACY_ENGINE")
 	if legacyEngine == "" {
+		if os.Getenv("CASKLET_REQUIRE_LEGACY_ENGINE") == "1" {
+			t.Fatal("CASKLET_LEGACY_ENGINE is required for upgrade compatibility validation")
+		}
 		t.Skip("set CASKLET_LEGACY_ENGINE to a pre-named-network Linux engine")
 	}
 	if _, err := os.Stat("/var/lib/casklet/runs/.network-shared.json"); !os.IsNotExist(err) {
+		if os.Getenv("CASKLET_REQUIRE_LEGACY_ENGINE") == "1" {
+			t.Fatalf("upgrade compatibility validation requires an unused bridge journal: %v", err)
+		}
 		t.Skip("requires no active bridge workloads")
 	}
 	forwarding := "/proc/sys/net/ipv4/ip_forward"
