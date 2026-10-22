@@ -17,8 +17,11 @@ baseline configuration and occupied bridge journals fail rather than skip. Local
 runs retain their optional baseline behavior unless explicitly required.
 
 Validation: macOS formatting, complete unit tests and vet, and pinned actionlint
-passed. Both privileged CI architectures must pass the actual mixed-generation
-case before this change is merged.
+passed. Both native privileged CI architectures passed their complete suites,
+including the required mixed-generation case with no skips. The same pinned case
+passed locally through the Linux arm64 shared-store preservation wrapper. The
+first local full suite encountered an unrelated lifecycle timestamp assertion
+after VM startup; its daily data was restored and its artifacts were retained.
 
 ## 2026-10-21: Sample readiness from pinned service IDs
 
