@@ -157,13 +157,15 @@ settings the old-supervisor case remains optional for ordinary local runs.
 
 `.github/workflows/macos-e2e.yml` runs the complete `make test-macos` client/VM
 suite weekly, by manual dispatch from `main`, or as a required release gate.
-Its matrix requires native Apple silicon (`ARM64`) and Intel (`X64`) dedicated
-runners; Rosetta is rejected.
+The complete client/VM suite requires a native Apple silicon (`ARM64`) dedicated
+runner; Rosetta is rejected. Intel retains native archive builds and offline
+package verification, plus the native Linux amd64 integration suite. Intel macOS
+client/VM end-to-end execution is not required for release.
 It is opt-in because GitHub-hosted Mac runners cannot be assumed to support the
 product's Virtualization.framework VM. Before enabling it:
 
-1. Register two dedicated self-hosted Mac runners with labels `self-hosted`, `macOS`,
-   and `casklet-e2e`, plus their automatic `ARM64` or `X64` architecture label.
+1. Register one dedicated Apple silicon self-hosted Mac runner with labels
+   `self-hosted`, `macOS`, and `casklet-e2e`, plus its automatic `ARM64` label.
    Use macOS 13.5+ with working Virtualization.framework,
    Lima 2.0+, Make, Python 3.9+, and network access to Ubuntu images and packages.
    The job installs the Go version in `go.mod` through `setup-go`.
@@ -183,9 +185,9 @@ product's Virtualization.framework VM. Before enabling it:
    gh workflow run macos-e2e.yml --repo OWNER/REPOSITORY --ref main
    ```
 
-   The first command is read-only. Both emit JSON with online runner IDs for each
-   architecture, the main-only environment check, readiness and enabled state.
-   Missing/offline runners, ambiguous architecture labels and unrestricted,
+   The first command is read-only. Both emit JSON with matching online ARM64
+   runner IDs, the main-only environment check, readiness and enabled state.
+   A missing/offline ARM64 runner, ambiguous architecture labels and unrestricted,
    wildcard, tag or additional environment branch policies fail the check.
    Pagination includes every repository runner. Busy online runners may queue
    work through the workflow's existing concurrency policy.
@@ -200,9 +202,10 @@ product's Virtualization.framework VM. Before enabling it:
    The API checks use GitHub's [runner inventory](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository)
    and [environment branch policy](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies)
    endpoints. The ordinary CI token intentionally cannot administer runners.
-   A successful prerequisite check does not prove VM capability or test success:
-   the dispatched workflow must still pass both native, real client/VM suites
-   with no skips. Release publication independently requires those results.
+   Intel runner presence and availability do not affect readiness. A successful
+   prerequisite check does not prove VM capability or test success: the dispatched
+   workflow must still pass the native Apple silicon client/VM suite with no skips.
+   Release publication independently requires that result.
    Until enabled, optional weekly runs skip and release preparation fails.
 
 The workflow never runs for pull requests or ordinary pushes. A GitHub-hosted
@@ -274,9 +277,9 @@ gh workflow run release.yml --ref main -f tag=v0.1.0
 
 Preparation refuses disabled Mac validation, non-main dispatches, missing drafts
 and unmerged tags. Hosted formatting/unit/vet/race/build/vulnerability and both
-privileged Linux suites run against the selected immutable commit. Both native
-Mac architectures must also pass their complete disposable-VM suites with no
-skipped tests. Failed, cancelled or skipped prerequisites cannot publish; a
+privileged Linux suites run against the selected immutable commit. The native
+Apple silicon Mac must also pass its complete disposable-VM suite with no skipped
+tests. Failed, cancelled or skipped prerequisites cannot publish; a
 missing runner leaves validation pending rather than approving the release.
 
 Only the final hosted publication job receives `contents: write`. It rechecks
@@ -296,7 +299,8 @@ replacing same-named assets on a retry. It rechecks draft/tag identity again aft
 upload before publishing. Missing/corrupt packages or failed uploads leave the
 draft unpublished; a partial upload can be retried. Other draft assets are retained.
 The binaries are not Developer ID signed or notarized. These hosted package
-checks do not replace the mandatory dedicated-Mac VM suites.
+checks do not replace the mandatory Apple silicon VM suite. Intel package
+verification does not establish Intel client/VM end-to-end coverage.
 
 The same package build runs on every CI invocation. For local native verification
 from a clean checkout (output stays ignored), run:
@@ -311,8 +315,9 @@ See the [GitHub reusable workflow permissions](https://docs.github.com/en/action
 and [release API](https://docs.github.com/en/rest/releases/releases#update-a-release).
 
 At the introduction of this gate, no dedicated Mac runners were registered.
-The gate remains disabled and release attempts fail until both real architectures
-are provisioned; unit/fake-runner checks do not establish Intel Mac compatibility.
+The gate remains disabled and release attempts fail until an Apple silicon runner
+is provisioned and the gate is explicitly enabled. Intel hardware is not required
+for this gate; unit/fake-runner checks do not establish real client/VM compatibility.
 
 ## OCI regression tests
 

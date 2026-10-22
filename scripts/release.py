@@ -28,7 +28,7 @@ def candidate(tag):
     if os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise ValueError("release validation must run from main")
     if os.environ.get("CASKLET_MACOS_E2E_ENABLED") != "1":
-        raise ValueError("configure Apple silicon and Intel Mac runners and enable CASKLET_MACOS_E2E_ENABLED before releasing")
+        raise ValueError("configure an Apple silicon Mac runner and enable CASKLET_MACOS_E2E_ENABLED before releasing")
     run("git", "check-ref-format", "refs/tags/" + tag)
     run("git", "fetch", "--no-tags", "origin",
         "+refs/heads/main:refs/remotes/origin/main",
@@ -55,7 +55,7 @@ def prepare(tag):
 
 def publish(tag, assets):
     if any(os.environ.get(name) != "success" for name in ("CHECKS_RESULT", "MACOS_RESULT")):
-        raise ValueError("both hosted checks and both Mac architectures must succeed before publishing")
+        raise ValueError("hosted checks and the Apple silicon Mac suite must succeed before publishing")
     expected = {"revision": os.environ.get("RELEASE_REVISION", ""),
                 "tag_oid": os.environ.get("RELEASE_TAG_OID", ""),
                 "release_id": os.environ.get("RELEASE_ID", "")}
@@ -71,7 +71,7 @@ def publish(tag, assets):
     github("api", "--method", "PATCH",
            f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/{expected['release_id']}",
            "-F", "draft=false")
-    print(f"Published {tag} after hosted and Apple silicon/Intel Mac validation.")
+    print(f"Published {tag} after hosted checks and Apple silicon Mac validation.")
 
 
 def main():
