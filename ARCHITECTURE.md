@@ -468,6 +468,17 @@ private roots/logs are discarded. Removed old records are not automatically
 restored after partial failure. Existing transaction-token rollback removes only
 new records/resources; retry creates absent services.
 
+`project up --remove-orphans` explicitly selects managed records absent from the
+new configuration. Selection verifies generated names and rejects duplicate or
+renamed identities. Orphans join the existing replacement reservation/source
+preflight and are removed using the same full-ID/generation/label-fenced guest
+operation. Removal is bounded to 64 existing records, precedes desired startup,
+and uses reverse creation order because the old dependency graph is not stored.
+Preview reports remove/service_removed actions without writes. Private roots/logs
+are discarded, while all pre-existing networks, volumes and bind data survive.
+Resource receipts are retained for config-free down; deleted service comparison
+receipts are discarded. Partial failure never restores removed old containers.
+
 Preview and recreation reservation checks use ID-ordered private pages of at
 most 64 snapshots per guest call. Each snapshot reads lifecycle identity and
 configuration together under the existing metadata lock, returning only the
@@ -480,7 +491,7 @@ Configuration reads release the metadata lock between records; existing source,
 host-port and removal fences still run.
 
 `project up --dry-run` shares inventory/ownership checks and reports resource
-creation plus service create/reuse/start/recreate actions, reasons, and sorted
+creation plus service create/reuse/start/recreate/remove actions, reasons, and sorted
 changed field names. Unselected drift is reportable during preview but still
 requires explicit recreation when applied. Only ID/spec-matched private baselines
 supply field differences; legacy/stale baselines are explicitly unavailable.

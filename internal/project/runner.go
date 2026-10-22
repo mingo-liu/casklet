@@ -89,8 +89,9 @@ type Change struct {
 }
 
 type UpOptions struct {
-	Recreate []string
-	DryRun   bool
+	Recreate      []string
+	DryRun        bool
+	RemoveOrphans bool
 
 	Timeout time.Duration
 	Wait    bool
@@ -157,14 +158,45 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			}
 		}
 	}
+	orphans := []container.Record{}
 	for _, record := range Managed(all, plan.Name) {
 		if expected, found := existing[record.Labels[LabelService]]; desired[record.Labels[LabelService]] && (!found || expected.ID != record.ID) {
 			return nil, errors.New("project has duplicate or renamed service records; use project down before recreating")
 		}
 		if !desired[record.Labels[LabelService]] {
-			return nil, errors.New("project has services absent from this config; use project down before recreating")
+			if !options.RemoveOrphans {
+				return nil, errors.New("project has services absent from this config; use --remove-orphans or project down")
+			}
+			orphans = append(orphans, record)
 		}
 	}
+	removing := maps.Clone(existing)
+	removalSelection := maps.Clone(selected)
+	for _, record := range orphans {
+		key := record.Labels[LabelService]
+		name, err := ScopedName(plan.Name, key)
+		if err != nil || ValidateName(key) != nil || record.Name != name || removalSelection[key] {
+			return nil, errors.New("project has duplicate or renamed orphan service records; use project down after inspection")
+		}
+		removing[key], removalSelection[key] = record, true
+	}
+	removalCount := 0
+	for key := range removing {
+		if removalSelection[key] {
+			removalCount++
+		}
+	}
+	if removalCount > ReservationPageSize {
+		return nil, errors.New("project removal selection exceeds 64 services")
+	}
+	// The old dependency graph is not retained. Remove orphans in reverse
+	// creation order, with a stable full-ID tie break.
+	sort.Slice(orphans, func(i, j int) bool {
+		if orphans[i].CreatedAt.Equal(orphans[j].CreatedAt) {
+			return orphans[i].ID > orphans[j].ID
+		}
+		return orphans[i].CreatedAt.After(orphans[j].CreatedAt)
+	})
 	inventories := map[string]map[string]Resource{}
 	for _, kind := range []string{"network", "volume"} {
 		inventory, e := runner.resources(ctx, kind)
@@ -210,8 +242,8 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	if len(runner.State.Resources)-releasedKeys+newKeys > 64 {
 		return nil, errors.New("project resource history is full; use project down before recreating")
 	}
-	if len(selected) > 0 || options.DryRun {
-		planned := maps.Clone(selected)
+	if len(removalSelection) > 0 || options.DryRun {
+		planned := maps.Clone(removalSelection)
 		if options.DryRun {
 			for key := range existing {
 				if !matching[key] {
@@ -219,12 +251,15 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 				}
 			}
 		}
-		if err := runner.checkConflicts(ctx, plan, all, existing, planned); err != nil {
+		if err := runner.checkConflicts(ctx, plan, all, removing, planned); err != nil {
 			return nil, err
 		}
 	}
 	for _, resource := range needed {
 		runner.Preview = append(runner.Preview, Change{Kind: resource.Kind, Name: resource.Name, Action: "create", Reason: "resource_missing"})
+	}
+	for _, record := range orphans {
+		runner.Preview = append(runner.Preview, Change{Kind: "service", Name: record.Labels[LabelService], ID: record.ID, Action: "remove", Reason: "service_removed"})
 	}
 	for _, service := range plan.Services {
 		record, found := existing[service.Key]
@@ -236,8 +271,8 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	// Check every source before removing any old execution. Pin resolved images
 	// for this invocation while retaining the desired-reference fingerprint.
 	prepared := map[string][]string{}
-	if len(selected) > 0 {
-		oldPorts, err := runner.selectedPorts(ctx, existing, selected)
+	if len(removalSelection) > 0 {
+		oldPorts, err := runner.selectedPorts(ctx, removing, removalSelection)
 		if err != nil {
 			return nil, err
 		}
@@ -326,6 +361,14 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 	}
 
+	for _, record := range orphans {
+		if _, err = runner.Call(ctx, "__project-replace", record.ID, fmt.Sprint(record.Generation), plan.Name, record.Labels[LabelService], record.Labels[LabelSpec]); err != nil {
+			return nil, err
+		}
+		if err = runner.forgetService(record); err != nil {
+			return nil, err
+		}
+	}
 	// Remove only pinned selected records, under the guest lifecycle lock. All
 	// removals precede creation so selected services can exchange ports/aliases.
 	for i := len(plan.Services) - 1; i >= 0; i-- {

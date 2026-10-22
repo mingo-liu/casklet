@@ -15,6 +15,7 @@ type Request struct {
 	Cursor        string
 	Services      []string
 	Recreate      []string
+	RemoveOrphans bool
 	Project       project.Plan
 	ProjectConfig string
 	RemoveVolumes bool

@@ -145,7 +145,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	runner := project.Runner{Call: call, Save: store.Save, State: state}
 	switch r.Action {
 	case "project-up":
-		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, DryRun: r.DryRun})
+		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, RemoveOrphans: r.RemoveOrphans, DryRun: r.DryRun})
 		if err != nil {
 			return 125, err
 		}

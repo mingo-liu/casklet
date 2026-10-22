@@ -110,6 +110,8 @@ casklet project down demo
 通过 `project up --config project.json --dry-run` 查看部署原因和变化字段；
 实际替换已变化的服务仍需指定 `--recreate SERVICE`。此示例使用指南中的 `demo` 配置。`project down` 默认保留数据卷；添加 `--volumes`
 也会删除项目拥有的数据卷。
+从配置中移除服务后，使用 `project up --remove-orphans` 删除对应容器，保留仍匹配的
+运行中服务和持久数据。添加 `--dry-run` 可先预览删除操作。
 
 使用 `project logs --follow demo` 查看带服务名前缀的聚合日志。
 `project up --wait` 每轮通过一次 VM 调用批量检查服务就绪状态。

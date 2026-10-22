@@ -37,6 +37,7 @@ func parseProject(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.JSON, "json", false, "print a validation summary")
 	case "up":
 		fs.BoolVar(&r.DryRun, "dry-run", false, "preview deployment changes")
+		fs.BoolVar(&r.RemoveOrphans, "remove-orphans", false, "remove managed services absent from the configuration")
 		fs.Func("recreate", "replace a logical service (repeatable)", func(value string) error { r.Recreate = append(r.Recreate, value); return nil })
 		fs.BoolVar(&r.Wait, "wait", false, "wait for all services within the deployment deadline")
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
