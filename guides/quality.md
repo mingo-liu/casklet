@@ -2070,6 +2070,29 @@ Validation:
   recovery test also passed 30 runs with the pre-named-network engine.
 - Intel Mac execution and Linux amd64 privileged execution were not performed.
 
+
+## 2026-10-26: Give project inventory, readiness and resources a typed backend
+
+Runner consumes typed records, service status and resource receipts through a
+five-method backend. A command adapter keeps the existing subprocess paths,
+context cancellation, authentication and private command protocol. The host
+inventory adapter validates and joins bounded private pages directly as values,
+removing the synthesized ps request and full-history JSON encode/decode cycle.
+An explicit reverse listing projection preserves current fields and prevents
+unknown transport fields from entering the orchestrator. Lifecycle, inspection
+and reservation commands retain their existing paths and identity fences.
+
+Validation: a value-only backend exercises reuse, resource creation/removal and
+pinned readiness without a command/JSON fake. Adapter errors, malformed responses,
+listing field preservation/redaction, cursor validation and existing rollback,
+generation, resource ownership and shared-deadline regressions pass. Complete
+Darwin/Linux unit and vet checks, CLI/project race checks on both platforms,
+formatting and native client/embedded engine build passed. Privileged project
+and offline-image recreation cases passed through the shared-VM preservation
+wrapper, retaining 256/512/1 inventory/reservation/pinned-readiness state reads.
+All 14 real Mac/VM project tests passed, including cancellation, log backpressure,
+external volumes, orphan removal, previews and selected recreation.
+
 ## 2026-10-22: Require pinned mixed-generation upgrade validation in CI
 
 Both native Linux privileged jobs build the exact pre-named-network revision

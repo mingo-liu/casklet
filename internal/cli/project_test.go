@@ -213,7 +213,7 @@ func TestProjectLegacyAliasFingerprintReusesServicesAndRejectsDrift(t *testing.T
 					return nil, errors.New("unexpected mutation")
 				}
 			}
-			runner := project.Runner{Call: call, State: project.State{Version: 1, Name: "demo",
+			runner := project.Runner{Backend: project.CommandBackend{Call: call}, Call: call, State: project.State{Version: 1, Name: "demo",
 				Resources: map[string]project.Resource{"network:cp-demo-default": network}}, Save: func(state project.State) error {
 				if test.wantError || !reflect.DeepEqual(state.Resources, map[string]project.Resource{"network:cp-demo-default": network}) {
 					t.Fatal("comparison baseline changed resource ownership")

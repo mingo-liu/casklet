@@ -112,13 +112,14 @@ func TestProjectListingTransportDropsFieldsOutsideItsContract(t *testing.T) {
 	}
 	fields["future_storage_metadata"] = json.RawMessage(`"private-value"`)
 	body, _ := json.Marshal(map[string]any{"records": []any{fields}})
-	call := projectRecordCalls("demo", func(context.Context, ...string) ([]byte, error) { return body, nil })
-	got, err := call(context.Background(), "ps", "-a", "--json", "--filter", "label="+project.LabelName+"=demo")
+	call := newProjectBackend("demo", func(context.Context, ...string) ([]byte, error) { return body, nil })
+	got, err := call.Records(context.Background(), "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want, _ := json.Marshal([]container.Record{member})
-	if !bytes.Equal(got, want) {
-		t.Fatalf("transport did not preserve its explicit contract:\ngot %s\nwant %s", got, want)
+	encoded, _ := json.Marshal(got)
+	if !bytes.Equal(encoded, want) {
+		t.Fatalf("transport did not preserve its explicit contract:\ngot %s\nwant %s", encoded, want)
 	}
 }

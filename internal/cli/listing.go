@@ -67,3 +67,26 @@ func containerListings(records []container.Record) []containerListing {
 	}
 	return listings
 }
+
+func listingRecords(listings []containerListing) []container.Record {
+	records := make([]container.Record, len(listings))
+	for i, record := range listings {
+		records[i] = container.Record{
+			ExitReason: record.ExitReason, OOMKilled: record.OOMKilled,
+			Labels: record.Labels, Health: record.Health,
+			RestartBootID: record.RestartBootID, StoppedBootID: record.StoppedBootID,
+			StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount,
+			RestartAt: record.RestartAt, LogLocking: record.LogLocking,
+			CleanupFailures: record.CleanupFailures, Generation: record.Generation,
+			LaunchAt: record.LaunchAt, PreviousExit: record.PreviousExit,
+			StopTimeout: record.StopTimeout, RetainRootFS: record.RetainRootFS,
+			Version: record.Version, ID: record.ID, BootID: record.BootID,
+			Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
+			StartedAt: record.StartedAt, FinishedAt: record.FinishedAt,
+			ExitCode: record.ExitCode, Error: record.Error,
+			RunPath: record.RunPath, Cgroup: record.Cgroup,
+			LogTruncated: record.LogTruncated, Command: record.Command, Publish: record.Publish,
+		}
+	}
+	return records
+}

@@ -187,7 +187,10 @@ func fakePlan() Plan {
 	return Plan{Name: "demo", Networks: []string{"cp-demo-default"}, Volumes: []string{"cp-demo-data"}, Services: []Service{db, api}}
 }
 func fakeRunner(fake *fakeProject) *Runner {
-	return &Runner{Call: fake.call, State: State{Version: 1, Name: "demo", Resources: map[string]Resource{}}, Save: func(State) error { fake.saves++; return nil }}
+	runner := runnerWithCall(fake.call)
+	runner.State = State{Version: 1, Name: "demo", Resources: map[string]Resource{}}
+	runner.Save = func(State) error { fake.saves++; return nil }
+	return runner
 }
 
 func TestProjectRepeatableUpAndDownPreserveDataVolumes(t *testing.T) {
@@ -482,4 +485,10 @@ func TestManagedVolumeConversionToExternalPreservesRunningServices(t *testing.T)
 	if err := runner.Down(context.Background(), "demo", true); err != nil || len(fake.resources) != 1 || !sameResource(fake.resources["volume:"+external.Name], external) {
 		t.Fatalf("converted volume removed: %v %v", err, fake.resources)
 	}
+}
+
+func runnerWithCall(call Call) *Runner {
+	runner := &Runner{Call: call}
+	runner.Backend = CommandBackend{Call: func(ctx context.Context, args ...string) ([]byte, error) { return runner.Call(ctx, args...) }}
+	return runner
 }
