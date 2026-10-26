@@ -14,7 +14,8 @@ type Store struct{}
 
 var errUnsupportedStore = errors.New("container management requires Linux")
 
-func OpenStore() (*Store, error) { return nil, errUnsupportedStore }
+func OpenStore() (*Store, error)                       { return nil, errUnsupportedStore }
+func OpenStoreContext(context.Context) (*Store, error) { return nil, errUnsupportedStore }
 func (*Store) Create(context.Context, config.Config, string) (Record, error) {
 	return Record{}, errUnsupportedStore
 }

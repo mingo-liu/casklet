@@ -81,7 +81,7 @@ func (store *Store) listPage(ctx context.Context, options RecordPageOptions, lim
 // ListPage preserves List's supervisor recovery and effective health semantics,
 // but refreshes only selected records, after releasing the metadata lock.
 func ListPage(ctx context.Context, options RecordPageOptions) (RecordPage, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return RecordPage{}, err
 	}

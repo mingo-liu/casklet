@@ -5,6 +5,7 @@ package container
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,5 +202,83 @@ func TestTransactionRecoveryHonorsCancellation(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("canceled recovery deleted data", err)
+	}
+}
+
+// Cancel only after a real unlink, avoiding directory-size and scheduler timing assumptions.
+type removalContext struct {
+	context.Context
+	directory string
+	initial   int
+	cancel    context.CancelFunc
+}
+
+func (ctx removalContext) Err() error {
+	if entries, err := os.ReadDir(ctx.directory); err == nil && len(entries) < ctx.initial {
+		ctx.cancel()
+	}
+	return ctx.Context.Err()
+}
+
+func TestContainerDeletionCancellationPreservesRecoverableTransaction(t *testing.T) {
+	for _, operation := range []string{"remove", "recover"} {
+		t.Run(operation, func(t *testing.T) {
+			store := testStore(t)
+			record := createTestRecord(t, store, "removed")
+			finishTestExecution(t, store, record, 0)
+			retained := createTestRecord(t, store, "unrelated")
+			path := filepath.Join(store.root, record.ID)
+			tombstone := filepath.Join(store.root, ".remove-"+record.ID)
+			if operation == "recover" {
+				if err := os.Rename(path, tombstone); err != nil {
+					t.Fatal(err)
+				}
+				path = tombstone
+			}
+			if err := os.Mkdir(filepath.Join(path, "rootfs"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			for i := range 300 {
+				if err := os.WriteFile(filepath.Join(path, "rootfs", fmt.Sprint(i)), []byte("remove"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := removalContext{parent, filepath.Join(tombstone, "rootfs"), 300, cancel}
+			var err error
+			if operation == "remove" {
+				err = store.Remove(ctx, record.ID)
+			} else {
+				err = store.recoverTransactions(ctx)
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("mid-deletion cancellation: %v", err)
+			}
+			entries, err := os.ReadDir(ctx.directory)
+			if err != nil || len(entries) == 0 || len(entries) >= 300 {
+				t.Fatalf("expected partial deletion, remaining=%d: %v", len(entries), err)
+			}
+			if err := store.Update(context.Background(), retained.ID, func(r *Record) error { r.State = StateRunning; return nil }); err != nil {
+				t.Fatal("metadata blocked after cancellation", err)
+			}
+			if _, err := store.List(context.Background()); err != nil {
+				t.Fatal("recovery after cancellation", err)
+			}
+			if _, err := os.Stat(tombstone); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("transaction survived recovery", err)
+			}
+			if _, err := store.Get(context.Background(), retained.ID); err != nil {
+				t.Fatal("unrelated container lost", err)
+			}
+		})
+	}
+}
+
+func TestOpenStoreContextRejectsCanceledCallerBeforePreparation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := OpenStoreContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
 	}
 }

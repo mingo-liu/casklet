@@ -41,7 +41,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 			return 125, err
 		}
 	}
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return 125, err
 	}

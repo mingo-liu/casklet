@@ -18,7 +18,7 @@ import (
 )
 
 func lockReference(ctx context.Context, ref string) (*Store, Record, *os.File, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return nil, Record{}, nil, err
 	}
@@ -219,7 +219,7 @@ func startStoppedWithPolicy(ctx context.Context, store *Store, record Record, pr
 // Wait pins an execution number before polling. Receipts survive later starts;
 // removal returns not-found instead of redirecting a reused name.
 func Wait(ctx context.Context, ref string) (int, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return 125, err
 	}

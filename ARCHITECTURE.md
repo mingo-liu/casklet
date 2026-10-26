@@ -226,7 +226,10 @@ recover abandoned `.create-ID` and `.remove-ID` directories. Recovery checks
 private ownership, existing leases, and mount points. A stable `.transactions`
 lock outside those directories fences deletion after internal lock files have
 been unlinked. Live deletion causes opportunistic recovery to skip; recursive
-deletion runs after releasing the metadata lock. Unsafe artifacts are preserved
+deletion runs after releasing the metadata lock. Storage preparation follows the
+caller context, and recursive deletion checks cancellation between entries using
+pinned, no-follow directories without crossing mounts. Cancellation preserves
+the remaining transaction for recovery. Unsafe artifacts are preserved
 with an error, and unknown directory names are left alone.
 
 ## Extending the project

@@ -10,7 +10,7 @@ import (
 // ListIDs samples at most 64 pinned full IDs without resolving names or reading
 // unrelated records. Missing IDs are omitted so callers can fence their selection.
 func ListIDs(ctx context.Context, ids []string) ([]Record, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -48,7 +48,7 @@ func refreshedSnapshot(ctx context.Context, store *Store, ref string) (Record, c
 }
 
 func Inspect(ctx context.Context, ref string) (Inspection, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return Inspection{}, err
 	}
@@ -64,7 +64,7 @@ func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics,
 	if err := ValidateStatsInterval(interval); err != nil {
 		return Statistics{}, err
 	}
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return Statistics{}, err
 	}
@@ -82,7 +82,7 @@ func Stats(ctx context.Context, ref string, interval time.Duration) (Statistics,
 // StatsMany samples pinned container IDs within one shared waiting window.
 // A removed container produces unavailable metrics without hiding other rows.
 func StatsMany(ctx context.Context, ids []string, interval time.Duration) ([]Statistics, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return nil, err
 	}

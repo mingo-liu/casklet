@@ -39,7 +39,7 @@ func RestartManager() int {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125

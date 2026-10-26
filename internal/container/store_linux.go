@@ -37,7 +37,12 @@ type Store struct {
 
 // OpenStore opens root-owned persistent storage. Host runtime files are never trusted blindly.
 func OpenStore() (*Store, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	return OpenStoreContext(context.Background())
+}
+
+// OpenStoreContext includes bounded recovery in the caller cancellation boundary.
+func OpenStoreContext(ctx context.Context) (*Store, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return openStoreContext(ctx)
 }
@@ -596,7 +601,7 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(tombstone); err != nil {
+	if err := rootfs.RemoveTree(ctx, tombstone); err != nil {
 		return err
 	}
 	return syncDirectory(store.root)

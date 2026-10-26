@@ -139,7 +139,7 @@ func (store *Store) recoverTransactions(ctx context.Context) error {
 		}
 		err = ctx.Err()
 		if err == nil {
-			err = os.RemoveAll(path)
+			err = rootfs.RemoveTree(ctx, path)
 		}
 		closeTransactionFiles(files)
 		if err != nil {
