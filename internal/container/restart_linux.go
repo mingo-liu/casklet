@@ -53,7 +53,7 @@ func RestartManager() int {
 	lastError := map[string]time.Time{}
 	var workers sync.WaitGroup
 	defer workers.Wait()
-	cursor := 0
+	scanner := restartScanner{}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	report := func(id string, err error) {
@@ -77,40 +77,23 @@ func RestartManager() int {
 			delete(active, result.id)
 			report(result.id, result.err)
 		case <-ticker.C:
-			listCtx, listCancel := context.WithTimeout(ctx, time.Second)
-			records, err := store.List(listCtx)
-			listCancel()
+			if len(active) >= 4 {
+				continue
+			}
+			scanCtx, scanCancel := context.WithTimeout(ctx, time.Second)
+			ids, err := scanner.next(scanCtx, store, active, 4-len(active), report)
+			scanCancel()
 			if err != nil {
 				report("storage", err)
 				continue
 			}
-			for scanned := 0; scanned < len(records); scanned++ {
-				if cursor >= len(records) {
-					cursor = 0
-				}
-				record := records[cursor]
-				cursor++
-				if len(active) >= 4 {
-					break
-				}
-				if active[record.ID] {
-					continue
-				}
-				cfg, err := store.Config(ctx, record.ID)
-				if err != nil {
-					report(record.ID, err)
-					continue
-				}
-				if cfg.RestartMode() == "no" {
-					continue
-				}
-				active[record.ID] = true
+			for _, id := range ids {
+				active[id] = true
 				workers.Add(1)
 				go func(id string) {
 					defer workers.Done()
-					err := reconcileRestart(ctx, store, id)
-					completed <- result{id, err}
-				}(record.ID)
+					completed <- result{id, reconcileRestart(ctx, store, id)}
+				}(id)
 			}
 		}
 	}
