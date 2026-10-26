@@ -412,10 +412,11 @@ atomic and fsynced; interrupted save files are reclaimed under the stable lock.
 
 Each supervisor owns a small UDP/TCP DNS server bound to its network gateway and
 an ephemeral port. Per-execution NAT redirects only that container's gateway DNS
-requests. Queries inspect current-boot journals and existing runtime lock leases,
-so abandoned/stopped executions are excluded and replacement addresses have no
-server cache. Exact names and aliases (optionally `.casklet`) receive IPv4 A records;
-external names use execution-specific upstream servers. There are at most 32
+requests. Single-label and `.casklet` queries inspect current-boot journals and
+existing runtime lock leases, so abandoned/stopped executions are excluded and
+replacement addresses have no server cache. Exact names and aliases (optionally
+`.casklet`) receive IPv4 A records; external names use execution-specific upstream
+servers directly, without reading local allocation journals. There are at most 32
 concurrent requests, 4 KiB packets, one TCP question per connection, and bounded
 upstream/connect/read deadlines. Shutdown cancels accepted and upstream sockets,
 quiesces workers, and keeps listening socket reservations through NAT cleanup.

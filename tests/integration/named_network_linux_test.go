@@ -115,6 +115,42 @@ func TestNamedNetworkUpstreamDNSPublishAndForegroundLease(t *testing.T) {
 	backgroundSuccess(t, "network", "rm", name)
 	assertNetworkSnapshot(t, before)
 }
+
+func TestNamedNetworkExternalDNSIgnoresUnrelatedJournal(t *testing.T) {
+	require(t)
+	before := networkSnapshot(t)
+	t.Cleanup(func() { assertNetworkSnapshot(t, before) })
+	networkUpstream(t)
+	name := namedNetwork(t)
+	id := startBackground(t, backgroundName(t), []string{"--network", name, "--network-alias", "consumer", "--dns", "198.18.0.2"}, "/bin/sleep", "300")
+	address := namedAddress(t, id)
+	poison, err := os.MkdirTemp("/var/lib/casklet/runs", "run-dns-invalid-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(poison) })
+	journal := filepath.Join(poison, "network-named.json")
+	if err := os.WriteFile(journal, []byte("invalid journal"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, protocol := range []string{"udp", "tcp"} {
+		if out := strings.TrimSpace(backgroundSuccess(t, "exec", id, "--", "/bin/integration-helper", "network-resolve", protocol, "fixture.test")); out != "198.18.0.2" {
+			t.Fatalf("external %s lookup: %s", protocol, out)
+		}
+		if code, _, _ := backgroundCLI(t, "exec", id, "--", "/bin/integration-helper", "network-resolve", protocol, "consumer.casklet"); code == 0 {
+			t.Fatal("local lookup ignored invalid execution state")
+		}
+	}
+	if data, err := os.ReadFile(journal); err != nil || string(data) != "invalid journal" {
+		t.Fatalf("query changed invalid journal: %q, %v", data, err)
+	}
+	if err := os.RemoveAll(poison); err != nil {
+		t.Fatal(err)
+	}
+	if out := strings.TrimSpace(backgroundSuccess(t, "exec", id, "--", "/bin/integration-helper", "network-resolve", "udp", "consumer.casklet")); out != address {
+		t.Fatalf("local lookup did not recover: %s != %s", out, address)
+	}
+}
 func TestNamedNetworkMetadataAndAliasValidation(t *testing.T) {
 	require(t)
 	name := namedNetwork(t)
