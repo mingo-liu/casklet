@@ -66,6 +66,10 @@ repair. Interrupted staging trees are reclaimed under the exclusive lease;
 symlinks, unsafe directory ownership/permissions, and mounts block reclamation.
 
 SSH carries exact shell-quoted argv, standard streams, exit status, and PTYs.
+Machine execution owns one signal subscription across preparation and guest
+sessions. Caller context cancellation sends a remote termination request, allows
+bounded cleanup, and reaps SSH before returning the context error. Explicit host
+signals preserve the guest command's signal handling and exit status.
 `remote` owns per-session Unix datagram sockets in private guest directories,
 relays control signals to the CLI child, and removes sockets when sessions end.
 A small macOS watchdog inherits a private lifeline pipe. Normal completion

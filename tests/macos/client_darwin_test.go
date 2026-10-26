@@ -311,9 +311,16 @@ func TestPublishedTCPAndUDP(t *testing.T) {
 }
 
 func TestSignalForwardingAndCleanup(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+		t.Run(sig.String(), func(t *testing.T) { signalForwardingAndCleanup(t, sig) })
+	}
+}
+
+func signalForwardingAndCleanup(t *testing.T, sig syscall.Signal) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, client(t), "run", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' TERM; echo signal-ready; while :; do sleep 1; done")
+	cmd := exec.CommandContext(ctx, client(t), "run", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' INT TERM; echo signal-ready; while :; do sleep 1; done")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +336,7 @@ func TestSignalForwardingAndCleanup(t *testing.T) {
 	if err != nil || !strings.Contains(string(buffer[:n]), "signal-ready") {
 		t.Fatalf("readiness: %q %v", buffer[:n], err)
 	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := cmd.Process.Signal(sig); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := io.ReadAll(stdout)
