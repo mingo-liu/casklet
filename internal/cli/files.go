@@ -14,11 +14,11 @@ import (
 	"syscall"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 const optionFileLimit = 1 << 20
 
-var runBooleans = map[string]bool{"detach": true, "d": true, "interactive": true, "i": true, "tty": true, "t": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
 var repeatedOptions = map[string]bool{"label": true, "network-alias": true, "env": true, "env-file": true, "mount": true, "dns": true, "publish": true, "uid-map": true, "gid-map": true}
 var runFileOptions = strings.Fields("rootfs image entrypoint detach name hostname memory tmp-size shm-size pids-limit cpus timeout stop-timeout stop-signal restart log-max-size log-max-files seccomp userns rootless uid-map gid-map network network-alias dns publish interactive tty env env-file label mount workdir user read-only progress health-cmd health-interval health-timeout health-retries health-start-period health-start-interval no-healthcheck")
 
@@ -61,29 +61,6 @@ func readEnvironment(filename string) ([]string, error) {
 		env = append(env, value)
 	}
 	return env, scanner.Err()
-}
-
-// optionTokens visits actual flags, skipping their values and the workload.
-func optionTokens(args []string, visit func(name, value string, index, end int) error) error {
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" || !strings.HasPrefix(args[i], "-") {
-			break
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
-		end := i
-		if !inline && !runBooleans[name] && name != "it" && name != "ti" && name != "help" && name != "h" {
-			end++
-			if end >= len(args) {
-				return fmt.Errorf("missing value for --%s", name)
-			}
-			value = args[end]
-		}
-		if err := visit(name, value, i, end); err != nil {
-			return err
-		}
-		i = end
-	}
-	return nil
 }
 
 func configFileArguments(filename string, explicit map[string]bool) ([]string, []string, error) {
@@ -155,7 +132,7 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 			if json.Unmarshal(raw, &entries) != nil {
 				return nil, nil, fmt.Errorf("config field %q must be a string array", name)
 			}
-		case runBooleans[name]:
+		case runargs.IsBoolean(name):
 			var value bool
 			if json.Unmarshal(raw, &value) != nil {
 				return nil, nil, fmt.Errorf("config field %q must be boolean", name)
@@ -208,7 +185,7 @@ func expandFileArguments(args []string) ([]string, error) {
 	configPath := ""
 	configCount := 0
 	help := false
-	err := optionTokens(args, func(name, value string, index, end int) error {
+	err := runargs.Walk(args, func(name, value string, index, end int) error {
 		explicit[name] = true
 		if name == "config" {
 			configPath = value
@@ -247,7 +224,7 @@ func expandFileArguments(args []string) ([]string, error) {
 		}
 	}
 	combined := append([]string{args[0]}, fileArgs...)
-	err = optionTokens(args, func(name, value string, index, end int) error {
+	err = runargs.Walk(args, func(name, value string, index, end int) error {
 		if name != "config" {
 			combined = append(combined, args[index:end+1]...)
 		}
@@ -257,7 +234,7 @@ func expandFileArguments(args []string) ([]string, error) {
 		return nil, err
 	}
 	consumed := 1
-	_ = optionTokens(args, func(_, _ string, _, end int) error { consumed = end + 1; return nil })
+	_ = runargs.Walk(args, func(_, _ string, _, end int) error { consumed = end + 1; return nil })
 	combined = append(combined, args[consumed:]...)
 	hasCommand := false
 	for _, arg := range args[consumed:] {
@@ -270,7 +247,7 @@ func expandFileArguments(args []string) ([]string, error) {
 	var envArgs []string
 	result := []string{combined[0]}
 	consumed = 1
-	err = optionTokens(combined, func(name, value string, index, end int) error {
+	err = runargs.Walk(combined, func(name, value string, index, end int) error {
 		consumed = end + 1
 		if name == "env-file" {
 			env, err := readEnvironment(value)

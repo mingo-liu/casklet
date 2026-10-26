@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/registryauth"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 // credentialOutput handles only the first protocol line. Keychain is opened
@@ -112,32 +113,16 @@ func (w *credentialOutput) sendCredential() error {
 // a second anonymous download; workload arguments remain byte-for-byte intact.
 func preparedImageArguments(args []string, id string) []string {
 	result := append([]string(nil), args...)
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true}
-	imageIndex, inlineImage, end := -1, false, len(result)
-	for i := 1; i < len(result); i++ {
-		if result[i] == "--" {
-			end = i
-			break
+	imageIndex, imageEnd, end := -1, -1, 1
+	_ = runargs.Walk(result, func(name, _ string, index, last int) error {
+		end = last + 1
+		if name == "image" {
+			imageIndex, imageEnd = index, last
 		}
-		name, _, inline := strings.Cut(strings.TrimLeft(result[i], "-"), "=")
-		if booleans[name] {
-			continue
-		}
-		index := i
-		if !inline {
-			i++
-			index = i
-		}
-		if name == "image" && index < len(result) {
-			imageIndex, inlineImage = index, inline
-		}
-	}
+		return nil
+	})
 	if imageIndex >= 0 {
-		if inlineImage {
-			result[imageIndex] = strings.SplitN(result[imageIndex], "=", 2)[0] + "=" + id
-		} else {
-			result[imageIndex] = id
-		}
+		runargs.SetValue(result, imageIndex, imageEnd, id)
 		return result
 	}
 	return append(append(append([]string(nil), result[:end]...), "--image", id), result[end:]...)

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 type Invocation struct {
@@ -45,43 +46,25 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 	if len(result) == 0 || (result[0] != "run" && result[0] != "doctor" && result[0] != "__project-preflight") {
 		return result, nil
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
-	for i := 1; i < len(result); i++ {
-		arg := result[i]
-		if arg == "--" {
-			break
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-		if booleans[name] {
-			continue
-		}
-		index := i
-		if !inline {
-			i++
-			index = i
-			if i >= len(result) {
-				return nil, fmt.Errorf("missing value for %s", arg)
-			}
-			value = result[i]
-		}
+	err := runargs.Walk(result, func(name, value string, index, end int) error {
 		switch name {
 		case "rootfs":
 			path, err := instance.hostPath(value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			value = path
 		case "mount":
 			mount, err := config.ParseMount(value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if mount.Type == "volume" {
-				continue
+				return nil
 			}
 			mount.Source, err = instance.hostPath(mount.Source)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			value = "type=bind,source=" + mount.Source + ",target=" + mount.Target
 			if mount.ReadOnly {
@@ -90,10 +73,10 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 		case "p", "publish":
 			mapping, err := config.ParsePortMapping(value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if mapping.HostPort == 22 {
-				return nil, errors.New("host port 22 is reserved by Lima; publish another port")
+				return errors.New("host port 22 is reserved by Lima; publish another port")
 			}
 			switch mapping.HostIP {
 			case "0.0.0.0":
@@ -101,17 +84,17 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 			case "127.0.0.1":
 				mapping.HostIP = "127.0.0.3"
 			default:
-				return nil, errors.New("macOS published ports support host addresses 0.0.0.0 and 127.0.0.1")
+				return errors.New("macOS published ports support host addresses 0.0.0.0 and 127.0.0.1")
 			}
 			value = fmt.Sprintf("%s:%d:%d/%s", mapping.HostIP, mapping.HostPort, mapping.ContainerPort, mapping.Protocol)
 		default:
-			continue
+			return nil
 		}
-		if inline {
-			result[index] = strings.SplitN(arg, "=", 2)[0] + "=" + value
-		} else {
-			result[index] = value
-		}
+		runargs.SetValue(result, index, end, value)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }

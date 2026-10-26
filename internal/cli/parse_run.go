@@ -19,153 +19,8 @@ import (
 var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
 func parseRun(r Request, args []string) (Request, error) {
-	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	if r.Action == "run" {
-		fs.String("env-file", "", "environment assignments file")
-		fs.String("config", "", "JSON run configuration")
-	}
-	if r.Action == "doctor" {
-		fs.BoolVar(&r.JSON, "json", false, "print a diagnostic report")
-	}
-	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
 	var memory, cpus, user string
-	if r.Action == "run" {
-		fs.String("health-cmd", "", "container shell health probe")
-		fs.Bool("no-healthcheck", false, "disable image health probe")
-		health := &config.HealthConfig{}
-		for name, target := range map[string]**time.Duration{"health-interval": &health.Interval, "health-timeout": &health.Timeout, "health-start-period": &health.StartPeriod, "health-start-interval": &health.StartInterval} {
-			fs.Func(name, "healthcheck duration", func(value string) error {
-				d, err := time.ParseDuration(value)
-				if err == nil {
-					*target = &d
-				}
-				return err
-			})
-		}
-		fs.Func("health-retries", "consecutive healthcheck failures", func(value string) error {
-			n, err := strconv.Atoi(value)
-			if err == nil {
-				health.Retries = &n
-			}
-			return err
-		})
-		r.Config.Healthcheck = health
-		fs.StringVar(&r.Config.Seccomp, "seccomp", "default", "seccomp profile")
-		fs.BoolVar(&r.Config.UserNS, "userns", false, "user namespace")
-		fs.BoolVar(&r.Config.Rootless, "rootless", false, "rootless foreground execution")
-		fs.Func("uid-map", "UID mapping", func(value string) error {
-			m, err := config.ParseIDMapping(value)
-			if err == nil {
-				r.Config.UIDMappings = append(r.Config.UIDMappings, m)
-			}
-			return err
-		})
-		fs.Func("gid-map", "GID mapping", func(value string) error {
-			m, err := config.ParseIDMapping(value)
-			if err == nil {
-				r.Config.GIDMappings = append(r.Config.GIDMappings, m)
-			}
-			return err
-		})
-		fs.Func("log-max-size", "maximum log file size", func(value string) error {
-			size, err := ParseMemory(value)
-			r.Config.LogMaxSize = size
-			return err
-		})
-		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
-		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
-		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
-		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })
-		fs.StringVar(&r.Config.Network, "network", "none", "none, bridge, or named network")
-		fs.Func("network-alias", "named network DNS alias", func(value string) error { r.Config.NetworkAliases = append(r.Config.NetworkAliases, value); return nil })
-		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
-		publish := func(value string) error {
-			mapping, err := config.ParsePortMapping(value)
-			if err == nil {
-				r.Config.Publish = append(r.Config.Publish, mapping)
-			}
-			return err
-		}
-		fs.Func("publish", "published port", publish)
-		fs.Func("p", "published port", publish)
-		fs.BoolVar(&r.Detach, "detach", false, "run in the background")
-		fs.BoolVar(&r.Detach, "d", false, "run in the background")
-		fs.BoolVar(&r.Config.Interactive, "interactive", false, "forward stdin")
-		fs.BoolVar(&r.Config.Interactive, "i", false, "forward stdin")
-		fs.BoolVar(&r.Config.TTY, "tty", false, "allocate a terminal")
-		fs.BoolVar(&r.Config.TTY, "t", false, "allocate a terminal")
-		fs.StringVar(&r.Name, "name", "", "detached container name")
-		fs.Func("label", "container metadata KEY=VALUE", func(value string) error {
-			key, val, err := config.ParseLabel(value)
-			if err != nil {
-				return err
-			}
-			if r.Config.Labels == nil {
-				r.Config.Labels = map[string]string{}
-			}
-			r.Config.Labels[key] = val
-			return config.ValidateLabels(r.Config.Labels)
-		})
-		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
-		fs.StringVar(&memory, "memory", "128m", "memory limit")
-		for name, target := range map[string]*int64{"tmp-size": &r.Config.TmpSize, "shm-size": &r.Config.ShmSize} {
-			fs.Func(name, "tmpfs byte capacity", func(value string) error {
-				size, err := ParseMemory(value)
-				if err != nil {
-					return errors.New("tmpfs capacity requires positive bytes or binary k/m/g units")
-				}
-				*target = size
-				return r.Config.ValidateTmpfs()
-			})
-		}
-		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
-		fs.Func("restart", "detached restart policy", func(value string) error {
-			if value == "" {
-				return errors.New("--restart requires a policy")
-			}
-			if _, _, err := config.ParseRestartPolicy(value); err != nil {
-				return err
-			}
-			r.Config.RestartPolicy = value
-			return nil
-		})
-		fs.Func("stop-signal", "Linux signal for managed shutdown", func(value string) error {
-			if _, err := config.ParseStopSignal(value); err != nil {
-				return err
-			}
-			r.Config.StopSignal = value
-			return nil
-		})
-		fs.Func("stop-timeout", "graceful shutdown duration", func(value string) error {
-			duration, err := time.ParseDuration(value)
-			if err != nil {
-				return err
-			}
-			if err := config.ValidateStopTimeout(duration); err != nil {
-				return err
-			}
-			r.Config.StopTimeout = &duration
-			return nil
-		})
-		fs.DurationVar(&r.Config.Timeout, "timeout", 0, "command timeout")
-		fs.StringVar(&cpus, "cpus", "0", "CPU cores")
-		fs.Func("env", "environment assignment", func(value string) error {
-			r.Config.Env = append(r.Config.Env, value)
-			return nil
-		})
-		fs.Func("mount", "directory bind mount", func(value string) error {
-			mount, err := config.ParseMount(value)
-			if err != nil {
-				return err
-			}
-			r.Config.Mounts = append(r.Config.Mounts, mount)
-			return nil
-		})
-		fs.StringVar(&r.Config.Workdir, "workdir", "", "working directory")
-		fs.StringVar(&user, "user", "", "numeric user and group IDs")
-		fs.BoolVar(&r.Config.ReadOnly, "read-only", false, "read-only root filesystem")
-	}
+	fs := runFlagSet(&r, &memory, &cpus, &user)
 	options := args
 	separator := -1
 	for i, arg := range options {
@@ -359,4 +214,156 @@ func parseRun(r Request, args []string) (Request, error) {
 		r.Config.Workdir = "/"
 	}
 	return r, nil
+}
+
+// Keep declarations separate so transport grammar can be checked against the
+// actual registered flag types without duplicating supported option names.
+func runFlagSet(r *Request, memory, cpus, user *string) *flag.FlagSet {
+	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	if r.Action == "run" {
+		fs.String("env-file", "", "environment assignments file")
+		fs.String("config", "", "JSON run configuration")
+	}
+	if r.Action == "doctor" {
+		fs.BoolVar(&r.JSON, "json", false, "print a diagnostic report")
+	}
+	fs.StringVar(&r.Config.RootFS, "rootfs", "", "rootfs template")
+	if r.Action == "run" {
+		fs.String("health-cmd", "", "container shell health probe")
+		fs.Bool("no-healthcheck", false, "disable image health probe")
+		health := &config.HealthConfig{}
+		for name, target := range map[string]**time.Duration{"health-interval": &health.Interval, "health-timeout": &health.Timeout, "health-start-period": &health.StartPeriod, "health-start-interval": &health.StartInterval} {
+			fs.Func(name, "healthcheck duration", func(value string) error {
+				d, err := time.ParseDuration(value)
+				if err == nil {
+					*target = &d
+				}
+				return err
+			})
+		}
+		fs.Func("health-retries", "consecutive healthcheck failures", func(value string) error {
+			n, err := strconv.Atoi(value)
+			if err == nil {
+				health.Retries = &n
+			}
+			return err
+		})
+		r.Config.Healthcheck = health
+		fs.StringVar(&r.Config.Seccomp, "seccomp", "default", "seccomp profile")
+		fs.BoolVar(&r.Config.UserNS, "userns", false, "user namespace")
+		fs.BoolVar(&r.Config.Rootless, "rootless", false, "rootless foreground execution")
+		fs.Func("uid-map", "UID mapping", func(value string) error {
+			m, err := config.ParseIDMapping(value)
+			if err == nil {
+				r.Config.UIDMappings = append(r.Config.UIDMappings, m)
+			}
+			return err
+		})
+		fs.Func("gid-map", "GID mapping", func(value string) error {
+			m, err := config.ParseIDMapping(value)
+			if err == nil {
+				r.Config.GIDMappings = append(r.Config.GIDMappings, m)
+			}
+			return err
+		})
+		fs.Func("log-max-size", "maximum log file size", func(value string) error {
+			size, err := ParseMemory(value)
+			r.Config.LogMaxSize = size
+			return err
+		})
+		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
+		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
+		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
+		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })
+		fs.StringVar(&r.Config.Network, "network", "none", "none, bridge, or named network")
+		fs.Func("network-alias", "named network DNS alias", func(value string) error { r.Config.NetworkAliases = append(r.Config.NetworkAliases, value); return nil })
+		fs.Func("dns", "IPv4 DNS server", func(value string) error { r.Config.DNS = append(r.Config.DNS, value); return nil })
+		publish := func(value string) error {
+			mapping, err := config.ParsePortMapping(value)
+			if err == nil {
+				r.Config.Publish = append(r.Config.Publish, mapping)
+			}
+			return err
+		}
+		fs.Func("publish", "published port", publish)
+		fs.Func("p", "published port", publish)
+		fs.BoolVar(&r.Detach, "detach", false, "run in the background")
+		fs.BoolVar(&r.Detach, "d", false, "run in the background")
+		fs.BoolVar(&r.Config.Interactive, "interactive", false, "forward stdin")
+		fs.BoolVar(&r.Config.Interactive, "i", false, "forward stdin")
+		fs.BoolVar(&r.Config.TTY, "tty", false, "allocate a terminal")
+		fs.BoolVar(&r.Config.TTY, "t", false, "allocate a terminal")
+		fs.StringVar(&r.Name, "name", "", "detached container name")
+		fs.Func("label", "container metadata KEY=VALUE", func(value string) error {
+			key, val, err := config.ParseLabel(value)
+			if err != nil {
+				return err
+			}
+			if r.Config.Labels == nil {
+				r.Config.Labels = map[string]string{}
+			}
+			r.Config.Labels[key] = val
+			return config.ValidateLabels(r.Config.Labels)
+		})
+		fs.StringVar(&r.Config.Hostname, "hostname", "casklet", "hostname")
+		fs.StringVar(memory, "memory", "128m", "memory limit")
+		for name, target := range map[string]*int64{"tmp-size": &r.Config.TmpSize, "shm-size": &r.Config.ShmSize} {
+			fs.Func(name, "tmpfs byte capacity", func(value string) error {
+				size, err := ParseMemory(value)
+				if err != nil {
+					return errors.New("tmpfs capacity requires positive bytes or binary k/m/g units")
+				}
+				*target = size
+				return r.Config.ValidateTmpfs()
+			})
+		}
+		fs.Int64Var(&r.Config.PidsLimit, "pids-limit", 64, "process and thread limit")
+		fs.Func("restart", "detached restart policy", func(value string) error {
+			if value == "" {
+				return errors.New("--restart requires a policy")
+			}
+			if _, _, err := config.ParseRestartPolicy(value); err != nil {
+				return err
+			}
+			r.Config.RestartPolicy = value
+			return nil
+		})
+		fs.Func("stop-signal", "Linux signal for managed shutdown", func(value string) error {
+			if _, err := config.ParseStopSignal(value); err != nil {
+				return err
+			}
+			r.Config.StopSignal = value
+			return nil
+		})
+		fs.Func("stop-timeout", "graceful shutdown duration", func(value string) error {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			if err := config.ValidateStopTimeout(duration); err != nil {
+				return err
+			}
+			r.Config.StopTimeout = &duration
+			return nil
+		})
+		fs.DurationVar(&r.Config.Timeout, "timeout", 0, "command timeout")
+		fs.StringVar(cpus, "cpus", "0", "CPU cores")
+		fs.Func("env", "environment assignment", func(value string) error {
+			r.Config.Env = append(r.Config.Env, value)
+			return nil
+		})
+		fs.Func("mount", "directory bind mount", func(value string) error {
+			mount, err := config.ParseMount(value)
+			if err != nil {
+				return err
+			}
+			r.Config.Mounts = append(r.Config.Mounts, mount)
+			return nil
+		})
+		fs.StringVar(&r.Config.Workdir, "workdir", "", "working directory")
+		fs.StringVar(user, "user", "", "numeric user and group IDs")
+		fs.BoolVar(&r.Config.ReadOnly, "read-only", false, "read-only root filesystem")
+	}
+	return fs
 }

@@ -2088,3 +2088,25 @@ entry-point regressions also reject missing, nonexecutable and wrong-architectur
 baselines before compilation or VM state access, and verify the requirement
 survives sudo environment reset. The first local full suite encountered an
 unrelated lifecycle timestamp assertion after VM startup; its daily data was restored and its artifacts were retained.
+
+## 2026-10-26: Share run option boundaries across preparation and transport
+
+A small runargs walker owns boolean classification, value boundaries and value
+replacement for file expansion, builtin-source selection, host/guest resource
+translation, credential image replacement and project preflight. CLI flag support
+and semantic validation stay in the parser. Actual registered flag types are
+checked against the shared grammar. Workload arguments, flag-like values, inline
+spelling, aliases and malformed-flag handling retain their boundaries.
+
+Selected-recreation preflight now skips values that happen to equal --publish
+instead of interpreting them as port options. A regression preserves a literal
+health command and workload arguments while removing only the actual exempt
+port. Existing host default-source regressions retain three-dash rejection.
+
+Validation: complete Darwin/Linux unit tests and vet, focused CLI/machine/project/
+runargs race checks on both platforms, formatting and native client/embedded
+engine build passed. Privileged project, OCI, credential preparation and network
+publishing cases passed through the shared-VM preservation wrapper. Real Mac/VM
+project deployment/reuse, selected recreation, private registry preparation and
+config-relative bind cases passed. Public commands, flags, storage and wire
+formats are unchanged.
