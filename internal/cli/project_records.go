@@ -15,7 +15,10 @@ import (
 
 const projectRecordPageSize = container.RecordPageSize
 
-type projectRecordPage = container.RecordPage
+type projectRecordPage struct {
+	Records []containerListing `json:"records"`
+	Next    string             `json:"next,omitempty"`
+}
 
 func validProjectCursor(cursor string) bool {
 	if cursor == "" {
@@ -57,15 +60,16 @@ func executeProjectRecords(ctx context.Context, r Request, out io.Writer) error 
 	return writeProjectRecords(out, page, r.Reference)
 }
 
-func writeProjectRecords(out io.Writer, page projectRecordPage, name string) error {
-	for i, record := range page.Records {
+func writeProjectRecords(out io.Writer, page container.RecordPage, name string) error {
+	response := projectRecordPage{Records: containerListings(page.Records), Next: page.Next}
+	for i, record := range response.Records {
 		if record.Labels[project.LabelName] != name {
 			// Only name ownership and reservation identity are needed outside
 			// the project. Commands, labels and private diagnostics stay guest-local.
-			page.Records[i] = container.Record{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, CreatedAt: record.CreatedAt}
+			response.Records[i] = containerListing{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, CreatedAt: record.CreatedAt}
 		}
 	}
-	return json.NewEncoder(out).Encode(page)
+	return json.NewEncoder(out).Encode(response)
 }
 
 // Keep the orchestrator's list interface while paging its host/guest transport.
@@ -85,7 +89,7 @@ func projectRecordCalls(name string, call project.Call) project.Call {
 		} else if len(args) != 3 {
 			return nil, errors.New("invalid project inventory request")
 		}
-		records := []container.Record{}
+		records := []containerListing{}
 		cursor := ""
 		for {
 			if err := ctx.Err(); err != nil {

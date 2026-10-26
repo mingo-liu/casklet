@@ -10,12 +10,11 @@ import (
 	"testing"
 
 	"github.com/mingo-liu/casklet/internal/config"
-	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
 func TestMacListingPortsTranslateGuestForwardingAddresses(t *testing.T) {
-	page := projectRecordPage{Next: strings.Repeat("a", 32), Records: []container.Record{{ID: strings.Repeat("a", 32),
+	page := projectRecordPage{Next: strings.Repeat("a", 32), Records: []containerListing{{ID: strings.Repeat("a", 32),
 		Publish: []config.PortMapping{
 			{HostIP: "127.0.0.2", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
 			{HostIP: "127.0.0.3", HostPort: 5353, ContainerPort: 53, Protocol: "udp"},

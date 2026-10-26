@@ -16,9 +16,13 @@ import (
 )
 
 func writeRecords(out io.Writer, records []container.Record, asJSON bool) error {
+	return writeListings(out, containerListings(records), asJSON)
+}
+
+func writeListings(out io.Writer, records []containerListing, asJSON bool) error {
 	if asJSON {
 		if records == nil {
-			records = []container.Record{}
+			records = []containerListing{}
 		}
 		return json.NewEncoder(out).Encode(records)
 	}

@@ -6,6 +6,28 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-26: Separate container listing output from persisted records
+
+The CLI projects container records into an explicit listing wire model before
+rendering public lists or private project pages. Mac listings and project page
+transport decode and present that same model. Adding a persisted Record field no
+longer extends listing JSON automatically. Existing fields, including legacy raw
+diagnostics and engine identities/paths, remain byte-compatible; their removal is
+outside this change. The existing public health, completion and port value types
+are reused. On-disk records, versions, filters and sanitized inspection are unchanged.
+Project redaction operates on output rows without mutating the storage snapshot.
+
+Validation: complete Darwin/Linux unit suites and vet, CLI/project race checks on
+both platforms, formatting and native client/embedded engine build passed.
+Contract regressions cover the complete field set, legacy JSON values, omission
+rules, null/empty collections, zero-valued pointers, output errors, member
+preservation, unrelated-record redaction, snapshot immutability and exclusion of
+unknown transport fields. Privileged inspection, labels/batch and large-history
+project tests passed through the shared-VM wrapper; inventory, reservation and
+pinned readiness retained 256, 512 and one state reads respectively. Real Mac/VM
+tests passed port listings, exit reasons, label filtering, project deployment/reuse,
+readiness, retained volumes, drift previews and reservation preflight.
+
 ## 2026-10-26: Cancel active SSH sessions through their caller context
 
 Machine execution keeps one signal subscription across host preparation,

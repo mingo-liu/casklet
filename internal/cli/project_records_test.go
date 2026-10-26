@@ -114,7 +114,7 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 		for i := range records {
 			records[i].ID = fmt.Sprintf("%032x", i+1)
 		}
-		return json.Marshal(projectRecordPage{Records: records, Next: records[len(records)-1].ID})
+		return json.Marshal(projectRecordPage{Records: containerListings(records), Next: records[len(records)-1].ID})
 	})
 	if _, err := call(ctx, "ps", "-a", "--json"); !errors.Is(err, context.Canceled) || count != 1 {
 		t.Fatalf("cancellation: calls=%d err=%v", count, err)
@@ -124,11 +124,11 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 			t.Fatalf("accepted %v", args)
 		}
 	}
-	if err := writeProjectRecords(failingWriter{}, projectRecordPage{Records: []container.Record{}}, "demo"); err == nil {
+	if err := writeProjectRecords(failingWriter{}, container.RecordPage{Records: []container.Record{}}, "demo"); err == nil {
 		t.Fatal("output error lost")
 	}
 	var out bytes.Buffer
-	if err := writeProjectRecords(&out, projectRecordPage{Records: []container.Record{}}, "demo"); err != nil || out.String() != "{\"records\":[]}\n" {
+	if err := writeProjectRecords(&out, container.RecordPage{Records: []container.Record{}}, "demo"); err != nil || out.String() != "{\"records\":[]}\n" {
 		t.Fatalf("empty page: %s %v", out.String(), err)
 	}
 }
@@ -141,7 +141,7 @@ func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 				t.Fatalf("ownership preflight reached mutation/resource call: %v", args)
 			}
 			var out bytes.Buffer
-			err := writeProjectRecords(&out, projectRecordPage{Records: []container.Record{record}}, "demo")
+			err := writeProjectRecords(&out, container.RecordPage{Records: []container.Record{record}}, "demo")
 			return out.Bytes(), err
 		})
 		runner := project.Runner{Call: call}
