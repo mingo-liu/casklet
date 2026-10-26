@@ -13,7 +13,7 @@ import (
 // ImageReferenced checks all retained records, including completed and failed
 // containers. Lock order is image store, then container store; never the reverse.
 func ImageReferenced(ctx context.Context, id string) (bool, error) {
-	store, err := OpenStore()
+	store, err := OpenStoreContext(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -26,7 +26,7 @@ func (store *Store) imageReferenced(ctx context.Context, id string) (bool, error
 
 // VolumeReferenced includes stopped containers; lock order is volume then container.
 func VolumeReferenced(ctx context.Context, name string) (bool, error) {
-	store, err := OpenStore()
+	store, err := OpenStoreContext(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -70,7 +70,7 @@ func (store *Store) configReferenced(ctx context.Context, matches func(config.Co
 
 // NetworkReferenced includes stopped containers. Lock order is network then container.
 func NetworkReferenced(ctx context.Context, name string) (bool, error) {
-	s, err := OpenStore()
+	s, err := OpenStoreContext(ctx)
 	if err != nil {
 		return false, err
 	}

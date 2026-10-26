@@ -24,11 +24,11 @@ const (
 	managementStopLimit  = 35 * time.Second
 )
 
-func managementStore() (*Store, error) {
+func managementStore(ctx context.Context) (*Store, error) {
 	if err := checkSystemd(); err != nil {
 		return nil, err
 	}
-	return OpenStore()
+	return OpenStoreContext(ctx)
 }
 
 // Start schedules an independent supervisor and waits for durable command startup.
@@ -37,7 +37,7 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err := cfg.ValidateExecution(); err != nil {
 		return Record{}, err
 	}
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return Record{}, err
 	}
@@ -235,7 +235,7 @@ func schedulingPendingAt(record Record, status unitStatus, bootID string, now ti
 }
 
 func List(ctx context.Context, all bool) ([]Record, error) {
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +400,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 	if tail < -1 || tail > 1000000 {
 		return errors.New("log tail must be between 0 and 1000000, or -1 for the entire log")
 	}
-	store, err := managementStore()
+	store, err := managementStore(ctx)
 	if err != nil {
 		return err
 	}

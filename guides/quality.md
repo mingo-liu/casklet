@@ -6,6 +6,29 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+
+## 2026-10-26: Cancel container deletion during recursive cleanup
+
+Container removal and abandoned transaction recovery share the existing image
+cleanup primitive through rootfs. It traverses pinned directories in bounded
+batches, rejects links/mount crossings and checks cancellation before each
+mutation. Cancellation preserves remaining tombstones under the existing stable
+transaction lock for a later recovery. Metadata locking, leases, on-disk records
+and image deletion semantics remain unchanged. Container management and reference
+checks propagate caller cancellation through storage preparation, retaining its
+five-second default preparation bound.
+
+Validation: deterministic remove/recovery regressions cancel after an actual
+unlink and verify partial storage, released metadata locks, unrelated records
+and successful retry. Both regressions fail with the old RemoveAll paths.
+Darwin package tests, vet, focused CLI/machine/project race checks and native
+client/embedded engine build passed. Linux container/image/rootfs tests, vet and
+related race checks passed, including the root container suite. The complete
+privileged Linux suite passed through the shared-VM preservation wrapper; daily
+storage and the restart manager were restored. The optional pinned legacy case
+was not configured locally; CI enforces it on both Linux architectures.
+Real Mac/VM lifecycle retention, wait/listings and structured exit tests passed.
+
 ## 2026-10-26: Separate container listing output from persisted records
 
 The CLI projects container records into an explicit listing wire model before

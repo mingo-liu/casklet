@@ -37,7 +37,7 @@ func executeProjectReservations(ctx context.Context, r Request, out io.Writer) e
 	if err != nil {
 		return err
 	}
-	store, err := container.OpenStore()
+	store, err := container.OpenStoreContext(ctx)
 	if err != nil {
 		return err
 	}
