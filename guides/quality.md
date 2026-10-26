@@ -6,6 +6,27 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-26: Cancel active SSH sessions through their caller context
+
+Machine execution keeps one signal subscription across host preparation,
+credential preparation and workload sessions. Host signals cancel preparation
+but remain distinct from caller context cancellation, preserving guest traps,
+terminal resizing and command exit status. Canceling a caller context during an
+active session forwards SIGTERM using an independent bounded control request,
+cancels lifecycle port checks, allows bounded guest cleanup, and reaps SSH before
+returning the context error. Unresponsive sessions retain the existing forced
+shutdown boundary; archive draining retains its shorter two-second bound.
+
+Validation: complete Darwin/Linux unit suites and vet, machine race checks on
+both platforms, CLI race checks on Darwin, formatting and native client/embedded
+engine build passed. Process regressions cover context-only cancellation,
+deadlines, unresponsive transport, signal forwarding, resizing, closed signal
+channels and transport reaping. Real Mac/VM tests passed context-only workload
+cleanup, SIGINT/SIGTERM/HUP/QUIT traps, abrupt client loss, retained lifecycle port
+checks, project deadline rollback, interactive terminal resize/restore and volume
+archive transport. The context-only fixture cancels via a private stdin pipe and
+confirms graceful guest cleanup plus removal of its run directory and cgroup.
+
 ## 2026-10-26: Isolate external DNS from allocation journals
 
 Named-network DNS classifies single-label and `.casklet` questions before local

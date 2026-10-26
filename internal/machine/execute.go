@@ -149,13 +149,45 @@ func engineCommand(rootless bool, args ...string) []string {
 }
 
 func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *os.File) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
+	// One signal source covers preparation and both credential/workload sessions.
+	// Keep caller cancellation distinct from signals so guest traps retain their
+	// original signal and command exit status.
+	preparationCtx, cancelPreparation := context.WithCancel(ctx)
+	defer cancelPreparation()
+	incoming := make(chan os.Signal, 8)
+	signals := make(chan os.Signal, 8)
+	signal.Notify(incoming, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
+	defer signal.Stop(incoming)
+	finished, joined := make(chan struct{}), make(chan struct{})
+	defer func() { close(finished); <-joined }()
+	go func() {
+		defer close(joined)
+		for {
+			select {
+			case sig := <-incoming:
+				select {
+				case signals <- sig:
+					if sig != syscall.SIGWINCH {
+						cancelPreparation()
+					}
+				case <-finished:
+					return
+				}
+			case <-finished:
+				return
+			}
+		}
+	}()
 	if invocation.TTY && invocation.Interactive {
 		if err := checkTerminal(stdin); err != nil {
 			return 125, err
 		}
 	}
 	if len(invocation.PreflightPorts) > 0 {
-		if err := waitHostPorts(ctx, invocation.PreflightPorts, 3*time.Second); err != nil {
+		if err := waitHostPorts(preparationCtx, invocation.PreflightPorts, 3*time.Second); err != nil {
 			return 125, err
 		}
 	}
@@ -173,7 +205,7 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		}); err != nil {
 			return 125, err
 		}
-		if err := waitHostPorts(ctx, ports, 3*time.Second); err != nil {
+		if err := waitHostPorts(preparationCtx, ports, 3*time.Second); err != nil {
 			return 125, err
 		}
 	}
@@ -184,10 +216,10 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 	if err != nil {
 		return 125, err
 	}
-	if err := m.preflightShares(ctx, invocation.Args); err != nil {
+	if err := m.preflightShares(preparationCtx, invocation.Args); err != nil {
 		return 125, err
 	}
-	instance, err := m.ensure(ctx, defaultOptions(), false, invocation.RequireRunning)
+	instance, err := m.ensure(preparationCtx, defaultOptions(), false, invocation.RequireRunning)
 	if err != nil {
 		return 125, err
 	}
@@ -216,7 +248,7 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		}
 		auth := &credentialOutput{reference: invocation.ImageReference, response: response, output: output}
 		preparation := Invocation{Args: []string{"__credential-prepare", mode, invocation.Progress, invocation.ImageReference}, Rootless: invocation.Rootless}
-		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth)
+		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth, signals)
 		if err != nil || code != 0 || invocation.RefreshImage {
 			return code, err
 		}
@@ -226,10 +258,13 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		}
 		args = preparedImageArguments(args, id)
 	}
-	return m.executeGuest(ctx, invocation, *instance, args, stdin, stdout, stderr, nil)
+	return m.executeGuest(ctx, invocation, *instance, args, stdin, stdout, stderr, nil, signals)
 }
 
-func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, instance Instance, args []string, stdin, stdout, stderr *os.File, authentication *credentialOutput) (int, error) {
+func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, instance Instance, args []string, stdin, stdout, stderr *os.File, authentication *credentialOutput, signals <-chan os.Signal) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return 125, err
@@ -250,6 +285,8 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	archiveOutput := len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
 	cmd := sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	checksCtx, cancelChecks := context.WithCancel(ctx)
+	defer cancelChecks()
 	if authentication != nil {
 		cmd.Stdout = authentication
 	}
@@ -261,16 +298,16 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 		defer input.Close()
 		defer response.Close()
 		cmd.Stdin = input
-		cmd.Stdout = &portCheckOutput{ctx: ctx, response: response, stdout: stdout}
+		cmd.Stdout = &portCheckOutput{ctx: checksCtx, response: response, stdout: stdout}
 	}
 	var inspection *inspectionOutput
 	if len(invocation.Args) > 0 && invocation.Args[0] == "inspect" {
 		inspection = &inspectionOutput{}
 		cmd.Stdout = inspection
 	}
-	signals := make(chan os.Signal, 8)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
-	defer signal.Stop(signals)
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
 	if err := cmd.Start(); err != nil {
 		return 125, err
 	}
@@ -279,53 +316,30 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 		// would prevent EPIPE if SSH exits before consuming the credentials.
 		_ = stdin.Close()
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	var shutdown <-chan time.Time
-	var canceledArchiveSignal syscall.Signal
-	for {
-		select {
-		case err := <-done:
-			if canceledArchiveSignal != 0 {
-				return 128 + int(canceledArchiveSignal), nil
-			}
-			if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
-				authentication.err = errors.New("incomplete registry preparation response")
-			}
-			if authentication != nil && authentication.err != nil {
-				return 125, authentication.err
-			}
-			return guestResult(instance, inspection, stdout, err)
-		case signal := <-signals:
-			if signal == syscall.SIGWINCH {
-				_ = cmd.Process.Signal(signal)
-				continue
-			}
-			controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			controlErr := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(signal.(syscall.Signal))))
-			cancel()
-			if controlErr != nil {
-				fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", controlErr)
-			}
-			if shutdown == nil {
-				grace := 75 * time.Second
-				if archiveOutput {
-					// SSH itself may be blocked writing the archive to a full host
-					// pipe even after the guest finishes and removes its signal
-					// socket. Attempt forwarding first, then bound transport draining
-					// regardless of delivery; discarded output is already incomplete.
-					grace = 2 * time.Second
-					canceledArchiveSignal = signal.(syscall.Signal)
-				}
-				shutdown = time.After(grace)
-			}
-		case <-shutdown:
-			_ = cmd.Process.Kill()
-			<-done
-			if canceledArchiveSignal != 0 {
-				return 128 + int(canceledArchiveSignal), nil
-			}
-			return 125, errors.New("guest did not finish after signal forwarding")
-		}
+	grace := 75 * time.Second
+	if archiveOutput {
+		// Bound SSH draining when a host archive pipe is full.
+		grace = 2 * time.Second
 	}
+	interrupted, err := waitGuest(ctx, cmd, signals, grace, func(sig syscall.Signal) {
+		cancelChecks()
+		controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(sig))); err != nil {
+			fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", err)
+		}
+	})
+	if archiveOutput && interrupted != 0 {
+		return 128 + int(interrupted), nil
+	}
+	if ctx.Err() != nil {
+		return 125, ctx.Err()
+	}
+	if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
+		authentication.err = errors.New("incomplete registry preparation response")
+	}
+	if authentication != nil && authentication.err != nil {
+		return 125, authentication.err
+	}
+	return guestResult(instance, inspection, stdout, err)
 }

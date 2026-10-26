@@ -137,8 +137,8 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 		}
 		return true, 0
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	// Machine execution owns signals across preparation and remote sessions.
+	ctx := context.Background()
 	if request.Action == "doctor" {
 		return true, executeDarwinDoctor(ctx, args, request, stdin, stdout, stderr)
 	}
