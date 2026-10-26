@@ -136,6 +136,14 @@ operations with a caller-provided context, `management.go` handles cancellation
 and exit status, and `output.go` handles table/JSON rendering. `help.go` is the
 option reference. Parsing completes before privilege escalation.
 
+Container listings use an explicit CLI-owned wire model rather than serializing
+persisted records. The same model covers public lists, Mac port presentation and
+private project record pages. Existing JSON fields, including legacy diagnostic
+and engine-path fields, retain their values and omission rules for compatibility;
+new storage fields require an explicit output decision. Project inventory still
+redacts unrelated members before transport. Inspection keeps its separate
+sanitized schema. Storage records and on-disk versions are unchanged.
+
 Within `runtime`, `check_linux.go` probes capabilities, `protocol_linux.go`
 defines supervisor/init messages, and `filesystem_linux.go` prepares private
 roots. `runtime_linux.go` coordinates startup and supervision; `init_linux.go`

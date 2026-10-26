@@ -12,13 +12,12 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/machine"
 	"github.com/mingo-liu/casklet/internal/project"
 	"github.com/mingo-liu/casklet/internal/registryauth"
 )
 
-func hostPublishedPorts(records []container.Record) {
+func hostPublishedPorts(records []containerListing) {
 	for i := range records {
 		for j := range records[i].Publish {
 			port := &records[i].Publish[j]
@@ -52,12 +51,12 @@ func executeDarwinPS(ctx context.Context, args []string, r Request, stdin, stdou
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return 125, err
 	}
-	var records []container.Record
+	var records []containerListing
 	if err := json.NewDecoder(file).Decode(&records); err != nil {
 		return 125, fmt.Errorf("invalid guest container listing: %w", err)
 	}
 	hostPublishedPorts(records)
-	if err := writeRecords(stdout, records, r.JSON); err != nil {
+	if err := writeListings(stdout, records, r.JSON); err != nil {
 		return 125, err
 	}
 	return 0, nil
