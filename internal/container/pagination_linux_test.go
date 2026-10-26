@@ -46,13 +46,18 @@ func paginationStore(t *testing.T, count int) (*Store, []Record) {
 // so repeated opens cannot be coalesced into a single inotify event.
 func watchRecordReads(t *testing.T, store *Store, records []Record) func() int {
 	t.Helper()
+	return watchContainerFileReads(t, store, records, "state.json")
+}
+
+func watchContainerFileReads(t *testing.T, store *Store, records []Record, name string) func() int {
+	t.Helper()
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { unix.Close(fd) })
 	for _, record := range records {
-		if _, err := unix.InotifyAddWatch(fd, filepath.Join(store.root, record.ID, "state.json"), unix.IN_OPEN|unix.IN_CLOSE_NOWRITE); err != nil {
+		if _, err := unix.InotifyAddWatch(fd, filepath.Join(store.root, record.ID, name), unix.IN_OPEN|unix.IN_CLOSE_NOWRITE); err != nil {
 			t.Fatal(err)
 		}
 	}

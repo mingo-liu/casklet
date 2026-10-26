@@ -181,7 +181,10 @@ exists; do not reverse image/container lock ordering.
 
 The boot-enabled `casklet-restarts.service` owns automatic policy reconciliation.
 It uses the same per-container operation lock and start path as manual lifecycle
-commands, with four bounded concurrent operations and fair polling. Workload
+commands, with four bounded concurrent operations and fair polling. Each polling pass decodes at most 64 records,
+retains pending candidates while workers are full, and caches only immutable
+restart modes by container ID. Removed cache entries are pruned after a complete
+ID traversal; directory names are still enumerated per page. Workload
 units keep `Restart=no`; every attempt publishes a new durable generation and
 receipt. Retry count, backoff deadline, and manual-stop state survive manager
 replacement. Boot identities distinguish policy restoration from a manual stop

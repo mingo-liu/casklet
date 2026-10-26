@@ -2111,3 +2111,24 @@ entry-point regressions also reject missing, nonexecutable and wrong-architectur
 baselines before compilation or VM state access, and verify the requirement
 survives sudo environment reset. The first local full suite encountered an
 unrelated lifecycle timestamp assertion after VM startup; its daily data was restored and its artifacts were retained.
+
+## 2026-10-26: Bound automatic restart discovery and reuse immutable policies
+
+Restart discovery decodes at most 64 ID-ordered records per polling pass and
+retains pending candidates when the four-worker limit is reached. A process-local
+cache stores only immutable restart modes, and removed IDs are discarded after
+a complete traversal. Full worker pools do no scanning. Reconciliation still
+acquires the operation lock and rereads current state/configuration; generations,
+manual-stop rules, backoff and persistent formats are unchanged. Directory names
+remain enumerated per page, and large histories take multiple passes to traverse.
+
+Validation: inotify regressions with 256 records verify 64 state opens and zero
+configuration opens per warm pass, versus the former full-history state/config
+reads. Cold passes perform at most 64 configuration reads. Tests cover retained
+candidate fairness, active workers, removed cache entries, concurrent removal,
+cancellation and full worker pools. Darwin package tests/vet/build and focused
+race checks passed. Linux unit/vet and root container race checks passed, as did
+privileged restart policy, boot restoration, concurrent management, canceled
+startup and project-readiness cases through the data-preserving shared-VM wrapper.
+The real Mac/VM automatic-restart regression passed. CI retains full privileged
+Linux coverage on both architectures.
