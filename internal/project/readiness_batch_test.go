@@ -30,7 +30,7 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 	for _, count := range []int{16, 64} {
 		plan, executions, records := readinessFixture(count)
 		calls := 0
-		runner := Runner{Call: func(ctx context.Context, args ...string) ([]byte, error) {
+		runner := runnerWithCall(func(ctx context.Context, args ...string) ([]byte, error) {
 			calls++
 			expected := []string{"__project-status", "demo"}
 			for _, service := range plan.Services {
@@ -40,7 +40,7 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 				t.Fatalf("sample did not pin service IDs: %v", args)
 			}
 			return json.Marshal(records)
-		}}
+		})
 		if err := runner.waitServices(context.Background(), plan, executions); err != nil || calls != 1 {
 			t.Fatalf("count=%d calls=%d err=%v", count, calls, err)
 		}
@@ -68,7 +68,7 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 			case "health stopped":
 				records[0].Health = container.HealthStopped
 			}
-			runner := Runner{Call: func(context.Context, ...string) ([]byte, error) {
+			runner := runnerWithCall(func(context.Context, ...string) ([]byte, error) {
 				if failure == "invalid JSON" {
 					return []byte("{"), nil
 				}
@@ -76,7 +76,7 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 					return nil, errors.New("fixture sample failure")
 				}
 				return json.Marshal(records)
-			}}
+			})
 			if err := runner.waitServices(context.Background(), plan, executions); err == nil {
 				t.Fatal("accepted invalid sample")
 			}
@@ -87,7 +87,7 @@ func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 func TestReadinessBatchResamplesDependenciesAndHonorsDeadline(t *testing.T) {
 	plan, executions, records := readinessFixture(2)
 	samples := 0
-	runner := Runner{Call: func(context.Context, ...string) ([]byte, error) {
+	runner := runnerWithCall(func(context.Context, ...string) ([]byte, error) {
 		samples++
 		if samples == 1 {
 			records[1].Health = container.HealthStarting
@@ -96,7 +96,7 @@ func TestReadinessBatchResamplesDependenciesAndHonorsDeadline(t *testing.T) {
 			records[0].State = container.StateExited
 		}
 		return json.Marshal(records)
-	}}
+	})
 	if err := runner.waitServices(context.Background(), plan, executions); err == nil || samples != 2 {
 		t.Fatalf("missed stopped dependency: %v samples=%d", err, samples)
 	}

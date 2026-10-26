@@ -113,10 +113,10 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if err != nil {
 		return 125, preparationError(err)
 	}
-	call = projectRecordCalls(name, call)
+	backend := newProjectBackend(name, call)
 	// Read-only status must remain available while up waits for a dependency.
 	if r.Action == "project-ps" || r.Action == "project-logs" {
-		runner := project.Runner{Call: call}
+		runner := project.Runner{Backend: backend, Call: call}
 		records, err := runner.Records(ctx, name)
 		if err != nil {
 			return 125, preparationError(err)
@@ -145,7 +145,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if err != nil {
 		return 125, preparationError(err)
 	}
-	runner := project.Runner{Call: call, Save: store.Save, State: state}
+	runner := project.Runner{Backend: backend, Call: call, Save: store.Save, State: state}
 	switch r.Action {
 	case "project-up":
 		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, RemoveOrphans: r.RemoveOrphans, DryRun: r.DryRun})

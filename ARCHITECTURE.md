@@ -456,7 +456,10 @@ remain owned by deployment.
 
 The CLI expands a project file on the invoking host before VM operations. `project`
 validates the bounded dependency DAG and owns operation sequencing, resource
-receipts and rollback. It calls the existing executable's command paths, preserving
+receipts and rollback. Inventory, readiness and resource operations use a narrow
+typed backend. The command adapter owns argument construction and response
+decoding; the host inventory adapter validates private pages and returns listing
+values directly without a joined JSON round trip. Existing command paths preserve
 macOS Keychain preparation, path/share translation, host-port preflight, readiness,
 generation fencing and managed lifecycle policy. No long-lived project daemon is
 introduced. Config hashes include effective defaults and expanded environment,

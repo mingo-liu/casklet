@@ -28,7 +28,7 @@ func TestProjectRecordPagesExcludeUnrelatedPayloadsAndPreserveMembers(t *testing
 	}
 	for _, scoped := range []bool{false, true} {
 		calls := 0
-		call := projectRecordCalls("demo", func(ctx context.Context, args ...string) ([]byte, error) {
+		call := newProjectBackend("demo", func(ctx context.Context, args ...string) ([]byte, error) {
 			calls++
 			r, err := Parse(args)
 			if err != nil || r.Action != "project-records" || r.All == scoped {
@@ -43,7 +43,7 @@ func TestProjectRecordPagesExcludeUnrelatedPayloadsAndPreserveMembers(t *testing
 			}
 			return out.data, nil
 		})
-		runner := project.Runner{Call: call}
+		runner := project.Runner{Backend: call}
 		var got []container.Record
 		var err error
 		if scoped {
@@ -72,7 +72,7 @@ func TestProjectRecordPagesPreserveCreationOrderForRollback(t *testing.T) {
 		// An unrelated trailing ID can require an empty final scoped page.
 		records[count].Labels = nil
 		calls := 0
-		call := projectRecordCalls("demo", func(_ context.Context, args ...string) ([]byte, error) {
+		call := newProjectBackend("demo", func(_ context.Context, args ...string) ([]byte, error) {
 			calls++
 			r, err := Parse(args)
 			if err != nil {
@@ -82,7 +82,7 @@ func TestProjectRecordPagesPreserveCreationOrderForRollback(t *testing.T) {
 			err = writeProjectRecords(&out, testRecordPage(records, r.Cursor, r.Reference, r.All, nil), r.Reference)
 			return out.Bytes(), err
 		})
-		runner := project.Runner{Call: call}
+		runner := project.Runner{Backend: call}
 		got, err := runner.Records(context.Background(), "demo")
 		if err != nil || len(got) != count || calls != 2 {
 			t.Fatalf("listing: %d records, %d calls, %v", len(got), calls, err)
@@ -100,14 +100,14 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 		`{`, `null`, `{"records":null}`, `{"records":[],"next":"bad"}`,
 		`{"records":[{"id":"bad"}]}`, `{"records":[{"id":"00000000000000000000000000000001"},{"id":"00000000000000000000000000000001"}]}`,
 	} {
-		call := projectRecordCalls("demo", func(context.Context, ...string) ([]byte, error) { return []byte(body), nil })
-		if _, err := call(context.Background(), "ps", "-a", "--json"); err == nil {
+		call := newProjectBackend("demo", func(context.Context, ...string) ([]byte, error) { return []byte(body), nil })
+		if _, err := call.Records(context.Background(), ""); err == nil {
 			t.Fatalf("accepted %s", body)
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	count := 0
-	call := projectRecordCalls("demo", func(context.Context, ...string) ([]byte, error) {
+	call := newProjectBackend("demo", func(context.Context, ...string) ([]byte, error) {
 		count++
 		cancel()
 		records := make([]container.Record, projectRecordPageSize)
@@ -116,7 +116,7 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 		}
 		return json.Marshal(projectRecordPage{Records: containerListings(records), Next: records[len(records)-1].ID})
 	})
-	if _, err := call(ctx, "ps", "-a", "--json"); !errors.Is(err, context.Canceled) || count != 1 {
+	if _, err := call.Records(ctx, ""); !errors.Is(err, context.Canceled) || count != 1 {
 		t.Fatalf("cancellation: calls=%d err=%v", count, err)
 	}
 	for _, args := range [][]string{{"__project-records"}, {"__project-records", "demo", "unknown"}, {"__project-records", "../demo", "project"}, {"__project-records", "demo", "inventory", "bad"}} {
@@ -136,7 +136,7 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 	for _, labels := range []map[string]string{nil, {project.LabelName: "other"}, {project.LabelName: "demo", project.LabelService: "wrong"}} {
 		record := container.Record{ID: strings.Repeat("1", 32), Name: "cp-demo-app", State: container.StateExited, Labels: labels}
-		call := projectRecordCalls("demo", func(_ context.Context, args ...string) ([]byte, error) {
+		call := newProjectBackend("demo", func(_ context.Context, args ...string) ([]byte, error) {
 			if args[0] != "__project-records" {
 				t.Fatalf("ownership preflight reached mutation/resource call: %v", args)
 			}
@@ -144,7 +144,7 @@ func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 			err := writeProjectRecords(&out, container.RecordPage{Records: []container.Record{record}}, "demo")
 			return out.Bytes(), err
 		})
-		runner := project.Runner{Call: call}
+		runner := project.Runner{Backend: call}
 		_, err := runner.Up(context.Background(), project.Plan{Name: "demo", Services: []project.Service{{Key: "app", Name: record.Name, Fingerprint: "spec"}}}, project.UpOptions{})
 		if err == nil || !strings.Contains(err.Error(), "ownership") {
 			t.Fatalf("name conflict was lost: %v", err)

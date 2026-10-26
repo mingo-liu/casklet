@@ -20,6 +20,7 @@ import (
 type Call func(context.Context, ...string) ([]byte, error)
 
 type Runner struct {
+	Backend Backend
 	Call    Call
 	Save    func(State) error
 	State   State
@@ -27,19 +28,11 @@ type Runner struct {
 }
 
 func (runner *Runner) Records(ctx context.Context, names ...string) ([]container.Record, error) {
-	args := []string{"ps", "-a", "--json"}
+	name := ""
 	if len(names) > 0 {
-		args = append(args, "--filter", "label="+LabelName+"="+names[0])
+		name = names[0]
 	}
-	data, err := runner.Call(ctx, args...)
-	if err != nil {
-		return nil, err
-	}
-	var records []container.Record
-	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, errors.New("invalid container list response")
-	}
-	return records, nil
+	return runner.Backend.Records(ctx, name)
 }
 
 func Managed(records []container.Record, name string) []container.Record {
@@ -54,13 +47,9 @@ func Managed(records []container.Record, name string) []container.Record {
 }
 
 func (runner *Runner) resources(ctx context.Context, kind string) (map[string]Resource, error) {
-	data, err := runner.Call(ctx, kind, "ls", "--json")
+	values, err := runner.Backend.Resources(ctx, kind)
 	if err != nil {
 		return nil, err
-	}
-	var values []Resource
-	if err := json.Unmarshal(data, &values); err != nil {
-		return nil, fmt.Errorf("invalid %s list response", kind)
 	}
 	result := map[string]Resource{}
 	for _, value := range values {
@@ -346,12 +335,11 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 	}()
 	for _, resource := range needed {
-		data, e := runner.Call(ctx, "__project-resource", "create", resource.Kind, resource.Name)
+		receipt, e := runner.Backend.CreateResource(ctx, resource.Kind, resource.Name)
 		if e != nil {
 			return nil, e
 		}
-		var receipt Resource
-		if json.Unmarshal(data, &receipt) != nil || receipt.Kind != resource.Kind || receipt.Name != resource.Name || receipt.CreatedAt.IsZero() {
+		if receipt.Kind != resource.Kind || receipt.Name != resource.Name || receipt.CreatedAt.IsZero() {
 			return nil, errors.New("invalid project creation receipt; preserving unverified resource")
 		}
 		created = append(created, receipt)
@@ -526,7 +514,7 @@ func (runner *Runner) removeResource(ctx context.Context, resource Resource) err
 		if !sameResource(current, resource) {
 			return fmt.Errorf("%s %q was replaced; preserving it", resource.Kind, resource.Name)
 		}
-		if _, err := runner.Call(ctx, "__project-resource", "rm", resource.Kind, resource.Name, resource.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+		if err := runner.Backend.RemoveResource(ctx, resource); err != nil {
 			return err
 		}
 	}
