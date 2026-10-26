@@ -196,11 +196,16 @@ func (s *dnsServer) answer(packet []byte, tcp bool) []byte {
 	if err != nil {
 		return nil
 	}
-	ip, known, err := s.lookup(name)
-	if err != nil {
-		return response(packet, end, 2)
-	}
-	if known {
+	// Single labels and .casklet names are network-local and must not leak upstream.
+	// External queries do not depend on the availability of execution journals.
+	if !strings.Contains(name, ".") || strings.HasSuffix(name, ".casklet") {
+		ip, known, err := s.lookup(name)
+		if err != nil {
+			return response(packet, end, 2)
+		}
+		if !known {
+			return response(packet, end, 3)
+		}
 		out := response(packet, end, 0)
 		out[2] |= 4
 		if typ == 1 && ip.To4() != nil {
@@ -209,10 +214,6 @@ func (s *dnsServer) answer(packet []byte, tcp bool) []byte {
 			out = append(out, ip.To4()...)
 		}
 		return out
-	}
-	// Single labels and .casklet names are network-local and must not leak upstream.
-	if !strings.Contains(name, ".") || strings.HasSuffix(name, ".casklet") {
-		return response(packet, end, 3)
 	}
 	for _, server := range s.upstream {
 		select {

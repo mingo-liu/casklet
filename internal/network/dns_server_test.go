@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -137,5 +138,28 @@ func TestDNSRejectsMalformedPacketsAndWrongSources(t *testing.T) {
 		if _, _, _, err := question(q); err == nil {
 			t.Fatalf("accepted malformed %x", q)
 		}
+	}
+}
+
+func TestDNSOnlyLocalNamesReadExecutionState(t *testing.T) {
+	for _, name := range []string{"redis", "redis.casklet", "missing.casklet", "fixture.test", "redis.casklet.example"} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			s := &dnsServer{lookup: func(string) (net.IP, bool, error) {
+				calls++
+				return nil, false, errors.New("unrelated execution journal is invalid")
+			}}
+			answer := s.answer(query(name, 1), false)
+			if len(answer) < 12 || answer[3]&15 != 2 {
+				t.Fatalf("expected SERVFAIL without a usable answer: %x", answer)
+			}
+			want := 0
+			if name == "redis" || strings.HasSuffix(name, ".casklet") {
+				want = 1
+			}
+			if calls != want {
+				t.Fatalf("execution lookups = %d, want %d", calls, want)
+			}
+		})
 	}
 }

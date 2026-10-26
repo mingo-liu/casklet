@@ -6,6 +6,23 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-10-26: Isolate external DNS from allocation journals
+
+Named-network DNS classifies single-label and `.casklet` questions before local
+lookup. External names go directly to the execution's upstream servers, avoiding
+global run-journal reads and preserving upstream resolution when unrelated local
+allocation metadata is invalid. Local queries retain live execution checks,
+SERVFAIL on unreadable state, NXDOMAIN for missing names, and uncached updates.
+Worker limits, transport deadlines and allocation/deletion validation are unchanged.
+
+Validation: complete Darwin and Linux unit suites and vet, network race checks on
+both platforms, and the privileged named-network suite passed in the shared VM;
+the wrapper restored daily data. A new regression covers UDP/TCP external lookup
+with a malformed unrelated journal, preserved journal contents, local failure and
+recovery. The unit regression failed before the fix on both external-name cases.
+The optional pinned legacy-supervisor case was skipped locally because no baseline
+binary was configured; hosted CI enforces it on both Linux architectures.
+
 ## 2026-10-22: Show published ports in container listings
 
 The `ps` and `project ps` tables now include `PORTS`, showing comma-separated
