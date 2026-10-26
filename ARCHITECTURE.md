@@ -134,7 +134,10 @@ while managed exec uses runtime resources and IPC.
 Within `cli`, `parse_*.go` handles command families, `commands_*.go` executes
 operations with a caller-provided context, `management.go` handles cancellation
 and exit status, and `output.go` handles table/JSON rendering. `help.go` is the
-option reference. Parsing completes before privilege escalation.
+option reference. Parsing completes before privilege escalation. The small `runargs` package owns
+run-style option boundaries and boolean classification shared by file expansion,
+host resource translation and project preflight. The CLI retains flag support
+and semantic validation; transport never scans workload operands.
 
 Container listings use an explicit CLI-owned wire model rather than serializing
 persisted records. The same model covers public lists, Mac port presentation and

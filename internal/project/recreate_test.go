@@ -224,3 +224,13 @@ func TestStoppedServicePreflightUsesInspectedSavedHostPorts(t *testing.T) {
 		t.Fatalf("checked=%v err=%v mutations=%v", checked, err, fake.mutations)
 	}
 }
+
+func TestPreflightSkipsPublishLikeOptionValues(t *testing.T) {
+	args := []string{"run", "--health-cmd", "--publish", "--publish", "127.0.0.1:8080:80/tcp", "--", "--publish", "workload"}
+	ports := []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}}
+	got := preflightArguments(args, ports)
+	want := []string{"__project-preflight", "--health-cmd", "--publish", "--", "--publish", "workload"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("preflight=%q want=%q", got, want)
+	}
+}

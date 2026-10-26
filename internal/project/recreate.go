@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 // Select validates logical keys before inventory or lifecycle operations.
@@ -95,19 +95,12 @@ func (runner *Runner) selectedPorts(ctx context.Context, existing map[string]con
 // Every desired endpoint is checked in full after removal, before startup.
 func preflightArguments(args []string, oldPorts []config.PortMapping) []string {
 	result := []string{"__project-preflight"}
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" {
-			return append(result, args[i:]...)
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
+	consumed := 1
+	_ = runargs.Walk(args, func(name, value string, index, end int) error {
+		consumed = end + 1
+		exempt := false
 		if name == "publish" || name == "p" {
-			end := i
-			if !inline {
-				end++
-				value = args[end]
-			}
 			port, err := config.ParsePortMapping(value)
-			exempt := false
 			if err == nil {
 				for _, previous := range oldPorts {
 					if port.HostIP == previous.HostIP && port.HostPort == previous.HostPort && port.Protocol == previous.Protocol {
@@ -115,14 +108,13 @@ func preflightArguments(args []string, oldPorts []config.PortMapping) []string {
 					}
 				}
 			}
-			if !exempt {
-				result = append(result, args[i:end+1]...)
-			}
-			i = end
-			continue
 		}
-		result = append(result, args[i])
-	}
+		if !exempt {
+			result = append(result, args[index:end+1]...)
+		}
+		return nil
+	})
+	result = append(result, args[consumed:]...)
 	return result
 }
 

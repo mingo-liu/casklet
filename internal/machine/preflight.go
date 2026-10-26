@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/rootfs"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 // visitHostResources skips option values and never reads workload arguments.
@@ -22,27 +22,9 @@ func visitHostResources(args []string, visit func(string, string) error) error {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {
 		return nil
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
-	for i := 1; i < len(args); i++ {
-		if args[i] == "--" {
-			break
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(args[i], "-"), "=")
-		if booleans[name] {
-			continue
-		}
-		if !inline {
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("missing value for --%s", name)
-			}
-			value = args[i]
-		}
-		if err := visit(name, value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runargs.Walk(args, func(name, value string, _, _ int) error {
+		return visit(name, value)
+	})
 }
 
 func validateMacPort(mapping config.PortMapping) error {

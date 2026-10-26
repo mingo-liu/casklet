@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/mingo-liu/casklet/internal/machine"
 	"github.com/mingo-liu/casklet/internal/project"
 	"github.com/mingo-liu/casklet/internal/registryauth"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 func hostPublishedPorts(records []containerListing) {
@@ -80,26 +80,13 @@ func platformArguments(args []string) []string {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "doctor" && args[0] != "__project-preflight") {
 		return args
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		if len(arg) < 2 || arg[0] != '-' || arg == "--" {
-			break
-		}
-		name := arg[1:]
-		if name[0] == '-' {
-			name = name[1:]
-		}
-		if name == "" || name[0] == '-' {
-			break
-		}
-		name, _, inline := strings.Cut(name, "=")
-		if name == "rootfs" || name == "image" {
-			return args
-		}
-		if !inline && !booleans[name] {
-			i++
-		}
+	hasSource := false
+	_ = runargs.Walk(args, func(name, _ string, _, _ int) error {
+		hasSource = hasSource || name == "rootfs" || name == "image"
+		return nil
+	})
+	if hasSource {
+		return args
 	}
 	return append([]string{args[0], "--rootfs", machine.BuiltinRootFS}, args[1:]...)
 }

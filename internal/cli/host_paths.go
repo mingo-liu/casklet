@@ -1,11 +1,10 @@
 package cli
 
 import (
-	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
 // hostPathArguments changes only CLI path values, never workload arguments or
@@ -23,59 +22,41 @@ func hostPathArguments(args []string, action string) ([]string, error) {
 	if action != "run" && action != "doctor" && action != "project-preflight" {
 		return result, nil
 	}
-	booleans := map[string]bool{"d": true, "detach": true, "i": true, "interactive": true, "t": true, "tty": true, "it": true, "ti": true, "read-only": true, "rootless": true, "userns": true, "no-healthcheck": true, "json": true}
-	for i := 1; i < len(result); i++ {
-		arg := result[i]
-		if arg == "--" {
-			break
-		}
-		name, value, inline := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-		if booleans[name] {
-			continue
-		}
-		index := i
-		if !inline {
-			i++
-			index = i
-			if i >= len(result) {
-				return nil, fmt.Errorf("missing value for %s", arg)
-			}
-			value = result[i]
-		}
+	err := runargs.Walk(result, func(name, value string, index, end int) error {
 		switch name {
 		case "rootfs":
 			if value == "builtin:busybox" {
-				continue
+				return nil
 			}
 			var err error
 			value, err = filepath.Abs(value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		case "mount":
 			mount, err := config.ParseMount(value)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			if mount.Type == "volume" {
-				continue
+				return nil
 			}
 			mount.Source, err = filepath.EvalSymlinks(mount.Source)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			value = "type=bind,source=" + mount.Source + ",target=" + mount.Target
 			if mount.ReadOnly {
 				value += ",readonly"
 			}
 		default:
-			continue
+			return nil
 		}
-		if inline {
-			result[index] = strings.SplitN(arg, "=", 2)[0] + "=" + value
-		} else {
-			result[index] = value
-		}
+		runargs.SetValue(result, index, end, value)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return result, nil
 }
