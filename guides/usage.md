@@ -593,6 +593,62 @@ can be overridden. Output goes to the caller; it is not added to container logs.
 Exiting an exec shell leaves the main container running. Shutdown cancels all
 exec sessions; client disconnect and timeout clean up that session's descendants.
 
+## Copying container files
+
+```sh
+casklet cp ./config.json worker:/etc/config.json
+casklet cp worker:/var/log/app ./logs
+casklet cp ./assets/. worker:/app/assets
+```
+
+Exactly one operand must be `ID|NAME:PATH`; names, full IDs and unique ID prefixes
+use the usual container resolver. Container paths are relative to `/` even without
+a leading slash; `..` components are rejected. Local paths are resolved on the
+invoking Mac, including directories outside VM shares. Prefix local filenames
+containing `:` with `./`, or use absolute paths. Use `--` before operands beginning
+with `-`. Container-to-container copies, stdin/stdout tar archives and additional
+copy flags are not provided. Success is silent; errors return 125, while signals
+retain their usual shell status. Both help forms describe the same interface.
+
+Files, directory trees and symbolic links can be copied in either direction.
+An existing destination directory receives the source basename. Otherwise the
+destination names the copied entry, and its parent must already exist. Directories
+merge; ordinary files replace ordinary files. `SOURCE/.` copies directory contents
+into an existing destination directory. A destination ending in `/` must already
+be a directory. Files cannot replace directories or vice versa. Existing symlink
+destinations are rejected, and symlinks inside copied trees are preserved rather
+than followed. Container path parents must be real directories; for example, use
+`/run` rather than a symlinked `/var/run`. Symlink targets may be absolute or dangling.
+
+Ordinary file/directory permission bits and modification times are preserved.
+New entries belong to the receiving user: the Mac caller or guest root. Ownership,
+hardlink identity, setuid/setgid/sticky bits, extended attributes, ACLs, and symlink
+timestamps are not preserved. Hardlinked source files become separate files.
+Device nodes, sockets and FIFOs fail explicitly. Each transfer is bounded to a
+16 GiB uncompressed tar stream including metadata, one million entries and 256
+path levels. The transport is internal; no `tar` executable is needed in the image.
+
+Both running and stopped retained containers are supported, including copied
+roots and OverlayFS images. Live copies access the current filesystem and its
+mounted volumes/binds, respect read-only mounts/root filesystems and may observe
+concurrent application writes. They are not application-consistent snapshots.
+Stopped copies access retained private files only: paths overlapping configured
+bind/volume mounts, `/tmp`, and other temporary storage fail rather than exposing
+hidden underlying directories. Start the container to access those mounts. A
+stopped read-only root also rejects uploads. `/proc`, `/sys`, `/dev` and the whole
+container root are excluded in either state. Foreground-only runs have no retained
+container identity and cannot be selected. A running supervisor from an older
+engine must be restarted once before it can provide the copy endpoint.
+
+Copy pins the full container ID and holds its lifecycle operation lock until
+completion, so start/restart/stop/removal wait rather than redirecting a reused
+name. This does not freeze the workload. Interrupted or failed copies retain
+completed entries; ordinary files are staged beside their destination and renamed
+only after their contents finish. Normal cancellation removes the unfinished
+staging file and leaves any old destination file intact. The whole directory copy
+is not transactional. Abrupt process loss may leave a `.casklet-cp-*` staging file
+for explicit inspection and removal.
+
 ## Background lifecycle and diagnostics
 
 ```sh

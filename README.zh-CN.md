@@ -105,6 +105,15 @@ casklet volume create app-data
 casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
 ```
 
+无需配置 VM 共享，即可与运行中或已停止的容器复制文件：
+
+```sh
+casklet cp ./config.json redis:/data/config.json
+casklet cp redis:/data/config.json ./config-copy.json
+```
+
+目录、符号链接、只读限制和停止状态下的挂载行为见[文件复制](guides/usage.md#copying-container-files)。
+
 通过[项目配置](guides/usage.md#project-deployment)部署多个服务，声明网络、数据卷
 和启动依赖：
 
@@ -136,7 +145,7 @@ casklet project down demo
 | 执行 | [CPU、内存、进程数和临时存储限制，环境变量、用户与只读根目录](guides/usage.md#resource-and-execution-options)、[交互式 run/exec](guides/usage.md#terminals-and-exec) |
 | 生命周期 | [日志与诊断](guides/usage.md#background-lifecycle-and-diagnostics)、[重启策略](guides/usage.md#automatic-restarts)、[健康检查](guides/usage.md#container-health-checks)、[实时资源监控](guides/usage.md#multi-container-resource-monitoring) |
 | 网络 | [TCP/UDP 端口发布](guides/usage.md#ipv4-networking)、[隔离的命名网络与服务发现](guides/usage.md#named-networks-and-service-discovery) |
-| 存储 | [绑定挂载与命名数据卷](guides/usage.md#persistent-data)、[数据卷备份与迁移](guides/usage.md#volume-backup-restore-and-migration)、[磁盘占用与镜像清理](guides/usage.md#disk-usage-and-cache-cleanup)、[下载缓存限制](guides/usage.md#shared-download-cache) |
+| 存储 | [容器文件复制](guides/usage.md#copying-container-files)、[绑定挂载与命名数据卷](guides/usage.md#persistent-data)、[数据卷备份与迁移](guides/usage.md#volume-backup-restore-and-migration)、[磁盘占用与镜像清理](guides/usage.md#disk-usage-and-cache-cleanup)、[下载缓存限制](guides/usage.md#shared-download-cache) |
 | 部署 | [JSON 配置与环境变量文件](guides/usage.md#repeatable-deployment-configuration)、[标签与批量操作](guides/usage.md#labels-filters-and-batch-lifecycle-operations)、[多服务项目与指定服务替换](guides/usage.md#project-deployment) |
 | 隔离 | [安全控制与 rootless 限制](guides/usage.md#security-and-rootless-execution) |
 

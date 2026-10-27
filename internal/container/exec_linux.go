@@ -22,12 +22,13 @@ import (
 const maxExecSessions = 16
 
 type execMessage struct {
-	Version int          `json:"version"`
-	Kind    string       `json:"kind"`
-	Options *config.Exec `json:"options,omitempty"`
-	Signal  int          `json:"signal,omitempty"`
-	Code    int          `json:"code,omitempty"`
-	Error   string       `json:"error,omitempty"`
+	Generation uint64       `json:"generation,omitempty"`
+	Version    int          `json:"version"`
+	Kind       string       `json:"kind"`
+	Options    *config.Exec `json:"options,omitempty"`
+	Signal     int          `json:"signal,omitempty"`
+	Code       int          `json:"code,omitempty"`
+	Error      string       `json:"error,omitempty"`
 }
 
 // Exec attaches caller-owned streams to an additional command in a live container.
@@ -295,7 +296,20 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 	if err := ipc.Decode(data, &request); err != nil {
 		return 125, err
 	}
-	if request.Version != 1 || request.Kind != "exec" || request.Options == nil || request.Signal != 0 || request.Code != 0 || request.Error != "" || len(files) != 3 {
+	if request.Version == 1 && request.Kind == "copy-root" && request.Generation == server.generation && request.Options == nil && request.Signal == 0 && request.Code == 0 && request.Error == "" && len(files) == 0 {
+		lookup, cancel := context.WithTimeout(server.ctx, 5*time.Second)
+		defer cancel()
+		record, err := server.store.Get(lookup, server.id)
+		if err != nil {
+			return 125, err
+		}
+		if record.Generation != server.generation || record.State != StateRunning || server.resources.Root == nil {
+			return 125, errors.New("container execution changed before copy")
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		return 0, ipc.Send(conn, execMessage{Version: 1, Kind: "copy-root", Generation: server.generation}, []*os.File{server.resources.Root})
+	}
+	if request.Generation != 0 || request.Version != 1 || request.Kind != "exec" || request.Options == nil || request.Signal != 0 || request.Code != 0 || request.Error != "" || len(files) != 3 {
 		return 125, errors.New("invalid exec request")
 	}
 	if err := request.Options.Validate(); err != nil {

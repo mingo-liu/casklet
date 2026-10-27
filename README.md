@@ -112,6 +112,16 @@ casklet volume create app-data
 casklet run --mount type=volume,source=app-data,target=/data -- /bin/sh -c 'echo saved > /data/message'
 ```
 
+Copy files to or from running and stopped containers without configuring a VM share:
+
+```sh
+casklet cp ./config.json redis:/data/config.json
+casklet cp redis:/data/config.json ./config-copy.json
+```
+
+See [file copying](guides/usage.md#copying-container-files) for directory, symlink,
+read-only and stopped-mount behavior.
+
 Deploy multiple services from a [project configuration](guides/usage.md#project-deployment)
 with networks, volumes, and startup dependencies:
 
@@ -137,7 +147,7 @@ See the [usage guide](guides/usage.md) for full examples, defaults, and limits.
 | Execution | [CPU, memory, PID and temporary-storage limits, environment, users, read-only roots](guides/usage.md#resource-and-execution-options), [interactive run/exec](guides/usage.md#terminals-and-exec) |
 | Lifecycle | [Logs and diagnostics](guides/usage.md#background-lifecycle-and-diagnostics), [restart policies](guides/usage.md#automatic-restarts), [health checks](guides/usage.md#container-health-checks), [live resource monitoring](guides/usage.md#multi-container-resource-monitoring) |
 | Networking | [TCP/UDP port publishing](guides/usage.md#ipv4-networking), [isolated named networks and service discovery](guides/usage.md#named-networks-and-service-discovery) |
-| Storage | [Bind mounts and named volumes](guides/usage.md#persistent-data), [volume backup and migration](guides/usage.md#volume-backup-restore-and-migration), [disk usage and image cleanup](guides/usage.md#disk-usage-and-cache-cleanup), [download cache limits](guides/usage.md#shared-download-cache) |
+| Storage | [Container file copying](guides/usage.md#copying-container-files), [Bind mounts and named volumes](guides/usage.md#persistent-data), [volume backup and migration](guides/usage.md#volume-backup-restore-and-migration), [disk usage and image cleanup](guides/usage.md#disk-usage-and-cache-cleanup), [download cache limits](guides/usage.md#shared-download-cache) |
 | Deployment | [JSON configuration and env-files](guides/usage.md#repeatable-deployment-configuration), [labels and batch operations](guides/usage.md#labels-filters-and-batch-lifecycle-operations), [multi-service projects and selective replacement](guides/usage.md#project-deployment) |
 | Isolation | [Security controls and rootless restrictions](guides/usage.md#security-and-rootless-execution) |
 

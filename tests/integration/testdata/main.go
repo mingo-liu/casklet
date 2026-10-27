@@ -14,6 +14,9 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "copy-hold":
+		fmt.Println("copy ready")
+		time.Sleep(30 * time.Second)
 	case "security":
 		securityProbe(true)
 	case "security-unconfined":

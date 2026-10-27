@@ -13,6 +13,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "__copy" {
+		os.Exit(container.CopyInit())
+	}
 	if len(os.Args) == 2 && os.Args[1] == "__restart-manager" {
 		os.Exit(container.RestartManager())
 	}
