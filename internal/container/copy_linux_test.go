@@ -20,7 +20,15 @@ func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
 	}
 	for _, kind := range []string{"running", "wrong-generation", "stopped", "missing-root"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
+			directory, err := os.MkdirTemp("", "ck-copy-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(directory)
+			store, err := newStoreAt(filepath.Join(directory, "containers"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			record := createTestRecord(t, store, "copy")
 			if err := store.Update(context.Background(), record.ID, func(r *Record) error { r.State = StateRunning; return nil }); err != nil {
 				t.Fatal(err)
