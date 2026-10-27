@@ -18,6 +18,17 @@ func TestCopyFilesThroughMacTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := detached(t, "--", "/bin/sleep", "300")
+	success(t, "cp", source, id+":/")
+	if got := success(t, "exec", id, "--", "/bin/cat", "/"+filepath.Base(source)); got != "exact\x00bytes\xff" {
+		t.Fatalf("root destination %q", got)
+	}
+	protected := filepath.Join(local, "proc")
+	if err := os.WriteFile(protected, []byte("blocked"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := command(t, "cp", protected, id+":/"); code != 125 {
+		t.Fatal("overwrote a protected root entry")
+	}
 	success(t, "cp", source, id[:12]+":/copied")
 	if got := success(t, "exec", id, "--", "/bin/cat", "/copied"); got != "exact\x00bytes\xff" {
 		t.Fatalf("upload %q", got)

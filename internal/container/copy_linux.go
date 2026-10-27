@@ -26,9 +26,10 @@ import (
 )
 
 type copyControl struct {
-	Path    string
-	Upload  bool
-	Overlay *rootfs.Overlay
+	Path     string
+	Upload   bool
+	Overlay  *rootfs.Overlay
+	Excluded []string
 }
 
 func copyPathsOverlap(a, b string) bool {
@@ -39,7 +40,7 @@ func copyPathsOverlap(a, b string) bool {
 // roots come from the authenticated supervisor, never a persisted numeric PID.
 func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, stderr *os.File) error {
 	clean := path.Clean(name)
-	if clean == "." || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+	if clean == "." && !upload || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
 		return errors.New("copy requires a path below the container root")
 	}
 	for _, reserved := range []string{"proc", "sys", "dev"} {
@@ -60,7 +61,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 	if err != nil {
 		return err
 	}
-	control := copyControl{Path: name, Upload: upload}
+	control := copyControl{Path: name, Upload: upload, Excluded: []string{"proc", "sys", "dev"}}
 	var rootFile *os.File
 	if record.State == StateRunning {
 		rootFile, err = liveCopyRoot(ctx, store, record)
@@ -75,7 +76,9 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 		if upload && cfg.ReadOnly {
 			return errors.New("copy cannot write a read-only container root")
 		}
+		control.Excluded = append(control.Excluded, "tmp")
 		for _, mount := range cfg.Mounts {
+			control.Excluded = append(control.Excluded, strings.TrimPrefix(mount.Target, "/"))
 			if copyPathsOverlap(clean, strings.TrimPrefix(mount.Target, "/")) {
 				return errors.New("copy cannot access an unmounted bind or volume in a stopped container; start it first")
 			}
@@ -271,7 +274,17 @@ func copyInit() error {
 	stop := context.AfterFunc(ctx, func() { file.Close() })
 	defer stop()
 	if control.Upload {
-		return copyfs.Import(ctx, root, control.Path, file)
+		return copyfs.ImportChecked(ctx, root, control.Path, file, func(target string) error {
+			if target == "." {
+				return errors.New("copy cannot merge contents into the whole container root")
+			}
+			for _, excluded := range control.Excluded {
+				if copyPathsOverlap(target, excluded) {
+					return errors.New("copy entry overlaps protected or unmounted container storage")
+				}
+			}
+			return nil
+		})
 	}
 	return copyfs.Export(ctx, root, control.Path, file)
 }

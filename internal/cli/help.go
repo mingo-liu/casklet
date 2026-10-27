@@ -132,7 +132,8 @@ Notes:
   Supports running/stopped retained containers and copy/OverlayFS roots; no tar
   executable or VM share is needed. Restart older running supervisors before copying.
   Stopped containers cannot expose mounts or temporary storage. Read-only mounts
-  and roots remain protected. /proc, /sys, /dev and the whole root are excluded.
+  and roots remain protected. /proc, /sys and /dev are excluded. Destination /
+  accepts a named file/tree; exporting / or merging SOURCE/. into / is excluded.
   Limits: 16 GiB tar stream, 1 million entries, 256 directory levels.
   Live copies are not snapshots. Errors/cancellation retain completed entries;
   unfinished ordinary files do not replace existing files. Success is silent.

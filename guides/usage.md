@@ -635,8 +635,10 @@ concurrent application writes. They are not application-consistent snapshots.
 Stopped copies access retained private files only: paths overlapping configured
 bind/volume mounts, `/tmp`, and other temporary storage fail rather than exposing
 hidden underlying directories. Start the container to access those mounts. A
-stopped read-only root also rejects uploads. `/proc`, `/sys`, `/dev` and the whole
-container root are excluded in either state. Foreground-only runs have no retained
+stopped read-only root also rejects uploads. `/proc`, `/sys` and `/dev` are excluded
+in either state. Destination `/` accepts a named source file or directory, with
+these exclusions checked against the resulting entry names. Exporting the whole
+container root or merging `SOURCE/.` directly into `/` is excluded. Foreground-only runs have no retained
 container identity and cannot be selected. A running supervisor from an older
 engine must be restarted once before it can provide the copy endpoint.
 

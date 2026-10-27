@@ -383,8 +383,10 @@ inside a short-lived private mount namespace; no mounts are published to the gue
 The helper and its root/image/operation handles remain live through transfer and
 cleanup. Parent death terminates the helper; namespace destruction releases any
 private mount. Stopped mount/temporary paths are rejected, and read-only roots
-reject uploads. Live read-only mounts retain kernel enforcement. Container root,
-procfs, sysfs and device trees are excluded. Storage record formats are unchanged.
+reject uploads. Live read-only mounts retain kernel enforcement. Procfs, sysfs
+and device trees are excluded, including per-entry checks when uploading a named
+file/tree to `/`. Whole-root exports/content merges are excluded. Storage record
+formats are unchanged.
 
 ## Named data volumes
 

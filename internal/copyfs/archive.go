@@ -173,6 +173,11 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 // traverses destination symlinks, preserves permission bits (not ownership or
 // special bits), and leaves completed entries intact on failure/cancellation.
 func Import(ctx context.Context, root *os.Root, destination string, source io.Reader) error {
+	return ImportChecked(ctx, root, destination, source, nil)
+}
+
+// ImportChecked applies a receiving-filesystem policy before each entry mutation.
+func ImportChecked(ctx context.Context, root *os.Root, destination string, source io.Reader, check func(string) error) error {
 	input := &stream{ctx: ctx, r: source}
 	reader := tar.NewReader(input)
 	first, err := reader.Next()
@@ -237,6 +242,11 @@ func Import(ctx context.Context, root *os.Root, destination string, source io.Re
 			}
 		}
 		target := path.Join(destination, relative)
+		if check != nil {
+			if err := check(target); err != nil {
+				return err
+			}
+		}
 		parent, err := openParent(root, target)
 		if err != nil {
 			return err

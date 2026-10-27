@@ -37,6 +37,10 @@ func TestCopyRunningStoppedOverlayAndMounts(t *testing.T) {
 		} else {
 			id = startBackground(t, backgroundName(t), options, "/bin/sleep", "300")
 		}
+		backgroundSuccess(t, "cp", local, id+":/")
+		if got := backgroundSuccess(t, "exec", id, "--", "/bin/cat", "/"+filepath.Base(local)); got != "exact\x00bytes\xff" {
+			t.Fatalf("root destination %q", got)
+		}
 		backgroundSuccess(t, "cp", local, id[:12]+":/value")
 		backgroundSuccess(t, "cp", local, id+":/data/value")
 		if got, _ := os.ReadFile(filepath.Join(bind, "value")); string(got) != "exact\x00bytes\xff" {

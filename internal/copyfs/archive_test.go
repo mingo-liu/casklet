@@ -225,3 +225,21 @@ func TestCopyRequiresCompleteArchiveAndRejectsTrailingData(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCopyDestinationPolicyRunsBeforeMutation(t *testing.T) {
+	root, dir := testRoot(t)
+	data := tarData(t, &tar.Header{Name: "protected", Mode: 0600, Typeflag: tar.TypeReg, Size: 5})
+	denied := errors.New("protected receiving path")
+	err := ImportChecked(context.Background(), root, ".", bytes.NewReader(data), func(target string) error {
+		if target != "protected" {
+			t.Fatalf("policy target %s", target)
+		}
+		return denied
+	})
+	if !errors.Is(err, denied) {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatal("mutated denied destination")
+	}
+}
