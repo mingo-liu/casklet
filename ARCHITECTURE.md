@@ -363,6 +363,31 @@ than reservations, and allocated tmpfs pages use the existing workload memory
 cgroup. Each execution recreates empty mounts, including retained OverlayFS and
 user-namespace/rootless copy paths.
 
+## Container file copying
+
+The host CLI opens local copy paths and streams one bounded private tar tree over
+SSH. Local paths never enter guest path translation, so copying needs no VM share.
+`copyfs` owns archive framing, limits, confined traversal and per-file replacement.
+It preserves symlinks as entries, refuses destination symlinks/special files and
+uses receiving-user ownership. Partial directory operations are intentionally
+retained; cancellation removes unfinished ordinary-file staging.
+
+The container manager pins the immutable ID under its existing lifecycle operation
+lock. Running roots are obtained through a generation-fenced, root-peer-validated
+request on the supervisor's existing exec socket. Init's pinned root descriptor
+provides the live mounted view without resolving a reusable PID or executing image
+tools. Older supervisors reject the new request and require an explicit restart.
+Stopped copied roots use the retained tree and supervisor lease. Stopped OverlayFS
+roots reacquire the immutable lower-image lease and mount the validated storage
+inside a short-lived private mount namespace; no mounts are published to the guest.
+The helper and its root/image/operation handles remain live through transfer and
+cleanup. Parent death terminates the helper; namespace destruction releases any
+private mount. Stopped mount/temporary paths are rejected, and read-only roots
+reject uploads. Live read-only mounts retain kernel enforcement. Procfs, sysfs
+and device trees are excluded, including per-entry checks when uploading a named
+file/tree to `/`. Whole-root exports/content merges are excluded. Storage record
+formats are unchanged.
+
 ## Named data volumes
 
 `volume` owns private metadata, data directories, creation/removal transactions,

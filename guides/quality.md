@@ -7,6 +7,44 @@ and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
 
+## 2026-10-27: Copy files between the host and retained containers
+
+Added `cp SOURCE DESTINATION` for ordinary files, directory trees and symbolic
+links in either direction. Host-local paths stream through SSH without a VM
+share or image-provided tools. Existing directories merge, `SOURCE/.` copies
+contents, parent directories must exist, and ordinary files publish by staged
+rename. Named entries can be uploaded to `/`, with per-entry protected-path checks.
+Permissions and file/directory timestamps are retained with receiving-user
+ownership; hardlink identity, special bits, extended attributes and special files
+are excluded. The private tar transport bounds bytes, entries and depth, rejects
+traversal, duplicate paths, unsafe links/types and incomplete/trailing framing,
+and never follows symlink parents inside the confined tree.
+
+The container manager pins the full ID and holds the lifecycle operation lock.
+Live roots come from an authenticated, generation-fenced supervisor descriptor;
+older supervisors require restart. Stopped copied roots use retained storage,
+while OverlayFS roots reacquire their lower-image lease and mount only in a
+short-lived private helper namespace. Read-only restrictions remain enforced.
+Stopped mount/temporary paths and protected kernel trees fail explicitly. Failed
+or canceled transfers retain completed entries, remove unfinished ordinary-file
+staging and preserve an old destination file. Abrupt process loss may leave a
+staging file for inspection. Help parity, both READMEs, usage and architecture
+cover these semantics without changing durable container formats.
+
+Validation: complete Darwin unit tests, vet, formatting and focused copy/CLI/
+container/machine race checks passed. Linux arm64 unit/vet checks and root
+container/copy race suites passed, including descriptor identity and stale/stopped
+endpoint refusal. The complete privileged suite passed 168 tests through the
+shared-store preservation wrapper; the optional pinned legacy-supervisor case
+was unconfigured locally and remains mandatory in hosted CI. Real Mac/VM copy
+regressions passed binary/quoted filenames, unshared host paths, short IDs,
+directory/symlink semantics, running/stopped copied and OverlayFS roots, mounted
+storage, root destinations and protected/read-only refusal. Linux also verifies
+tool-free images, malicious archives, interrupted-file preservation, temporary
+cleanup and lifecycle-lock release. The endpoint fixture uses a short private
+path to remain below the Unix socket address limit. Daily VM storage and its
+restart manager were restored after privileged validation.
+
 ## 2026-10-26: Cancel container deletion during recursive cleanup
 
 Container removal and abandoned transaction recovery share the existing image

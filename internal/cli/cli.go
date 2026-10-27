@@ -43,6 +43,9 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	if r.Action == "version" {
 		return executeVersion(r, stdout, stderr)
 	}
+	if r.Action == "cp" {
+		return executeCopy(r, stderr)
+	}
 	if r.Action == "project-logs" || r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
 		return executeProject(r, stdout, stderr)
 	}
@@ -72,7 +75,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
 		return executeManagement(r, stdout, stderr, stdin)
-	case "image-load", "image-save":
+	case "copy-in", "copy-out", "image-load", "image-save":
 		return executeManagement(r, stdout, stderr, stdin)
 	case "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)

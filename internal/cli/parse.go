@@ -12,6 +12,9 @@ import (
 )
 
 type Request struct {
+	CopySource    copyEndpoint
+	CopyTarget    copyEndpoint
+	CopyPath      string
 	Cursor        string
 	Services      []string
 	Recreate      []string
@@ -118,6 +121,13 @@ func Parse(args []string) (request Request, err error) {
 	}
 	if r.Action == "image" {
 		return parseImage(r, args[1:])
+	}
+	if r.Action == "cp" {
+		return parseCopy(r, args[1:], false)
+	}
+	if r.Action == "__copy-in" || r.Action == "__copy-out" {
+		r.Action = strings.TrimPrefix(r.Action, "__")
+		return parseCopy(r, args[1:], true)
 	}
 	if r.Action == "exec" {
 		return parseExec(r, args[1:])

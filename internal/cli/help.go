@@ -9,6 +9,7 @@ const commandOverview = `Usage: casklet COMMAND [OPTIONS]
 
 Commands:
   run       Run a command in a new container
+  cp        Copy files between the host and a container
   exec      Run a command in a running container
   project   Deploy and manage dependent services
   ps        List containers
@@ -111,6 +112,40 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"cp": `Usage: casklet cp [--] SOURCE DESTINATION
+       casklet cp LOCAL_PATH ID|NAME:PATH
+       casklet cp ID|NAME:PATH LOCAL_PATH
+
+Options:
+  -h, --help  Show this help
+
+Notes:
+  Exactly one endpoint is a container name, full ID, or unique ID prefix plus :PATH.
+  Container paths are relative to /; .. components are rejected.
+  Copies files, directories and symlinks; links inside a tree are not followed.
+  An existing destination directory receives the source basename; otherwise the
+  destination names the copy. SOURCE/. merges directory contents into an existing
+  directory. Parent directories must exist. Files are replaced; directories merge.
+  Preserves file/directory permissions and modification times, not ownership, hardlink
+  identity, special bits or extended attributes. New files belong to the receiving
+  user (root inside containers). Existing symlink destinations are rejected.
+  Supports running/stopped retained containers and copy/OverlayFS roots; no tar
+  executable or VM share is needed. Restart older running supervisors before copying.
+  Stopped containers cannot expose mounts or temporary storage. Read-only mounts
+  and roots remain protected. /proc, /sys and /dev are excluded. Destination /
+  accepts a named file/tree; exporting / or merging SOURCE/. into / is excluded.
+  Limits: 16 GiB tar stream, 1 million entries, 256 directory levels.
+  Live copies are not snapshots. Errors/cancellation retain completed entries;
+  unfinished ordinary files do not replace existing files. Success is silent.
+  Container-to-container copies and stdin/stdout tar archives are unsupported.
+  Use ./ before local names containing : to avoid container-operand ambiguity.
+
+Examples:
+  casklet cp ./config.json worker:/etc/config.json
+  casklet cp worker:/var/log/app ./logs
+  casklet cp ./assets/. worker:/app/assets
+`,
+
 	"version": `Usage: casklet version [--json]
        casklet --version [--json]
 
