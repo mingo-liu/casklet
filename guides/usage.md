@@ -866,6 +866,52 @@ Later management operations reclaim verified abandoned transactions automaticall
 Directories with live leases, unsafe ownership or permissions, or mounted
 subtrees are preserved; unsafe artifacts produce a diagnostic.
 
+## Lifecycle events
+
+```sh
+casklet events --json --filter project=demo
+casklet events --follow --json
+casklet events --after 120 --follow --filter event=exit
+```
+
+Events report retained container lifecycle transitions: `create`, `starting`,
+`start`, `stopping`, `exit`, `restart`, `stop_requested`, `restart_scheduled`,
+`health`, `cleanup_failed`, and `remove`. `restart` marks a new retained execution
+regardless of whether start, restart or automatic policy created it. Health probes
+emit changes rather than every probe. The VM retains the last 1024 events in a
+bounded private journal, including entries for removed containers. Sequence numbers
+are global, strictly increasing and survive ordinary VM restarts. They reset if
+the store/journal is explicitly replaced or removed.
+
+Without `--follow`, the command snapshots retained history. Follow starts at the
+current end unless `--after` or `--since` is supplied. `--after` is exclusive;
+`--after 0` replays retained history. `--since` accepts an RFC3339 timestamp with
+optional fractional seconds and includes that instant. Repeated `--filter` values
+are ANDed and support `event=TYPE`, `container=FULL_ID|EXACT_NAME`, `project=NAME`
+and `service=KEY`. Exact names can match several historical containers after name
+reuse; use a full ID for one immutable container. No prefix resolution or label
+value export occurs. A resume cursor ahead of this store or behind retained history
+fails explicitly. Slow followers also fail on retention overrun rather than silently
+skipping events. Time filtering cannot recover already discarded history.
+
+`--json` writes one `schema_version: 1` object per line, for snapshots and streams.
+Fields include sequence, UTC time, full container ID, name, event type, generation,
+state and optional health/exit reason/status, sanitized cleanup stages and project/
+service keys. Plain output abbreviates IDs. Environment values, command arguments,
+probe output, raw private errors and engine paths are not included. Readers release
+metadata locks before output; cancellation/output failure stops observation without
+stopping workloads, including when stdout is blocked.
+
+History begins with this engine version. Supervisors already running an older
+engine do not emit newly supported transitions until restarted. State publication
+and journal publication are separate atomic files, so a crash between them can
+leave an event gap. Journal storage failures warn and attempt to persist an incomplete-history marker;
+they do not block container lifecycle operations or resource cleanup. Readers refuse
+marked history rather than presenting it as complete. After correcting storage,
+explicit operator acknowledgement/reset is required; see the development guide.
+This bounded stream is an operational observation interface, not a complete audit
+log. It covers retained containers, not standalone foreground runs.
+
 ## IPv4 networking
 
 ```sh

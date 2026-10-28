@@ -432,3 +432,20 @@ project-scoped `__project-status` read. This measures one readiness pass, not co
 startup, dependency waits or image preparation. Use 1-10 iterations to keep live
 sampling bounded. Initial per-service configuration/healthcheck inspection and
 final deployment validation remain outside the optimized wait loop.
+
+## Event history recovery
+
+Lifecycle observation is separate from container state. A failed journal write
+warns without preventing stop, completion or removal, and attempts to persist
+`/var/lib/casklet/containers/.events-error`. Event readers reject that marker so
+missing observations are not presented as complete. Fix capacity, permissions or
+unsafe artifacts first; do not reset container metadata or roots.
+
+After inspecting/backing up the bounded `.events.json` journal in that same guest
+directory, an operator can explicitly acknowledge lost observations by removing
+only `.events-error`. Keep a valid journal to preserve its sequence. If the journal
+itself is invalid, stop event readers and archive/remove only `.events.json` together
+with the marker to start a new history; prior cursors no longer describe that store.
+Use `limactl shell casklet-runtime` for these internal guest diagnostics. Do not
+follow or truncate unexpected links. If recording the marker also failed, only the
+warning is available: the journal is best-effort observation, not an audit log.

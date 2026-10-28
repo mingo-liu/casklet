@@ -16,6 +16,7 @@ Commands:
   inspect   Show a container's configuration and lifecycle as JSON
   stats     Sample or monitor container memory and CPU usage
   logs      Read or follow retained container output
+  events    Read or follow retained lifecycle events
   stop      Stop a container gracefully
   wait      Wait for container exit or health
   start     Start a stopped container with its retained files
@@ -112,6 +113,38 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"events": `Usage: casklet events [OPTIONS]
+
+Options:
+  --json           Print one schema_version:1 JSON object per event (NDJSON)
+  -f, --follow     Follow future events until canceled
+  --since TIME     Include retained events at/after RFC3339 time (nanoseconds allowed)
+  --after SEQUENCE Resume after a global sequence; 0 replays retained history
+  --filter FILTER  event=TYPE, container=FULL_ID|EXACT_NAME, project=NAME,
+                   or service=KEY; repeat (AND)
+  -h, --help       Show this help
+
+Notes:
+  Default: snapshot the last 1024 retained container events. Follow starts with
+  future events unless --since or --after is present. Names can match reused names;
+  use a full immutable ID for one container. Filters are ANDed.
+  Types: create, starting, start, stopping, exit, restart, stop_requested,
+  restart_scheduled, health, cleanup_failed, remove. restart marks a new generation.
+  Global sequences survive VM reboots. Resume/follow errors explicitly on retention
+  overrun or a newer-store cursor. --since cannot recover discarded history.
+  Commands, environment values, probe output and raw private errors are excluded.
+  Cancellation and stdout failure release readers; workloads keep running.
+  History begins with this engine; older supervisors do not emit new transitions.
+  State and events publish separately: crashes can leave gaps. Recording failures
+  warn without blocking lifecycle cleanup and attempt an incomplete-history marker;
+  readers refuse marked history. This is not a complete audit log.
+
+Examples:
+  casklet events --filter project=demo --json
+  casklet events --follow --json
+  casklet events --after 120 --follow --filter event=exit
+`,
+
 	"project exec": `Usage: casklet project exec [OPTIONS] PROJECT SERVICE -- COMMAND [ARGS...]
 
 Options:
@@ -524,6 +557,8 @@ Commands:
   down  Stop and remove managed containers and owned networks
   ps    Show all retained containers belonging to a project
   logs  Read or follow output grouped by logical service
+  exec  Run a command in one logical service
+  start/stop/restart  Operate on retained project services
 
 Notes:
   Project names and logical service/resource names use lowercase DNS labels.

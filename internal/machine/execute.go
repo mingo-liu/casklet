@@ -265,7 +265,7 @@ func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, insta
 	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
 	// SSH owns terminal raw mode and resizing. Explicit control messages also
 	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
-	archiveOutput := len(args) > 0 && args[0] == "__copy-out" || len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
+	archiveOutput := len(args) > 0 && (args[0] == "__copy-out" || args[0] == "events") || len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
 	cmd := sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	checksCtx, cancelChecks := context.WithCancel(ctx)

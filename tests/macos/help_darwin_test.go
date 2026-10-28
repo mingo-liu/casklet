@@ -9,7 +9,7 @@ import (
 
 func TestScopedHelpMatchesNamedHelp(t *testing.T) {
 	for _, topic := range [][]string{
-		{"project", "exec"}, {"project", "start"}, {"project", "stop"}, {"project", "restart"}, {"project"}, {"project", "validate"}, {"project", "up"}, {"project", "down"}, {"project", "ps"},
+		{"events"}, {"project", "exec"}, {"project", "start"}, {"project", "stop"}, {"project", "restart"}, {"project"}, {"project", "validate"}, {"project", "up"}, {"project", "down"}, {"project", "ps"},
 		{"cp"}, {"run"}, {"exec"}, {"doctor"}, {"ps"}, {"inspect"}, {"stats"},
 		{"wait"}, {"start"}, {"restart"}, {"stop"}, {"logs"}, {"rm"},
 		{"image"}, {"image", "pull"}, {"image", "import"}, {"image", "ls"}, {"image", "rm"},

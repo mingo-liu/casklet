@@ -100,6 +100,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if err != nil {
 		return err
 	}
+	before := snapshotEvents(record)
 	if record.Generation != generation {
 		return errors.New("container execution changed")
 	}
@@ -134,7 +135,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 		if err := validateRecord(record, id); err != nil {
 			return err
 		}
-		return store.writeJSON(path, "state.json", record, maxRecordBytes)
+		return store.writeStateEvents(id, before, record)
 	}
 	if !errors.Is(receiptErr, os.ErrNotExist) {
 		return receiptErr
@@ -142,7 +143,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if err := store.writeJSON(path, receiptName(generation), executionResult(record), maxRecordBytes); err != nil {
 		return err
 	}
-	return store.writeJSON(path, "state.json", record, maxRecordBytes)
+	return store.writeStateEvents(id, before, record)
 }
 
 // BeginExecution requires both the operation lock and an inactive supervisor.
@@ -156,6 +157,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	if err != nil {
 		return record, err
 	}
+	before := snapshotEvents(record)
 	if record.Generation != generation || !record.Terminal() {
 		return record, errors.New("container execution changed or is still active")
 	}
@@ -203,7 +205,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	record.ExitReason, record.OOMKilled = "", false
 	record.StopTimeout = nil
 	record.RetainRootFS = true
-	if err := store.writeJSON(filepath.Join(store.root, id), "state.json", record, maxRecordBytes); err != nil {
+	if err := store.writeStateEvents(id, before, record); err != nil {
 		return record, err
 	}
 	return record, nil

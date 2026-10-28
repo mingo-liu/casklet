@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	Events        container.EventQuery
 	CopySource    copyEndpoint
 	CopyTarget    copyEndpoint
 	CopyPath      string
@@ -121,6 +122,9 @@ func Parse(args []string) (request Request, err error) {
 	}
 	if r.Action == "image" {
 		return parseImage(r, args[1:])
+	}
+	if r.Action == "events" {
+		return parseEvents(r, args[1:])
 	}
 	if r.Action == "cp" {
 		return parseCopy(r, args[1:], false)

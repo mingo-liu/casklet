@@ -45,7 +45,10 @@ func openPTY(t *testing.T) (*os.File, *os.File) {
 func TestInteractiveRunAndExecResizeAndRestore(t *testing.T) {
 	client(t)
 	id := detached(t, "--", "/bin/sleep", "60")
-	for _, args := range [][]string{{"run", "-it", "--"}, {"exec", "-it", id, "--"}} {
+	name := fmt.Sprintf("project-tty-%x", time.Now().UnixNano())
+	file := macTaskConfig(t, name, "echo 1 > /data/count")
+	success(t, "project", "up", "--config", file, "--timeout", "30s")
+	for _, args := range [][]string{{"run", "-it", "--"}, {"exec", "-it", id, "--"}, {"project", "exec", "-it", name, "api", "--"}} {
 		t.Run(args[0], func(t *testing.T) {
 			master, slave := openPTY(t)
 			before, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TIOCGETA)

@@ -71,7 +71,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return executeManagement(r, stdout, stderr)
 	case "project-reservations", "project-records", "project-status", "project-resource", "project-replace", "project-preflight", "project-start-preflight":
 		return executeManagement(r, stdout, stderr)
-	case "system-df":
+	case "events", "system-df":
 		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
 		return executeManagement(r, stdout, stderr, stdin)

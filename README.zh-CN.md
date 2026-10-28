@@ -141,6 +141,9 @@ casklet project down demo
 项目配置支持[一次性任务](guides/usage.md#one-shot-project-tasks)和成功完成依赖，
 例如先完成数据库迁移，再启动应用服务。
 
+使用[生命周期事件](guides/usage.md#lifecycle-events)回看近期容器状态变化，
+或通过 `casklet events --follow --json` 持续订阅。
+
 ## 功能概览
 
 完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。

@@ -13,6 +13,8 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 	var err error
 	returnCode := 0
 	switch r.Action {
+	case "events":
+		return executeEvents(ctx, r, stdout)
 	case "copy-in", "copy-out":
 		return executeCopyStream(ctx, r, stdout, input...)
 	case "network-create", "network-ls", "network-inspect", "network-rm":
