@@ -51,7 +51,10 @@ func parseExecOperands(r Request, args []string, operands int) (Request, error) 
 		workdirSpecified = workdirSpecified || f.Name == "workdir"
 	})
 	if fs.NArg() != operands || fs.Arg(0) == "" {
-		return r, errors.New("exec requires its container, or project and service, before --; flags must precede operands")
+		if operands == 2 {
+			return r, errors.New("project exec requires PROJECT SERVICE before --; flags must precede them")
+		}
+		return r, errors.New("exec requires exactly one container ID or name before --; flags must precede it")
 	}
 	r.Reference = fs.Arg(0)
 	if operands == 2 {
@@ -64,6 +67,9 @@ func parseExecOperands(r Request, args []string, operands int) (Request, error) 
 		return r, errors.New("invalid container ID or name")
 	}
 	if separator < 0 {
+		if operands == 2 {
+			return r, errors.New("a command is required after --; for example: casklet project exec demo api -- /bin/echo hello")
+		}
 		return r, errors.New("a command is required after --; for example: casklet exec worker -- /bin/echo hello")
 	}
 	if workdirSpecified && r.Exec.Workdir == "" {

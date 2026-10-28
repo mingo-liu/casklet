@@ -42,7 +42,7 @@ func taskFixture(code int, reason string, running bool) (*fakeProject, *Runner, 
 	return fake, runner, plan
 }
 func TestProjectTaskCompletesBeforeDependentsAndIsReused(t *testing.T) {
-	fake, runner, plan := taskFixture(0, "completed", false)
+	fake, runner, plan := taskFixture(0, "exited", false)
 	records, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second, Wait: true})
 	if err != nil || len(records) != 2 || records[1].State != container.StateExited {
 		t.Fatalf("up %v %v", records, err)
@@ -56,7 +56,7 @@ func TestProjectTaskCompletesBeforeDependentsAndIsReused(t *testing.T) {
 	}
 }
 func TestProjectTaskFailureBlocksDependentsAndRollsBackOnlyNew(t *testing.T) {
-	fake, runner, plan := taskFixture(7, "completed", false)
+	fake, runner, plan := taskFixture(7, "exited", false)
 	_, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second})
 	var failure *TaskFailure
 	if !errors.As(err, &failure) || failure.Code != 7 {
@@ -76,7 +76,7 @@ func TestProjectTaskFailureBlocksDependentsAndRollsBackOnlyNew(t *testing.T) {
 	}
 }
 func TestProjectTaskDeadlineAppliesWithoutWait(t *testing.T) {
-	_, runner, plan := taskFixture(0, "completed", true)
+	_, runner, plan := taskFixture(0, "exited", true)
 	_, err := runner.Up(context.Background(), plan, UpOptions{Timeout: 30 * time.Millisecond})
 	if !errors.Is(err, ErrWaitTimeout) {
 		t.Fatalf("deadline %v", err)

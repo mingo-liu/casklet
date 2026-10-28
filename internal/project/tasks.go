@@ -32,7 +32,7 @@ func taskResult(key, state string, code *int, reason string, cleanup []string) (
 	if *code != 0 {
 		return false, &TaskFailure{key, *code}
 	}
-	if reason != "completed" {
+	if reason != "exited" {
 		return false, fmt.Errorf("task %q did not finish normally", key)
 	}
 	return true, nil
