@@ -12,6 +12,7 @@ import (
 )
 
 type Request struct {
+	Revision      uint64
 	Events        container.EventQuery
 	CopySource    copyEndpoint
 	CopyTarget    copyEndpoint

@@ -661,3 +661,16 @@ then rootfs installs mode-0444 files on a read-only noexec/nosuid/nodev tmpfs at
 Restart and automatic policy starts reopen sources; running executions retain their
 snapshots. Namespace teardown owns cleanup. Container copy excludes this storage,
 and public inspection exposes target names only.
+
+## Deployment revisions
+
+The project store atomically publishes a bounded, private history file under the
+existing project lock after successful up/rollback. Snapshots retain parsed run
+inputs and expanded argv; OCI identities come from generation-independent immutable
+container configuration inspection, not a mutable reference lookup. Public history
+renders summaries only. Rollback reparses expanded arguments, checks saved defaults,
+replaces image values and spec labels with pinned identities, and reuses ordinary
+Up recreation/source preflight and cleanup. A successful rollback appends provenance.
+History publication is separate from guest deployment; abrupt loss may omit a
+revision. Images and external sources must remain available. Volume/application
+state and container writable roots have no historical snapshot semantics.

@@ -148,6 +148,40 @@ Examples:
   casklet events --after 120 --follow --filter event=exit
 `,
 
+	"project history": `Usage: casklet project history [--json] PROJECT
+
+Options:
+  --json  Print revision, time, service names, pinned image IDs and rollback provenance
+
+Notes:
+  Lists successful deployments recorded by this client; no guest access is needed.
+  Keeps the latest 32 revisions within 16 MiB; unchanged up does not add a revision.
+  Environment values, commands and source paths are excluded from this output.
+
+Examples:
+  casklet project history --json demo
+`,
+	"project rollback": `Usage: casklet project rollback [--wait] [--timeout DURATION] [--json] PROJECT REVISION
+
+Options:
+  --wait     Wait for all services within the deployment deadline
+  --timeout  Dependency/whole-deployment timeout (default: 30s, maximum: 24h)
+  --json     Print resulting container records
+
+Notes:
+  Explicitly recreates all saved services using saved configuration and image IDs.
+  Does not reopen the original project or env-files. Secret sources are reread.
+  Preflights all sources before removing old containers. Missing images fail locally;
+  keep historical images available and avoid pruning them if rollback is needed.
+  Removes current managed services absent from the saved revision.
+  Reuses volumes; application data, bind contents and retained roots are not restored.
+  Successful rollback records a new revision with restored-from provenance.
+  Failed rollback cleans its new resources but cannot restore removed containers.
+  History is client-local; old engine defaults can make a saved config incompatible.
+
+Examples:
+  casklet project rollback --wait --timeout 1m demo 2
+`,
 	"project exec": `Usage: casklet project exec [OPTIONS] PROJECT SERVICE -- COMMAND [ARGS...]
 
 Options:
@@ -239,7 +273,8 @@ Notes:
   Supports running/stopped retained containers and copy/OverlayFS roots; no tar
   executable or VM share is needed. Restart older running supervisors before copying.
   Stopped containers cannot expose mounts or temporary storage. Read-only mounts
-  and roots remain protected. /proc, /sys and /dev are excluded. Destination /
+  and roots remain protected. /proc, /sys, /dev and configured secret storage are excluded.
+  Destination /
   accepts a named file/tree; exporting / or merging SOURCE/. into / is excluded.
   Limits: 16 GiB tar stream, 1 million entries, 256 directory levels.
   Live copies are not snapshots. Errors/cancellation retain completed entries;
@@ -559,6 +594,8 @@ Examples:
 Commands:
   validate  Check a local project file without Lima or a VM
   up    Deploy services from a local JSON project file
+  history  List successful deployment revisions
+  rollback Recreate a saved revision with pinned image IDs
   down  Stop and remove managed containers and owned networks
   ps    Show all retained containers belonging to a project
   logs  Read or follow output grouped by logical service
@@ -585,6 +622,7 @@ Notes:
   Uses the same configuration parsing as project up, including env-files.
   Checks fields, dependencies, resource references, port/alias conflicts and limits.
   Relative rootfs, bind sources, and env-files use the project file directory.
+  Secret source files also use that directory.
   No Lima, VM, registry, Keychain or project-state access; no files are written.
   Does not check runtime/source readiness, occupied ports, guest resources or drift.
   Output excludes environment values, commands and expanded run configuration.
@@ -614,6 +652,7 @@ Notes:
   Each service has a run object and optional depends-on conditions: started/healthy.
   Default network is default; volume/network references use declared logical names.
   Relative rootfs, bind sources, and env-files use the project file directory.
+  Secret source files also use that directory.
   Local files are expanded before VM operations; volume sources remain names.
   Reuses matching running services and starts matching stopped services.
   Reordering network aliases keeps service identity, including older deployments.
@@ -629,6 +668,7 @@ Notes:
   Selected services lose their old private root; named/external mounts survive.
   Unselected running services keep their IDs/generations. Stopped ones are started.
   Replacement interrupts selected services; there is no automatic old-container rollback.
+  Successful up saves configuration/image IDs for explicit project rollback.
   Partial failure leaves removed old services absent; retry up creates missing services.
   Refresh an image tag explicitly with image pull, then --recreate its service.
   --dry-run reports configuration drift even without --recreate; applying it still requires selection.

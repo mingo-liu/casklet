@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 func parseProject(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("project requires validate, up, down, ps, logs, exec, start, stop, or restart")
+		return r, errors.New("project requires validate, up, down, ps, logs, exec, start, stop, restart, history, or rollback")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -45,6 +46,12 @@ func parseProject(r Request, args []string) (Request, error) {
 		fs.BoolVar(&r.Wait, "wait", false, "wait for all services within the deployment deadline")
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
 		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "dependency health wait deadline")
+		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
+	case "history":
+		fs.BoolVar(&r.JSON, "json", false, "print sanitized deployment history")
+	case "rollback":
+		fs.BoolVar(&r.Wait, "wait", false, "wait for rolled-back services")
+		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "deployment deadline")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
 	case "stop", "restart":
 		fs.Func("timeout", "graceful shutdown override", func(value string) error {
@@ -93,6 +100,21 @@ func parseProject(r Request, args []string) (Request, error) {
 			_, err = project.Select(plan, r.Recreate)
 		}
 		return r, err
+	}
+	if args[0] == "rollback" {
+		if fs.NArg() != 2 {
+			return r, errors.New("project rollback requires PROJECT REVISION; flags precede operands")
+		}
+		r.Reference = fs.Arg(0)
+		var err error
+		r.Revision, err = strconv.ParseUint(fs.Arg(1), 10, 64)
+		if err != nil || r.Revision == 0 {
+			return r, errors.New("revision must be a positive integer")
+		}
+		if r.WaitTimeout <= 0 || r.WaitTimeout > 24*time.Hour {
+			return r, errors.New("project --timeout must be greater than zero and at most 24h")
+		}
+		return r, project.ValidateName(r.Reference)
 	}
 	if args[0] == "logs" {
 		explicit := false
