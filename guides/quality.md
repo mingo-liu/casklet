@@ -7,6 +7,18 @@ and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
 
+## 2026-10-28: Name and distribute local image snapshots
+
+Added atomic local image tag replacement and explicit source/target OCI push,
+including directory imports and loaded images. Push reuses verified snapshot
+export, leased private staging and the scoped Keychain credential exchange;
+local references remain unchanged. Documents flattened manifests, imported-root
+ownership, remote overwrite/cancellation and temporary disk semantics.
+
+Validation: CLI argument/help parity, local tag replacement, missing source,
+digest-target rejection, canceled push and OCI/imported round trips against a
+local registry; Darwin/Linux unit tests, vet, build and real client verification.
+
 ## 2026-10-28: Operate on logical project services
 
 Added project exec/start/stop/restart with logical service selection, generated-name

@@ -37,7 +37,7 @@ func executeOperation(ctx context.Context, r Request, stdout io.Writer, input ..
 		return executeSystem(ctx, r, stdout)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
 		return executeVolume(ctx, r, stdout, input...)
-	case "image-load", "image-save", "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit":
+	case "image-tag", "image-push", "image-load", "image-save", "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit":
 		return executeImage(ctx, r, stdout, input...)
 	case "run":
 		var record container.Record

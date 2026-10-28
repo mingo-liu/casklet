@@ -77,7 +77,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return executeManagement(r, stdout, stderr, stdin)
 	case "copy-in", "copy-out", "image-load", "image-save":
 		return executeManagement(r, stdout, stderr, stdin)
-	case "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
+	case "image-tag", "image-push", "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
 		signals := make(chan os.Signal, 16)

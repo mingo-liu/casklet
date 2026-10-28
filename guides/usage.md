@@ -1616,3 +1616,31 @@ execution metrics after restart; a generation change during sampling reports
 unavailable metrics rather than combining different executions. CPU 100% means one
 fully used core. Missing metrics are N/A/JSON null rather than zero. Empty selections
 exit after one frame. Interrupting monitoring leaves workloads running.
+
+## Image tags and pushes
+
+Name an imported or loaded image without copying its snapshot, then distribute it:
+
+```sh
+id=$(casklet image import ./rootfs/busybox)
+casklet image tag "$id" ghcr.io/team/app:v1
+casklet login -u alice --password-stdin ghcr.io < /path/to/registry-token
+casklet image push ghcr.io/team/app:v1 ghcr.io/team/app:v1
+```
+
+Both commands accept a cached source name, full ID or unique ID prefix; neither
+pulls a missing source. Targets accept NAME[:TAG], with Docker Hub/library/latest
+defaults, and reject digests. Tag atomically replaces only the local mapping.
+Push overwrites the remote tag and prints its manifest digest without changing
+local names. Imported directories have empty launch defaults; consumers must
+supply a command. OCI sources retain environment, command, user, workdir, stop
+signal and health defaults. Push uses the existing native Keychain credential
+exchange (or anonymous access) and never stores credentials in the VM.
+
+The published artifact is a flattened native Linux OCI image rather than the
+original layer history or original manifest digest. Directory imports acquire
+OCI ownership semantics when pulled. Temporary export/archive data needs guest
+disk space and is cleaned on success, failure or cancellation; abandoned staging
+uses ordinary image transaction recovery. Registry blobs may survive cancellation,
+and a lost response can leave a successfully published remote tag. The registry
+manifest is written last. Tags do not protect unused images from image prune.

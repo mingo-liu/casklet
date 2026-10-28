@@ -9,6 +9,9 @@ import (
 	"os"
 )
 
+func (*Store) Tag(context.Context, string, string) error            { return errUnsupported }
+func (*Store) Push(context.Context, string, string) (string, error) { return "", errUnsupported }
+
 type Store struct{}
 
 var errUnsupported = errors.New("local image management requires Linux")

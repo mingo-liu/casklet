@@ -27,6 +27,7 @@ type Invocation struct {
 	Interactive    bool
 	Rootless       bool
 	ImageReference string
+	PushSource     string
 	RefreshImage   bool
 	Progress       string
 }
@@ -218,6 +219,9 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		if invocation.RefreshImage {
 			mode = "pull"
 		}
+		if invocation.PushSource != "" {
+			mode = "push"
+		}
 		input, response, err := os.Pipe()
 		if err != nil {
 			return 125, err
@@ -226,13 +230,16 @@ func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *
 		defer response.Close()
 		var resolved bytes.Buffer
 		output := io.Writer(&resolved)
-		if invocation.RefreshImage {
+		if invocation.RefreshImage || invocation.PushSource != "" {
 			output = stdout
 		}
 		auth := &credentialOutput{reference: invocation.ImageReference, response: response, output: output}
 		preparation := Invocation{Args: []string{"__credential-prepare", mode, invocation.Progress, invocation.ImageReference}, Rootless: invocation.Rootless}
+		if invocation.PushSource != "" {
+			preparation.Args = append(preparation.Args, invocation.PushSource)
+		}
 		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth, signals)
-		if err != nil || code != 0 || invocation.RefreshImage {
+		if err != nil || code != 0 || invocation.RefreshImage || invocation.PushSource != "" {
 			return code, err
 		}
 		id := strings.TrimSpace(resolved.String())

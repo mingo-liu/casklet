@@ -137,12 +137,16 @@ func (w *boundedImageWriter) Write(p []byte) (int, error) {
 // Save synthesizes a standard OCI layout from the immutable flattened tree.
 // A shared image lease remains held through output; no metadata lock covers I/O.
 func (store *Store) Save(ctx context.Context, id string, destination io.Writer) error {
+	return store.save(ctx, id, destination, false)
+}
+
+func (store *Store) save(ctx context.Context, id string, destination io.Writer, directory bool) error {
 	record, tree, imageLease, err := store.Acquire(ctx, id)
 	if err != nil {
 		return err
 	}
 	defer imageLease.Close()
-	if record.Config == nil {
+	if record.Config == nil && !directory {
 		return errors.New("image save requires an OCI image; directory imports have a different ownership and capability policy")
 	}
 	stage, lease, transaction, err := store.beginImport(ctx)
@@ -163,6 +167,9 @@ func (store *Store) Save(ctx context.Context, id string, destination io.Writer) 
 	}
 	layerHash := v1.Hash{Algorithm: "sha256", Hex: hex.EncodeToString(digest.Sum(nil))}
 	cfg := record.Config
+	if cfg == nil {
+		cfg = &LaunchConfig{}
+	}
 	// The extension includes StartInterval, which the pinned registry Config omits.
 	launch := map[string]any{"Entrypoint": cfg.Entrypoint, "Cmd": cfg.Cmd, "Env": cfg.Env, "WorkingDir": cfg.Workdir, "User": cfg.User, "StopSignal": cfg.StopSignal, "Shell": cfg.Shell}
 	if h := cfg.Healthcheck; h != nil {
