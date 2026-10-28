@@ -19,8 +19,8 @@ import (
 
 const optionFileLimit = 1 << 20
 
-var repeatedOptions = map[string]bool{"label": true, "network-alias": true, "env": true, "env-file": true, "mount": true, "dns": true, "publish": true, "uid-map": true, "gid-map": true}
-var runFileOptions = strings.Fields("rootfs image entrypoint detach name hostname memory tmp-size shm-size pids-limit cpus timeout stop-timeout stop-signal restart log-max-size log-max-files seccomp userns rootless uid-map gid-map network network-alias dns publish interactive tty env env-file label mount workdir user read-only progress health-cmd health-interval health-timeout health-retries health-start-period health-start-interval no-healthcheck")
+var repeatedOptions = map[string]bool{"label": true, "network-alias": true, "env": true, "env-file": true, "mount": true, "secret": true, "dns": true, "publish": true, "uid-map": true, "gid-map": true}
+var runFileOptions = strings.Fields("rootfs image entrypoint detach name hostname memory tmp-size shm-size pids-limit cpus timeout stop-timeout stop-signal restart log-max-size log-max-files seccomp userns rootless uid-map gid-map network network-alias dns publish interactive tty env env-file label mount secret workdir user read-only progress health-cmd health-interval health-timeout health-retries health-start-period health-start-interval no-healthcheck")
 
 func readOptionFile(filename string) ([]byte, error) {
 	f, err := os.OpenFile(filename, os.O_RDONLY|syscall.O_NONBLOCK, 0)
@@ -156,6 +156,13 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 				if !filepath.IsAbs(value) {
 					value = filepath.Join(filepath.Dir(filename), value)
 				}
+			}
+			if name == "secret" {
+				secret, err := config.ParseSecret(value, filepath.Dir(filename))
+				if err != nil {
+					return nil, nil, err
+				}
+				value = secret.Argument()
 			}
 			if name == "mount" {
 				mount, err := config.ParseMountFrom(value, filepath.Dir(filename))

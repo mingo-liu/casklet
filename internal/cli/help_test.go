@@ -117,7 +117,7 @@ func TestHelpOverviewAndShortTopicsAreFocused(t *testing.T) {
 			}
 		}
 		run, err := scopedUsage("run", macOS)
-		for _, detail := range []string{"-- COMMAND", "--tmp-size", "--shm-size", "up to 128g", "default: 16m", "default: 64m", "sizes are not reservations", "--uid-map", "--gid-map", "--rootless", "--stop-signal", "--restart", "--config", "--env-file", "--label", "--health-cmd", "--no-healthcheck", "--health-start-interval", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {
+		for _, detail := range []string{"-- COMMAND", "--tmp-size", "--shm-size", "up to 128g", "default: 16m", "default: 64m", "sizes are not reservations", "--uid-map", "--gid-map", "--rootless", "--stop-signal", "--restart", "--config", "--env-file", "--secret", "--label", "--health-cmd", "--no-healthcheck", "--health-start-interval", "0.01-1000", "1 KiB-64 MiB", "0s-1m", "up to 32", "Terminal options require a foreground run"} {
 			if err != nil || !strings.Contains(run, detail) {
 				t.Errorf("run help missing %q: %q %v", detail, run, err)
 			}

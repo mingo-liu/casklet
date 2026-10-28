@@ -650,3 +650,14 @@ Removed or changed executions expose unavailable values. Each watch frame obtain
 fresh readers, so restarts never share counters. Readers close before output and
 between frames. The CLI throttles unavailable frames, owns cancellation/output,
 and streams table frames or newline-delimited JSON through the existing guest session.
+
+## Secret files
+
+Execution configuration carries only secret source paths and target names. The
+host maps source parents through VM shares; template/runtime preflight validates
+bounded regular sources. Namespace init reads a fresh snapshot before pivot_root,
+then rootfs installs mode-0444 files on a read-only noexec/nosuid/nodev tmpfs at
+/run/secrets. No bytes enter retained roots or serialized execution configuration.
+Restart and automatic policy starts reopen sources; running executions retain their
+snapshots. Namespace teardown owns cleanup. Container copy excludes this storage,
+and public inspection exposes target names only.

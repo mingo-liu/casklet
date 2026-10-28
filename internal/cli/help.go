@@ -52,6 +52,9 @@ const runOptions = `Options:
   --cpus         CPU cores, 0 or 0.01-1000, up to 3 decimals (default: 0)
   --config       Strict JSON run options; CLI scalars override config values
                  Relative rootfs, bind sources, and env-files use the file directory
+  --secret       Repeatable source=FILE,target=NAME; read-only /run/secrets/NAME
+                 Fresh source snapshot on start/restart; no live updates
+                 Max 32 files, 1 MiB each, 8 MiB total; sources must remain available
   --env-file     Repeatable KEY=VALUE file; explicit --env values take precedence
   --env          KEY=VALUE; repeat; no host environment inheritance
                  Complete execution config is limited to 1 MiB of JSON after merging
@@ -533,6 +536,8 @@ Examples:
 Options:
   -i, --interactive  Forward stdin (default: no input)
   -t, --tty          Allocate a terminal; combine with -i as -it for input
+  --secret           Repeatable source=FILE,target=NAME; read-only /run/secrets/NAME
+                     Sources are reread on restart; contents are not saved in config
   --env-file         Repeatable KEY=VALUE file; explicit --env takes precedence
   --env             Override KEY=VALUE; repeat to add variables
   --workdir         Existing absolute directory (default: container configuration)

@@ -52,6 +52,18 @@ func localPreflight(args []string) error {
 				return fmt.Errorf("rootfs template %s: %w; export a valid template to a new directory with casklet rootfs DIRECTORY", value, err)
 			}
 			canonicalRoot = root
+		case "secret":
+			secret, err := config.ParseSecret(value, "")
+			if err != nil {
+				return err
+			}
+			info, err := os.Lstat(secret.Source)
+			if err != nil {
+				return fmt.Errorf("secret source: %w", err)
+			}
+			if !info.Mode().IsRegular() || info.Size() > config.MaxSecretBytes {
+				return errors.New("secret source must be a regular file of at most 1 MiB")
+			}
 		case "mount":
 			mount, err := config.ParseMount(value)
 			if err != nil {
@@ -87,7 +99,7 @@ func localPreflight(args []string) error {
 func (m *Machine) preflightShares(ctx context.Context, args []string) error {
 	needsShares := false
 	if err := visitHostResources(args, func(name, value string) error {
-		needsShares = needsShares || name == "mount" || (name == "rootfs" && value != BuiltinRootFS)
+		needsShares = needsShares || name == "secret" || name == "mount" || (name == "rootfs" && value != BuiltinRootFS)
 		return nil
 	}); err != nil {
 		return err
