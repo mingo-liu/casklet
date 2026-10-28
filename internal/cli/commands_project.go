@@ -96,7 +96,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	}
 	parent := ctx
 	var deadline time.Time
-	if r.Action == "project-up" && (r.Wait || r.Project.HasTasks()) {
+	if (r.Action == "project-up" || r.Action == "project-rollback") && (r.Wait || r.Project.HasTasks()) {
 		deadline = time.Now().Add(r.WaitTimeout)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, deadline)
@@ -148,6 +148,42 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if err != nil {
 		return 125, preparationError(err)
 	}
+	var history project.History
+	if r.Action == "project-up" || r.Action == "project-rollback" || r.Action == "project-history" {
+		history, err = store.LoadHistory()
+		if err != nil {
+			return 125, preparationError(err)
+		}
+	}
+	if r.Action == "project-history" {
+		return 0, writeDeploymentHistory(stdout, history, r.JSON)
+	}
+	if r.Action == "project-rollback" {
+		var found bool
+		for _, deployment := range history.Deployments {
+			if deployment.Revision != r.Revision {
+				continue
+			}
+			r.Project, err = restoreDeployment(deployment)
+			if err != nil {
+				return 125, err
+			}
+			found = true
+			break
+		}
+		if !found {
+			return 125, errors.New("deployment revision not found or expired")
+		}
+		for _, service := range r.Project.Services {
+			r.Recreate = append(r.Recreate, service.Key)
+		}
+		r.RemoveOrphans = true
+	}
+	if r.Action == "project-up" || r.Action == "project-rollback" {
+		if err := project.ValidateDeploymentSize(r.Project); err != nil {
+			return 125, err
+		}
+	}
 	runner := project.Runner{Backend: backend, Call: call, Save: store.Save, State: state}
 	switch r.Action {
 	case "project-start", "project-stop", "project-restart":
@@ -156,7 +192,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 			return 125, err
 		}
 		return 0, executeProjectLifecycle(ctx, r, records, stdout, call)
-	case "project-up":
+	case "project-up", "project-rollback":
 		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, RemoveOrphans: r.RemoveOrphans, DryRun: r.DryRun})
 		if err != nil {
 			return 125, err
@@ -181,6 +217,13 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 				}
 			}
 			return 0, nil
+		}
+		images, err := deploymentImages(ctx, r.Project, records, call)
+		if err != nil {
+			return 125, fmt.Errorf("deployment succeeded but history capture failed: %w", err)
+		}
+		if err := store.RecordDeployment(history, r.Project, images, deploymentContainers(r.Project, records), r.Revision); err != nil {
+			return 125, fmt.Errorf("deployment succeeded but history publication failed: %w", err)
 		}
 		return 0, writeRecords(stdout, records, r.JSON)
 	case "project-down":

@@ -152,6 +152,7 @@ See the [usage guide](guides/usage.md) for full examples, defaults, and limits.
 
 | Area | Supported workflows |
 | --- | --- |
+| Deployments | [History and explicit rollback](guides/usage.md#deployment-history-and-rollback) with pinned image IDs; data volumes are not rewound |
 | Secrets | [Read-only secret files](guides/usage.md#secret-file-injection), refreshed on restart |
 | Images | [OCI/Docker pulls and local directory imports](guides/usage.md#ocidocker-images), [private registries with macOS Keychain credentials](guides/usage.md#registry-credentials), [offline OCI archives](guides/usage.md#offline-oci-image-archives), [local tags and registry pushes](guides/usage.md#image-tags-and-pushes) |
 | Execution | [CPU, memory, PID and temporary-storage limits, environment, users, read-only roots](guides/usage.md#resource-and-execution-options), [interactive run/exec](guides/usage.md#terminals-and-exec) |

@@ -150,6 +150,7 @@ casklet project down demo
 
 | 类别 | 支持的功能 |
 | --- | --- |
+| 部署版本 | [历史与显式回退](guides/usage.md#deployment-history-and-rollback)，固定镜像 ID，不回滚卷数据 |
 | Secret | [只读文件注入](guides/usage.md#secret-file-injection)，重启时重新读取来源 |
 | 镜像 | [OCI/Docker 拉取与本地目录导入](guides/usage.md#ocidocker-images)、[私有仓库与 macOS 钥匙串凭据](guides/usage.md#registry-credentials)、[离线 OCI 归档](guides/usage.md#offline-oci-image-archives)、[本地标签与仓库推送](guides/usage.md#image-tags-and-pushes) |
 | 执行 | [CPU、内存、进程数和临时存储限制，环境变量、用户与只读根目录](guides/usage.md#resource-and-execution-options)、[交互式 run/exec](guides/usage.md#terminals-and-exec) |

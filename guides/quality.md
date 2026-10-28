@@ -7,6 +7,26 @@ and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
 
+## 2026-10-28: Retain deployment revisions and explicitly roll back
+
+Successful up records private expanded run configuration, actual immutable image
+IDs and container identities. Unchanged executions deduplicate; explicit recreation
+and rollback create revisions. Bounded atomic history retains at most 32 revisions
+and 16 MiB, with sanitized public summaries and rollback provenance. Rollback
+revalidates saved defaults/ownership/dependencies, pins image IDs, recreates services
+and removes current orphans through ordinary Up preflight and bounded cleanup.
+Original project/env-files are not reopened. History failure cannot block down or
+manual lifecycle cleanup. Documented private environment values, separate guest/
+history transactions, source/image availability and lack of application-data rollback.
+
+Validation: Darwin/Linux unit, vet and CLI/project race checks; history retention,
+permissions, deduplication/recreation, redaction, graph/default compatibility and
+runtime-free listing regressions; real Mac rollback after source config deletion
+and failed replacement; complete privileged Linux suite through the preservation
+wrapper, including mutable-image pinning, missing-image preflight, task reruns,
+orphan removal, volume preservation and current secret-source refresh. All 175
+Linux cases passed; the optional pinned legacy-supervisor case was not configured.
+
 ## 2026-10-28: Name and distribute local image snapshots
 
 Added atomic local image tag replacement and explicit source/target OCI push,

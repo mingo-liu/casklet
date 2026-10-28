@@ -1328,7 +1328,8 @@ Source, bind and env-file paths resolve relative to the project file. Environmen
 file contents are expanded once before deployment. Reserved `io.casklet.project.*`
 labels track project/service ownership, effective-config hashes and startup attempts;
 at most 60 additional user labels are supported. No environment values are saved
-in the local project ownership file.
+in the local project ownership file. Successful deployment revisions save expanded
+configuration separately in a private history file; see [deployment history](#deployment-history-and-rollback).
 
 `depends-on` maps service names to `started` or `healthy`. Dependencies form a
 validated acyclic graph and start before their consumers, with deterministic ties.
@@ -1679,3 +1680,54 @@ mount namespace is released; no secret bytes are written to the retained root or
 image. Source files remain yours to rotate and delete. `cp` excludes secret storage.
 An application can still copy or log a secret it reads, and tmpfs may use guest
 swap; this feature is file delivery, not a vault or secure-erasure guarantee.
+
+## Deployment history and rollback
+
+A successful `project up` records its expanded run configuration and the immutable
+image IDs actually used by all services. Unchanged up does not add a revision; explicit recreation with new container IDs does.
+View the sanitized history and explicitly recreate an earlier deployment:
+
+```sh
+casklet project history --json demo
+casklet project rollback --wait --timeout 1m demo 2
+```
+
+Rollback restores every service in the revision and removes current managed
+services absent from it, using the existing ownership, generation and source
+preflight checks. All old services are checked before replacement; missing pinned
+images or unavailable sources abort before removing current containers. Image names
+are replaced with their recorded IDs; mutable tag refreshes do not affect rollback.
+A later up from a mutable-name configuration may require `--recreate` because
+rollback publishes an explicitly pinned configuration. The original project JSON
+and env-files are not reopened: expanded environment
+values are saved. Secret file contents remain external and are reread on startup.
+A successful rollback appends a new revision with `restored_from`; failed deployment
+attempts do not appear as successful revisions. Failed replacement can leave old
+containers removed; invoke rollback explicitly to recreate the saved configuration.
+Rollback failure cleans new resources but does not automatically restore removed
+containers. Startup tasks run again and may change application data.
+
+History belongs to this client and project-state directory, under a private
+mode-0600 `<project>.history.json` file next to resource receipts. It contains
+commands and environment **values**, so protect it like the source configuration.
+The `history` command prints only revision/time, service names, pinned image IDs
+and rollback provenance; it needs no guest access. History retains the latest 32
+revisions within 16 MiB (each deployment is limited to 4 MiB), expiring oldest
+entries without reusing revision numbers. Existing deployments gain history after
+the next successful up; earlier configurations cannot be reconstructed. Down keeps
+history. Publication errors after deployment report that the deployment succeeded
+but history was not recorded; retry up to record it. History publication and guest
+deployment are separate transactions, so abrupt client loss can leave a running
+deployment without its history entry.
+
+Keep historical images available: history records IDs but does not exempt them
+from `image rm` or `image prune`, nor archive image contents. Directory templates,
+bind sources and secret sources must still exist when recreating services.
+Versions created with incompatible CLI defaults are rejected before mutation;
+use a new explicit project configuration to migrate those deployments.
+
+Rollback recreates container roots. It reuses data volumes and never rewinds volume
+contents, bind data, external files, database schemas or other application state.
+Use application-aware backups separately; `--volumes` cleanup and volume restore
+remain explicit operations. A rollback is a configuration/image rollback, not a
+data restore or a zero-downtime deployment.
