@@ -165,6 +165,14 @@ func Authenticator(ctx context.Context, registry string) authn.Authenticator {
 // PublicError prevents registry response bodies or authentication service URLs
 // from reflecting secrets into CLI output. Cancellation remains recognizable.
 func PublicError(ctx context.Context, err error) error {
+	return publicError(ctx, err, "pull")
+}
+
+func PublicPushError(ctx context.Context, err error) error {
+	return publicError(ctx, err, "push")
+}
+
+func publicError(ctx context.Context, err error, operation string) error {
 	if err == nil {
 		return nil
 	}
@@ -180,7 +188,7 @@ func PublicError(ctx context.Context, err error) error {
 		if errors.Is(err, context.Canceled) {
 			return context.Canceled
 		}
-		return errors.New("authenticated registry pull failed; check credentials, repository access, and registry connectivity")
+		return errors.New("authenticated registry " + operation + " failed; check credentials, repository access, and registry connectivity")
 	}
 	return err
 }

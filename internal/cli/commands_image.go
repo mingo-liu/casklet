@@ -38,6 +38,17 @@ func executeImage(ctx context.Context, r Request, stdout io.Writer, input ...io.
 		}
 	}
 	switch r.Action {
+	case "image-tag":
+		err = store.Tag(ctx, r.Reference, r.Target)
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, r.Target)
+		}
+	case "image-push":
+		var digest string
+		digest, err = store.Push(ctx, r.Reference, r.Target)
+		if err == nil {
+			_, err = fmt.Fprintln(stdout, digest)
+		}
 	case "image-load":
 		if len(input) == 0 {
 			return 125, errors.New("image load requires an OCI tar archive on stdin")

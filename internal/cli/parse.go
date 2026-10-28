@@ -33,6 +33,7 @@ type Request struct {
 	JSON          bool
 	References    []string
 	Filters       []container.Filter
+	Target        string
 	Reference     string
 	Tail          int
 	Follow        bool

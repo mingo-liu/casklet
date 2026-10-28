@@ -895,6 +895,8 @@ Examples:
 
 Commands:
   pull REFERENCE    Download or refresh a native Linux OCI/Docker image
+  tag SOURCE TARGET Name an existing local image
+  push SOURCE TARGET Upload a local snapshot to a registry tag
   import DIRECTORY  Copy a Linux rootfs into the local image store
   load              Load one native OCI layout image from tar on stdin
   save ID           Write an OCI image layout tar to stdout
@@ -912,6 +914,32 @@ Examples:
   casklet image pull redis:8
   casklet image import ./rootfs/busybox
   casklet image ls
+`,
+	"image tag": `Usage: casklet image tag SOURCE TARGET
+
+Notes:
+  SOURCE is a cached name, full image ID or unique ID prefix; no pull is attempted.
+  TARGET is NAME[:TAG]. Atomically replaces its local mapping without copying data.
+  Supports directory imports and OCI images. Does not contact a registry.
+  Tagged images remain eligible for image prune when unused.
+
+Examples:
+  casklet image tag sha256:0123456789ab ghcr.io/team/app:v1
+`,
+	"image push": `Usage: casklet image push SOURCE TARGET
+
+Notes:
+  SOURCE is a cached name, full image ID or unique ID prefix; no pull is attempted.
+  TARGET is NAME[:TAG]; digest targets are rejected. Prints the published digest.
+  Uploads a flattened native Linux OCI snapshot, including launch defaults.
+  Directory imports use empty launch defaults; specify a command when running them.
+  Uses macOS Keychain credentials saved by login; anonymous access remains supported.
+  Local references are unchanged. Registry tags may be overwritten.
+  Cancellation can leave registry blobs; the manifest is published last.
+  Requires temporary guest disk space for an OCI archive and extracted blobs.
+
+Examples:
+  casklet image push ghcr.io/team/app:v1 ghcr.io/team/app:v1
 `,
 	"image pull": `Usage: casklet image pull [--progress auto|plain|tty] REFERENCE
 

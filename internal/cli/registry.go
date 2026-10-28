@@ -71,7 +71,7 @@ func executeRegistryCommand(r Request, input io.Reader, output io.Writer, store 
 // its immutable ID before requesting host credentials, preserving offline use.
 // Credential bytes never become environment variables, flags, or saved config.
 func ExecuteCredentialPrepare(args []string, input io.Reader, output, diagnostic io.Writer) int {
-	if len(args) != 3 || (args[0] != "pull" && args[0] != "resolve") || validateProgressMode(args[1]) != nil {
+	if (len(args) != 3 && len(args) != 4) || (args[0] != "pull" && args[0] != "resolve" && args[0] != "push") || (args[0] == "push") != (len(args) == 4) || validateProgressMode(args[1]) != nil {
 		fmt.Fprintln(diagnostic, "casklet: invalid credential preparation request")
 		return 125
 	}
@@ -88,6 +88,11 @@ func ExecuteCredentialPrepare(args []string, input io.Reader, output, diagnostic
 				return 0, err
 			}
 			if !errors.Is(err, image.ErrNotFound) || image.IsIDReference(r.Reference) {
+				return 125, err
+			}
+		}
+		if args[0] == "push" {
+			if _, err := store.Resolve(ctx, args[3]); err != nil {
 				return 125, err
 			}
 		}
@@ -109,6 +114,13 @@ func ExecuteCredentialPrepare(args []string, input io.Reader, output, diagnostic
 			return 125, err
 		}
 		ctx = registryauth.WithCredential(ctx, credential)
+		if args[0] == "push" {
+			digest, err := store.Push(ctx, args[3], ref)
+			if err == nil {
+				_, err = fmt.Fprintln(output, digest)
+			}
+			return 0, err
+		}
 		progress := newPullProgress(diagnostic, r.Progress)
 		ctx = image.WithProgress(ctx, progress.observe)
 		record, err := store.Pull(ctx, ref)

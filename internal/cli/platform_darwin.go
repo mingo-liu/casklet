@@ -151,6 +151,9 @@ func executePlatform(args []string, request Request, stdin, stdout, stderr *os.F
 			invocation.ImageReference = request.Reference
 		}
 	}
+	if request.Action == "image-push" {
+		invocation.ImageReference, invocation.PushSource, invocation.Progress = request.Target, request.Reference, "plain"
+	}
 	code, err := machine.Execute(ctx, invocation, stdin, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "casklet: %v\n", err)

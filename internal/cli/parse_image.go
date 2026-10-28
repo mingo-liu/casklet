@@ -11,7 +11,7 @@ import (
 
 func parseImage(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("image requires pull, import, load, save, ls, rm, prune, or cache")
+		return r, errors.New("image requires pull, tag, push, import, load, save, ls, rm, prune, or cache")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -32,7 +32,7 @@ func parseImage(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
 	case "prune":
 		fs.BoolVar(&r.DryRun, "dry-run", false, "preview unused images without deleting them")
-	case "import", "rm", "save", "load":
+	case "tag", "push", "import", "rm", "save", "load":
 	default:
 		return r, fmt.Errorf("unknown image command %q", args[0])
 	}
@@ -47,6 +47,20 @@ func parseImage(r Request, args []string) (Request, error) {
 			return r, errors.New("image ls, prune, and load do not accept positional arguments")
 		}
 		return r, nil
+	}
+	if args[0] == "tag" || args[0] == "push" {
+		if fs.NArg() != 2 || fs.Arg(0) == "" {
+			return r, errors.New("image tag and push require SOURCE TARGET")
+		}
+		r.Reference, r.Target = fs.Arg(0), fs.Arg(1)
+		if !image.IsIDReference(r.Reference) {
+			if _, err := image.NormalizeReference(r.Reference); err != nil {
+				return r, err
+			}
+		}
+		var err error
+		r.Target, err = image.NormalizeTag(r.Target)
+		return r, err
 	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
 		return r, errors.New("image pull, import, save, and rm require exactly one argument")
