@@ -49,6 +49,7 @@ type Config struct {
 	StopTimeout    *time.Duration    `json:"stop_timeout,omitempty"`
 	Image          string            `json:"image,omitempty"`
 	OCI            bool              `json:"oci,omitempty"`
+	Secrets        []Secret          `json:"secrets,omitempty"`
 	Mounts         []BindMount       `json:"mounts,omitempty"`
 	RootFS         string            `json:"rootfs"`
 	Hostname       string            `json:"hostname"`
@@ -158,6 +159,9 @@ func (c Config) ValidateExecution() error {
 		return err
 	}
 	if err := ValidateNetwork(c.Network, c.DNS, c.Publish, c.Mounts); err != nil {
+		return err
+	}
+	if err := ValidateSecrets(c.Secrets, c.Mounts); err != nil {
 		return err
 	}
 	if err := ValidateMounts(c.Mounts, c.RootFS); err != nil {

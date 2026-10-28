@@ -273,6 +273,13 @@ func runFlagSet(r *Request, memory, cpus, user *string) *flag.FlagSet {
 			return err
 		})
 		fs.IntVar(&r.Config.LogMaxFiles, "log-max-files", 4, "retained log files")
+		fs.Func("secret", "read-only file at /run/secrets/NAME", func(value string) error {
+			secret, err := config.ParseSecret(value, "")
+			if err == nil {
+				r.Config.Secrets = append(r.Config.Secrets, secret)
+			}
+			return err
+		})
 		fs.StringVar(&r.Progress, "progress", "auto", "image progress mode: auto, plain, or tty")
 		fs.StringVar(&r.Config.Image, "image", "", "image reference or local image ID")
 		fs.Func("entrypoint", "replace the image entrypoint", func(value string) error { r.Entrypoint = &value; return nil })

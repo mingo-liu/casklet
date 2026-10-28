@@ -40,6 +40,7 @@ type Inspection struct {
 }
 
 type InspectionConfig struct {
+	SecretTargets    []string                `json:"secret_targets,omitempty"`
 	TmpSize          int64                   `json:"tmp_size"`
 	ShmSize          int64                   `json:"shm_size"`
 	Healthcheck      *InspectionHealthConfig `json:"healthcheck"`
@@ -96,6 +97,10 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 	}
 	logSize, logFiles := cfg.LogRetention()
 	tmpSize, shmSize := cfg.TmpfsSizes()
+	secretTargets := make([]string, 0, len(cfg.Secrets))
+	for _, secret := range cfg.Secrets {
+		secretTargets = append(secretTargets, secret.Target)
+	}
 	return Inspection{
 		ExitReason: record.ExitReason, OOMKilled: record.OOMKilled,
 		Labels:        maps.Clone(record.Labels),
@@ -104,7 +109,7 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		CleanupFailures: append([]string{}, record.CleanupFailures...),
 		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
 		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{TmpSize: tmpSize, ShmSize: shmSize, Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
+		Config: InspectionConfig{SecretTargets: secretTargets, TmpSize: tmpSize, ShmSize: shmSize, Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
 			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
 			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
 		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,

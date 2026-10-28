@@ -18,6 +18,9 @@ import (
 // A retained root takes precedence over the original source on restart. This
 // lets a container restart after its original directory has been removed.
 func acquireRunTemplate(ctx context.Context, cfg config.Config, retainedRoot string) (*template.Template, bool, error) {
+	if err := rootfs.ValidateSecretSources(cfg.Secrets); err != nil {
+		return nil, false, err
+	}
 	if retainedRoot != "" {
 		info, err := os.Lstat(retainedRoot)
 		if err == nil {

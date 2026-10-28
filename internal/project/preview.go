@@ -32,6 +32,8 @@ func fieldName(name string) string {
 		return "cpus"
 	case "labels":
 		return "label"
+	case "secrets":
+		return "secret"
 	case "mounts":
 		return "mount"
 	}

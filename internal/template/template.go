@@ -78,6 +78,9 @@ func acquire(ctx context.Context, cfg config.Config, resolveImage func(context.C
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := rootfs.ValidateSecretSources(cfg.Secrets); err != nil {
+		return nil, err
+	}
 	t := &Template{Path: cfg.RootFS}
 	defer func() {
 		if err != nil {

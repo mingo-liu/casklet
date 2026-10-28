@@ -19,6 +19,20 @@ Validation: CLI argument/help parity, local tag replacement, missing source,
 digest-target rejection, canceled push and OCI/imported round trips against a
 local registry; Darwin/Linux unit tests, vet, build and real client verification.
 
+## 2026-10-28: Deliver application secrets as read-only files
+
+Added repeatable secret source references to run files and project services.
+Each execution reads bounded regular files into a private read-only tmpfs at
+/run/secrets. Rotation requires restart; automatic starts also reread sources.
+Source contents never enter configuration, environment, retained roots or public
+inspection. Inspection exposes target names and cp excludes secret storage.
+Documented source lifetime, read access, limits, update/failure and cleanup rules.
+
+Validation: source/type/size and parser regressions, Darwin/Linux unit tests and
+vet, Linux race checks, real Mac project restart/rotation/failure/copy checks,
+and the complete privileged Linux suite through the daily-state preservation
+wrapper, including numeric users and read-only roots.
+
 ## 2026-10-28: Operate on logical project services
 
 Added project exec/start/stop/restart with logical service selection, generated-name

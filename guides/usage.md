@@ -1644,3 +1644,38 @@ disk space and is cleaned on success, failure or cancellation; abandoned staging
 uses ordinary image transaction recovery. Registry blobs may survive cancellation,
 and a lost response can leave a successfully published remote tag. The registry
 manifest is written last. Tags do not protect unused images from image prune.
+
+## Secret file injection
+
+Use separate files for passwords, certificates and keys instead of environment
+assignments. Repeat `--secret source=FILE,target=NAME` to expose each source as
+`/run/secrets/NAME`:
+
+```sh
+casklet run --secret source=/Users/alice/.secrets/db-password,target=db-password \
+  -- /bin/sh -c 'test -r /run/secrets/db-password'
+```
+
+Run JSON and project service `run` objects accept a `secret` string array with
+the same syntax. Relative sources in these files resolve against their containing
+configuration file, as with env-files. CLI sources must be absolute. The source's
+parent directory must be shared with the product VM. Sources must be regular files,
+not symlinks, directories or devices. Up to 32 files are allowed, at most 1 MiB each
+and 8 MiB total. Targets are unique file names of 1-128 letters, digits, `_`, `-`
+or `.`, beginning with a letter or digit. Mounts cannot overlap `/run/secrets`.
+
+Each start reads fresh snapshots before launching the workload. Files are mode
+0444 on a private read-only, noexec/nosuid/nodev tmpfs, readable by numeric users
+inside that container. Source updates do not change a running snapshot. Replace
+sources atomically, then use `restart` or `project restart`; a matching `project up`
+does not restart just because contents changed. Automatic restart also rereads
+sources; missing, unreadable or invalid sources cause startup failure. A failed
+restart leaves the old execution stopped and preserves its retained filesystem.
+
+Only source paths and target names are saved in execution configuration; secret
+bytes are excluded from env, config, inspection and project comparison hashes.
+Inspection exposes `secret_targets`. The tmpfs disappears when the execution's
+mount namespace is released; no secret bytes are written to the retained root or
+image. Source files remain yours to rotate and delete. `cp` excludes secret storage.
+An application can still copy or log a secret it reads, and tmpfs may use guest
+swap; this feature is file delivery, not a vault or secure-erasure guarantee.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -55,6 +56,17 @@ func guestArguments(instance Instance, args []string) ([]string, error) {
 				return err
 			}
 			value = path
+		case "secret":
+			secret, err := config.ParseSecret(value, "")
+			if err != nil {
+				return err
+			}
+			parent, err := instance.hostPath(filepath.Dir(secret.Source))
+			if err != nil {
+				return err
+			}
+			secret.Source = filepath.Join(parent, filepath.Base(secret.Source))
+			value = secret.Argument()
 		case "mount":
 			mount, err := config.ParseMount(value)
 			if err != nil {

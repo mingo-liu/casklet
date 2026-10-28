@@ -20,6 +20,18 @@ func Setup(cfg config.Config) error {
 	if err := cfg.ValidateTmpfs(); err != nil {
 		return err
 	}
+	if err := config.ValidateSecrets(cfg.Secrets, cfg.Mounts); err != nil {
+		return err
+	}
+	secrets, err := readSecrets(cfg.Secrets)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, data := range secrets {
+			clear(data)
+		}
+	}()
 	tmpSize, shmSize := cfg.TmpfsSizes()
 	mounts := cfg.Mounts
 	root, err := directory(cfg.RootFS)
@@ -103,6 +115,9 @@ func Setup(cfg config.Config) error {
 		return fmt.Errorf("mount tmp: %w", err)
 	}
 	if err := mountDirectories(mounts, sources); err != nil {
+		return err
+	}
+	if err := mountSecrets(cfg.Secrets, secrets); err != nil {
 		return err
 	}
 	// Keep the old root attached until source descriptors have been bound.

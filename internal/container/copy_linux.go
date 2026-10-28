@@ -61,7 +61,13 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 	if err != nil {
 		return err
 	}
+	if len(cfg.Secrets) > 0 && copyPathsOverlap(clean, "run/secrets") {
+		return errors.New("copy cannot access secret storage")
+	}
 	control := copyControl{Path: name, Upload: upload, Excluded: []string{"proc", "sys", "dev"}}
+	if len(cfg.Secrets) > 0 {
+		control.Excluded = append(control.Excluded, "run/secrets")
+	}
 	var rootFile *os.File
 	if record.State == StateRunning {
 		rootFile, err = liveCopyRoot(ctx, store, record)
