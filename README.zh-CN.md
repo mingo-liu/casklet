@@ -138,6 +138,9 @@ casklet project down demo
 使用 `project exec`、`project start`、`project stop` 和 `project restart`
 按逻辑服务名操作，详见[服务操作](guides/usage.md#project-service-operations)。
 
+项目配置支持[一次性任务](guides/usage.md#one-shot-project-tasks)和成功完成依赖，
+例如先完成数据库迁移，再启动应用服务。
+
 ## 功能概览
 
 完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。

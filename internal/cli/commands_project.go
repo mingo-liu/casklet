@@ -96,7 +96,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	}
 	parent := ctx
 	var deadline time.Time
-	if r.Action == "project-up" && r.Wait {
+	if r.Action == "project-up" && (r.Wait || r.Project.HasTasks()) {
 		deadline = time.Now().Add(r.WaitTimeout)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, deadline)

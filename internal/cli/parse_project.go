@@ -245,8 +245,8 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				return plan, errors.New("io.casklet.project.* labels are reserved")
 			}
 		}
-		if len(request.Config.Labels) > 60 {
-			return plan, errors.New("project services support at most 60 user labels")
+		if len(request.Config.Labels) > 60 || service.Task && len(request.Config.Labels) > 59 {
+			return plan, errors.New("project services support at most 60 user labels (59 for tasks)")
 		}
 		for _, port := range request.Config.Publish {
 			for _, previous := range published {
@@ -255,6 +255,28 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				}
 			}
 			published = append(published, port)
+		}
+		if service.Task {
+			if request.Config.RestartMode() != "no" {
+				return plan, fmt.Errorf("task %q requires restart=no", key)
+			}
+			h := request.Config.Healthcheck
+			if h != nil && (len(h.Test) == 0 || h.Enabled()) {
+				return plan, fmt.Errorf("task %q cannot enable health checks", key)
+			}
+			request.Config.Healthcheck = &config.HealthConfig{Test: []string{"NONE"}}
+			if request.Config.Labels == nil {
+				request.Config.Labels = map[string]string{}
+			}
+			request.Config.Labels[project.LabelTask] = "true"
+			end := len(args)
+			for i, arg := range args {
+				if arg == "--" {
+					end = i
+					break
+				}
+			}
+			args = append(append(append([]string(nil), args[:end]...), "--no-healthcheck", "--label", project.LabelTask+"=true"), args[end:]...)
 		}
 		// Keep absence distinct from explicit overrides of image-provided defaults.
 		request.Config.Env = canonicalProjectEnvironment(request.Config.Env)
@@ -283,7 +305,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		if _, err := Parse(validationArgs); err != nil {
 			return plan, fmt.Errorf("invalid generated configuration for service %q", key)
 		}
-		plan.Services = append(plan.Services, project.Service{Config: request.Config, Fields: project.FieldDigests(request.Config, request.Entrypoint), Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
+		plan.Services = append(plan.Services, project.Service{Task: service.Task, Config: request.Config, Fields: project.FieldDigests(request.Config, request.Entrypoint), Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
 			MatchLegacyFingerprint: func(saved string, aliases []string) bool {
 				// The store appends the container name if it is not already an
 				// explicit alias. It was absent from that legacy config hash.

@@ -47,6 +47,9 @@ func executeProjectLifecycle(ctx context.Context, r Request, records []container
 	})
 	var failures []error
 	for _, record := range selected {
+		if action != "stop" && len(r.Services) == 0 && record.Labels[project.LabelTask] == "true" {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return errors.Join(append(failures, err)...)
 		}

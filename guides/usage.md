@@ -1458,6 +1458,38 @@ and a cancelable project lock live under the local casklet configuration directo
 state. Keep ownership files with the machine they describe; without receipts,
 containers can still be discovered by their labels but networks/volumes are preserved.
 
+### One-shot project tasks
+
+A service with `"task": true` runs to completion. Declare `"completed"` dependencies
+on tasks; ordinary services continue to use `"started"` or `"healthy"`:
+
+```json
+{
+  "name": "demo",
+  "services": {
+    "migrate": {"task": true, "run": {"image": "example/app:1", "command": ["/app/migrate"]}},
+    "api": {"run": {"image": "example/app:1"}, "depends-on": {"migrate": "completed"}}
+  }
+}
+```
+
+Tasks require `restart=no` and cannot enable health checks; inherited image checks
+are disabled. Every task must exit normally with code zero and no cleanup failures
+before up succeeds or its dependents start. Task completion is awaited even without
+`--wait`; one shared `--timeout` covers lock acquisition, preparation, startup and
+tasks. Nonzero task statuses propagate to the caller; an infrastructure failure is
+125 and the deployment deadline is 124. Ordinary service startup behavior is unchanged.
+
+Matching successful tasks are reused on later up calls, running tasks are awaited,
+and existing failed tasks block deployment. Explicit `project restart demo migrate`
+or `project up --recreate migrate --config project.json` reruns a task. Failed new
+tasks follow ordinary transaction rollback; retrying up creates missing tasks again.
+Completed task IDs and generations remain pinned during dependency/readiness checks.
+Default project start/restart skips tasks so routine service maintenance cannot
+rerun migrations; explicit task selections may rerun them. Preview reports
+`reuse/task_completed`, `reuse/task_running` or `blocked/task_failed` for matching
+tasks. These jobs are deployment steps, not scheduled or periodically recurring jobs.
+
 ### Project service operations
 
 ```sh

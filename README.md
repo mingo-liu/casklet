@@ -140,6 +140,9 @@ data. Add `--dry-run` to preview the removals first.
 Operate on logical service keys with `project exec`, `project start`, `project stop`
 and `project restart`; see [service operations](guides/usage.md#project-service-operations).
 
+Project configurations also support [one-shot tasks](guides/usage.md#one-shot-project-tasks)
+and successful-completion dependencies, for example migrations before application startup.
+
 ## Capabilities
 
 See the [usage guide](guides/usage.md) for full examples, defaults, and limits.

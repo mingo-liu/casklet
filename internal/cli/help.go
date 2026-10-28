@@ -140,6 +140,7 @@ Notes:
   Pins full IDs, validates all selections before changes, and serializes with up/down.
   Starts retained containers in creation order; running containers are reused.
   Does not apply configuration changes or dependency/health waits; use project up.
+  Default start skips tasks; select a task explicitly to rerun it.
   Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
   Cancellation/output errors stop further work. Persistent data is retained.
 
@@ -173,6 +174,7 @@ Notes:
   Validates selection and pins full IDs before changes; serializes with up/down.
   Restarts retained commands in creation order, preserving roots and persistent data.
   Does not apply new configuration or dependency/health waits; use project up.
+  Default restart skips tasks; select a task explicitly to rerun it.
   Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
   Cancellation/output errors stop further work. Flags precede PROJECT.
 
@@ -607,6 +609,15 @@ Notes:
   Wait pins each service ID/generation; exit, removal or restart fails readiness.
   Its deadline covers the local project lock, startup and readiness after parsing.
   A deployment deadline returns 124 after bounded rollback; other failures return 125.
+
+Task notes:
+  Set service task:true and use depends-on:{"migrate":"completed"} for one-shot jobs.
+  Tasks require restart=no and no health checks; inherited image checks are disabled.
+  Up waits for every task under the shared --timeout, even without --wait.
+  Successful matching tasks are reused. Existing failed tasks block deployment;
+  select them with project restart or up --recreate to rerun explicitly.
+  Task failures retain their nonzero exit status; deployment deadlines return 124.
+  Preview can report reuse/task_completed or blocked/task_failed.
 
 Examples:
   casklet project up --config project.json

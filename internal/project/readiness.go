@@ -16,15 +16,19 @@ var ErrWaitTimeout = errors.New("timed out waiting for project readiness")
 // ServiceStatus is the bounded guest response used by project readiness passes.
 // Configuration, command arguments and probe output are intentionally excluded.
 type ServiceStatus struct {
-	ID         string `json:"id"`
-	Project    string `json:"project"`
-	Service    string `json:"service"`
-	Generation uint64 `json:"generation"`
-	State      string `json:"state"`
-	Health     string `json:"health,omitempty"`
+	ExitCode        *int     `json:"exit_code,omitempty"`
+	ExitReason      string   `json:"exit_reason,omitempty"`
+	CleanupFailures []string `json:"cleanup_failures,omitempty"`
+	ID              string   `json:"id"`
+	Project         string   `json:"project"`
+	Service         string   `json:"service"`
+	Generation      uint64   `json:"generation"`
+	State           string   `json:"state"`
+	Health          string   `json:"health,omitempty"`
 }
 
 type serviceExecution struct {
+	Task        bool
 	ID          string
 	Generation  uint64
 	Healthcheck bool
@@ -84,6 +88,14 @@ func (runner *Runner) waitServices(ctx context.Context, plan Plan, executions ma
 			}
 			if latest.Generation != execution.Generation {
 				return fmt.Errorf("service %q execution changed before project readiness", service.Key)
+			}
+			if execution.Task {
+				done, err := taskResult(service.Key, latest.State, latest.ExitCode, latest.ExitReason, latest.CleanupFailures)
+				if err != nil {
+					return err
+				}
+				ready = ready && done
+				continue
 			}
 			if latest.State == container.StateExited || latest.State == container.StateFailed || latest.State == container.StateStopping || latest.Health == container.HealthStopped {
 				return fmt.Errorf("service %q stopped before project readiness (state: %s)", service.Key, latest.State)
