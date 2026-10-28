@@ -6,10 +6,16 @@ import (
 	"io"
 	"path"
 	"strings"
+
+	"github.com/mingo-liu/casklet/internal/project"
 )
 
 func parseExec(r Request, args []string) (Request, error) {
-	fs := flag.NewFlagSet("exec", flag.ContinueOnError)
+	return parseExecOperands(r, args, 1)
+}
+
+func parseExecOperands(r Request, args []string, operands int) (Request, error) {
+	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.String("env-file", "", "environment assignments file")
 	fs.BoolVar(&r.Exec.Interactive, "interactive", false, "forward stdin")
@@ -36,7 +42,7 @@ func parseExec(r Request, args []string) (Request, error) {
 	}
 	if err := fs.Parse(expandTerminalFlags(fs, options)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return parseFlagHelp(r.Action, fs, args)
+			return parseFlagHelp(strings.Replace(r.Action, "project-", "project ", 1), fs, args)
 		}
 		return r, err
 	}
@@ -44,10 +50,16 @@ func parseExec(r Request, args []string) (Request, error) {
 	fs.Visit(func(f *flag.Flag) {
 		workdirSpecified = workdirSpecified || f.Name == "workdir"
 	})
-	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		return r, errors.New("exec requires exactly one container ID or name before --; flags must precede it")
+	if fs.NArg() != operands || fs.Arg(0) == "" {
+		return r, errors.New("exec requires its container, or project and service, before --; flags must precede operands")
 	}
 	r.Reference = fs.Arg(0)
+	if operands == 2 {
+		if project.ValidateName(r.Reference) != nil || project.ValidateName(fs.Arg(1)) != nil {
+			return r, errors.New("project exec requires a valid project and logical service name")
+		}
+		r.Services = []string{fs.Arg(1)}
+	}
 	if strings.ContainsAny(r.Reference, "/\\\x00") || r.Reference == "." || r.Reference == ".." {
 		return r, errors.New("invalid container ID or name")
 	}

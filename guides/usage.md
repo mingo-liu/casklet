@@ -1458,6 +1458,29 @@ and a cancelable project lock live under the local casklet configuration directo
 state. Keep ownership files with the machine they describe; without receipts,
 containers can still be discovered by their labels but networks/volumes are preserved.
 
+### Project service operations
+
+```sh
+casklet project exec -it demo api -- /bin/sh
+casklet project stop --timeout 10s demo
+casklet project start demo
+casklet project restart demo api worker
+```
+
+`exec` takes exactly one logical service key and supports the ordinary exec flags,
+including local env-files, terminals and command exit statuses. It remains usable
+while deployment waits. Lifecycle commands take zero or more logical service keys;
+omitting them selects the project. All selections and generated names are checked
+before mutations, and complete container IDs are pinned so reused names cannot
+redirect an operation. Lifecycle commands serialize with local project up/down.
+They preserve retained roots, logs, networks and volumes. Start/restart use creation
+order, stop uses reverse creation order; config-free operations do not reconstruct
+the dependency graph or wait for readiness. Use `project up --wait` for that.
+Successful lifecycle operations print full IDs. Individual failures are aggregated
+and return 125 while other selected services continue; cancellation or output errors
+stop further work. Exec forwards its command's exit status and affects only that
+exec session. Flags precede the project name. All scoped help forms are equivalent.
+
 ### Project logs
 
 ```sh

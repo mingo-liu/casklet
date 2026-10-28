@@ -20,7 +20,7 @@ import (
 
 func parseProject(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("project requires validate, up, down, ps, or logs")
+		return r, errors.New("project requires validate, up, down, ps, logs, exec, start, stop, or restart")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -29,6 +29,9 @@ func parseProject(r Request, args []string) (Request, error) {
 		return helpRequest([]string{"project"})
 	}
 	r.Action = "project-" + args[0]
+	if args[0] == "exec" {
+		return parseExecOperands(r, args[1:], 2)
+	}
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	switch args[0] {
@@ -43,6 +46,16 @@ func parseProject(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
 		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "dependency health wait deadline")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
+	case "stop", "restart":
+		fs.Func("timeout", "graceful shutdown override", func(value string) error {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			r.StopTimeout = &duration
+			return nil
+		})
+	case "start":
 	case "down":
 		fs.BoolVar(&r.RemoveVolumes, "volumes", false, "also remove project-owned data volumes")
 	case "logs":
@@ -87,6 +100,28 @@ func parseProject(r Request, args []string) (Request, error) {
 		if (explicit && r.Tail < 0) || r.Tail > 1000000 {
 			return r, errors.New("--tail must be between 0 and 1000000")
 		}
+	}
+	if args[0] == "start" || args[0] == "stop" || args[0] == "restart" {
+		if fs.NArg() < 1 {
+			return r, errors.New("project lifecycle command requires PROJECT [SERVICE ...]")
+		}
+		r.Reference, r.Services = fs.Arg(0), fs.Args()[1:]
+		if r.StopTimeout != nil {
+			if err := config.ValidateStopTimeout(*r.StopTimeout); err != nil {
+				return r, err
+			}
+		}
+		if len(r.Services) > 64 {
+			return r, errors.New("project operations support at most 64 services")
+		}
+		seen := map[string]bool{}
+		for _, key := range r.Services {
+			if project.ValidateName(key) != nil || seen[key] {
+				return r, errors.New("invalid or duplicate project service selection")
+			}
+			seen[key] = true
+		}
+		return r, project.ValidateName(r.Reference)
 	}
 	if fs.NArg() != 1 {
 		return r, errors.New("project command requires exactly one project name; flags precede it")

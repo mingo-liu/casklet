@@ -112,6 +112,75 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"project exec": `Usage: casklet project exec [OPTIONS] PROJECT SERVICE -- COMMAND [ARGS...]
+
+Options:
+  -i, --interactive  Forward stdin
+  -t, --tty          Allocate a terminal; -it combines both
+  --env KEY=VALUE    Override environment; repeat
+  --env-file FILE    Read local environment assignments; repeat
+  --workdir PATH     Override the working directory
+  --timeout DURATION  Limit the command duration; 0 disables it
+  -h, --help         Show this help
+
+Notes:
+  Flags precede PROJECT. SERVICE is a logical project key, not a container name.
+  Pins a full container ID after ownership checks. Requires a running service.
+  Uses ordinary exec terminal, signal and exit-status semantics; the main workload
+  remains running. Status and exec remain available during project deployments.
+
+Examples:
+  casklet project exec -it demo api -- /bin/sh
+  casklet project exec --env MODE=check demo api -- /app/check
+`,
+	"project start": `Usage: casklet project start PROJECT [SERVICE ...]
+
+Notes:
+  Omit SERVICE to select the managed project. Uses logical service keys.
+  Pins full IDs, validates all selections before changes, and serializes with up/down.
+  Starts retained containers in creation order; running containers are reused.
+  Does not apply configuration changes or dependency/health waits; use project up.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Persistent data is retained.
+
+Examples:
+  casklet project start demo
+  casklet project start demo api worker
+`,
+	"project stop": `Usage: casklet project stop [--timeout DURATION] PROJECT [SERVICE ...]
+
+Options:
+  --timeout DURATION  Override graceful shutdown, 0s-1m
+
+Notes:
+  Uses logical service keys; omitting them selects the managed project.
+  Validates selection and pins full IDs before changes; serializes with up/down.
+  Stops in reverse creation order and preserves roots, logs, networks and volumes.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Flags precede PROJECT.
+
+Examples:
+  casklet project stop demo
+  casklet project stop --timeout 10s demo api
+`,
+	"project restart": `Usage: casklet project restart [--timeout DURATION] PROJECT [SERVICE ...]
+
+Options:
+  --timeout DURATION  Override graceful shutdown, 0s-1m
+
+Notes:
+  Uses logical service keys; omitting them selects the managed project.
+  Validates selection and pins full IDs before changes; serializes with up/down.
+  Restarts retained commands in creation order, preserving roots and persistent data.
+  Does not apply new configuration or dependency/health waits; use project up.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Flags precede PROJECT.
+
+Examples:
+  casklet project restart demo
+  casklet project restart --timeout 10s demo api worker
+`,
+
 	"cp": `Usage: casklet cp [--] SOURCE DESTINATION
        casklet cp LOCAL_PATH ID|NAME:PATH
        casklet cp ID|NAME:PATH LOCAL_PATH

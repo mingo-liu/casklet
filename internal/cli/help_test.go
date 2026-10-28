@@ -34,7 +34,7 @@ func helpExecution(t *testing.T, args []string) (string, string, int) {
 func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, topic := range []string{
-		"cp", "project", "project validate", "project up", "project down", "project ps", "project logs", "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm",
+		"project exec", "project start", "project stop", "project restart", "cp", "project", "project validate", "project up", "project down", "project ps", "project logs", "run", "exec", "doctor", "ps", "inspect", "stats", "wait", "start", "restart", "stop", "logs", "rm",
 		"network", "network create", "network ls", "network inspect", "network rm",
 		"volume", "volume create", "volume ls", "volume inspect", "volume rm", "volume export", "volume restore",
 		"system", "system df", "image prune",

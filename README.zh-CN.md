@@ -135,6 +135,9 @@ casklet project down demo
 
 使用 `doctor --json` 查看版本、VM 状态、磁盘余量和诊断检查。
 
+使用 `project exec`、`project start`、`project stop` 和 `project restart`
+按逻辑服务名操作，详见[服务操作](guides/usage.md#project-service-operations)。
+
 ## 功能概览
 
 完整示例、默认值和限制见[使用指南](guides/usage.md)（英文）。

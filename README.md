@@ -137,6 +137,9 @@ After removing services from the configuration, use `project up --remove-orphans
 to delete those containers while retaining matching running services and persistent
 data. Add `--dry-run` to preview the removals first.
 
+Operate on logical service keys with `project exec`, `project start`, `project stop`
+and `project restart`; see [service operations](guides/usage.md#project-service-operations).
+
 ## Capabilities
 
 See the [usage guide](guides/usage.md) for full examples, defaults, and limits.

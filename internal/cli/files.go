@@ -178,6 +178,13 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 // expandFileArguments consumes host-local files before VM transport or sudo.
 // Scalar CLI flags override config values; files precede all explicit env values.
 func expandFileArguments(args []string) ([]string, error) {
+	if len(args) > 1 && args[0] == "project" && args[1] == "exec" {
+		expanded, err := expandFileArguments(append([]string{"exec"}, args[2:]...))
+		if err != nil {
+			return nil, err
+		}
+		return append([]string{"project", "exec"}, expanded[1:]...), nil
+	}
 	if len(args) == 0 || args[0] != "run" && args[0] != "exec" {
 		return args, nil
 	}

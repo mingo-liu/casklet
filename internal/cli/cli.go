@@ -46,8 +46,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	if r.Action == "cp" {
 		return executeCopy(r, stderr)
 	}
-	if r.Action == "project-logs" || r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
-		return executeProject(r, stdout, stderr)
+	if r.Action == "project-exec" || r.Action == "project-start" || r.Action == "project-stop" || r.Action == "project-restart" || r.Action == "project-logs" || r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
+		return executeProject(r, stdout, stderr, stdin)
 	}
 	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {
 		return code

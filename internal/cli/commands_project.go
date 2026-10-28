@@ -67,13 +67,16 @@ func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
 	}, nil
 }
 
-func executeProject(r Request, stdout, stderr io.Writer) int {
+func executeProject(r Request, stdout, stderr io.Writer, input ...*os.File) int {
+	if r.Action == "project-exec" {
+		return executeProjectExec(r, stdout, stderr, input...)
+	}
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {
-		return executeProjectContext(ctx, r, stdout, stderr)
+		return executeProjectContext(ctx, r, stdout, stderr, input...)
 	})
 }
 
-func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Writer) (int, error) {
+func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Writer, input ...*os.File) (int, error) {
 	// Validation is host-local: do not open project state or construct a guest call.
 	if r.Action == "project-validate" {
 		if r.JSON {
@@ -147,6 +150,12 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	}
 	runner := project.Runner{Backend: backend, Call: call, Save: store.Save, State: state}
 	switch r.Action {
+	case "project-start", "project-stop", "project-restart":
+		records, err := backend.Records(ctx, name)
+		if err != nil {
+			return 125, err
+		}
+		return 0, executeProjectLifecycle(ctx, r, records, stdout, call)
 	case "project-up":
 		records, err := runner.Up(parent, r.Project, project.UpOptions{Timeout: r.WaitTimeout, Wait: r.Wait, Deadline: deadline, Recreate: r.Recreate, RemoveOrphans: r.RemoveOrphans, DryRun: r.DryRun})
 		if err != nil {
