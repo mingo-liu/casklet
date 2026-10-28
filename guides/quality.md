@@ -7,6 +7,71 @@ and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
 
+## 2026-10-28: Operate on logical project services
+
+Added project exec/start/stop/restart with logical service selection, generated-name
+ownership checks and full-ID pinning before mutations. Lifecycle operations share
+the local deployment lock, preserve retained data, aggregate per-service failures,
+and stop on cancellation or output failure. Config-free commands use creation
+order (reverse for stop); dependency/readiness policy stays with up. Exec delegates
+to the ordinary dispatcher in the same process, preserving stdin, terminal resize/
+restore, explicit signals and exact command status while remaining available during
+up. Focused help, both READMEs, usage and architecture describe these boundaries.
+
+Validation: CLI/project unit tests, vet and race checks passed on Darwin and Linux
+arm64. Real Linux and Mac tests cover selection, retained start/stop/restart, job
+exclusion, stdin/env and exit 7, plus a real Mac PTY with size changes and restoration.
+Unknown/duplicate selections and renamed records fail before mutations; partial
+failure preserves successful full IDs. The complete privileged Linux suite passed
+through the daily-store preservation wrapper alongside the existing project cases.
+
+## 2026-10-28: Await successful one-shot deployment tasks
+
+Project services accept task:true and completed dependencies. Tasks disable inherited
+health checks and require restart=no. Up pins task IDs/generations and requires a
+normal exited result with status zero and no cleanup failures. One deadline covers
+preparation, startup and task completion even without --wait. Successful matching
+tasks are reused, running tasks are awaited, existing failed tasks block deployment,
+and new failures use transaction rollback. Explicit task start/restart/recreation
+permits rerunning; default project start/restart skips tasks. Normal services retain
+their existing hashes and started/healthy semantics. Preview reports completed,
+running and failed task outcomes; task command statuses survive rollback.
+
+Validation: parser/graph/identity, successful reuse, failed dependency blocking,
+rollback and deadline regressions passed with CLI/project vet/race checks. Real
+Linux/Mac deployments verify migration-before-application ordering, retained volume
+counters, explicit reruns, failed existing tasks, exit 7/9 propagation and timeout
+124 without --wait. Tests use the runtime's actual exited reason rather than
+inferring normal completion from a numeric status or a stopped task.
+
+## 2026-10-28: Replay and follow bounded lifecycle events
+
+Added events with NDJSON/plain output, global sequence resume, time selection and
+AND filters for type/container/project/service. The private versioned journal
+retains 1024 sanitized observations and includes removed container identities.
+Metadata mutations publish only lifecycle/health/restart/cleanup transitions;
+readers release metadata locks before output. Default follow starts at the tail;
+explicit replay, future/stale cursor rejection and slow-reader overrun are bounded.
+Commands, environment, probe output and private diagnostics are excluded. Effective
+stopped health is retained in stopping/completion events.
+
+Recording is observational: journal failure warns and attempts a durable incomplete-
+history marker, without preventing workload stop or resource cleanup. Readers reject
+marked history until operator acknowledgement. State/journal files are separately
+atomic, and old supervisors/crashes can leave gaps; this is not a complete audit
+log. Recovery, help parity, bilingual overviews and architecture are documented.
+
+Validation: bounded retention, exclusive resume, redaction, duplicate-health
+suppression, lock release, failed output and cancellation regressions passed.
+Inotify synchronizes follow startup and verifies tail-only behavior plus overrun
+from an initially empty history. Root container race tests and real Linux/Mac
+project streams passed. A corrupted guest journal still permits stop/removal and
+causes explicit incomplete-history read failure. Real Mac full stdout-pipe
+cancellation returns 143 while preserving the workload. The complete Linux suite
+passed 170 cases (the optional pinned legacy case was not configured locally),
+and the added journal-failure scenario passed separately through the same
+preservation wrapper; daily state and restart-manager service were restored.
+
 ## 2026-10-27: Copy files between the host and retained containers
 
 Added `cp SOURCE DESTINATION` for ordinary files, directory trees and symbolic

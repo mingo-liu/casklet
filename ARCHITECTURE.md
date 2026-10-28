@@ -471,7 +471,48 @@ firewall drops restrict forwarding to other casklet networks without modifying
 unrelated host tables or policies. Published host ports retain the existing Lima
 address translation and forwarding path.
 
+## Lifecycle event observation
+
+Container metadata mutations capture sanitized before/after snapshots and append
+only actual transitions to a separate versioned 1024-entry journal under the
+existing metadata lock. Creation is observed after record publication, and removal
+after the record is hidden. Completion, new generations, restart deadlines, manual
+stop requests, health changes and recorded runtime cleanup failures use the same
+path. No commands, environment, raw errors, probe output or private paths enter
+this wire model. State records and the journal are separately atomic: failed
+journal writes warn and attempt a durable incomplete-history marker without blocking
+lifecycle/cleanup. Readers reject marked histories until explicit acknowledgement;
+crashes and older supervisors can still leave missing observations. This is not an
+audit transaction log.
+
+Readers snapshot and validate the bounded journal under a shared lock, then emit
+outside all metadata locks. Global sequence cursors provide exclusive resume and
+explicit stale/future/overrun failure. Polling never scans unrelated container
+records. The CLI closes pollable stdout duplicates on cancellation and the host
+bounds SSH output draining as for archive streams. JSON is newline-delimited and
+versioned per event. The journal remains in the container store, so shared-VM test
+preservation saves and restores it with everyday data.
+
 ## Project orchestration
+
+Config-free project start/stop/restart resolves logical services to verified scoped
+names and full IDs before mutations. Local project locks serialize those operations
+with deployment, while ordinary container lifecycle paths retain VM port checks
+and guest operation locks. Creation order is used without a persisted dependency
+graph; up remains the dependency-aware interface. Exec uses read-only inventory
+then delegates to the ordinary exec dispatcher in the same process, preserving
+terminal, explicit signal and command-status semantics.
+
+A task is an explicit project service role, recorded in a reserved immutable label
+and configuration identity. Tasks require no restart policy or health monitoring,
+including image-inherited checks. Up applies the shared deployment deadline even
+without --wait, pins each task execution, and samples its normal zero exit plus
+cleanup result before dependents proceed. Completed dependencies require tasks;
+regular service started/healthy semantics remain unchanged. Matching successful
+tasks are reused, failed existing tasks block up, and new failed tasks use ordinary
+transaction rollback. Explicit service restart/recreation permits rerunning a task;
+default config-free start/restart skips tasks. Final whole-project readiness checks
+accept pinned successful tasks alongside running/healthy ordinary services.
 
 `project validate` stops after the existing host-side project parser and emits
 only project/service identifiers. It never constructs guest calls, reads registry

@@ -866,6 +866,52 @@ Later management operations reclaim verified abandoned transactions automaticall
 Directories with live leases, unsafe ownership or permissions, or mounted
 subtrees are preserved; unsafe artifacts produce a diagnostic.
 
+## Lifecycle events
+
+```sh
+casklet events --json --filter project=demo
+casklet events --follow --json
+casklet events --after 120 --follow --filter event=exit
+```
+
+Events report retained container lifecycle transitions: `create`, `starting`,
+`start`, `stopping`, `exit`, `restart`, `stop_requested`, `restart_scheduled`,
+`health`, `cleanup_failed`, and `remove`. `restart` marks a new retained execution
+regardless of whether start, restart or automatic policy created it. Health probes
+emit changes rather than every probe. The VM retains the last 1024 events in a
+bounded private journal, including entries for removed containers. Sequence numbers
+are global, strictly increasing and survive ordinary VM restarts. They reset if
+the store/journal is explicitly replaced or removed.
+
+Without `--follow`, the command snapshots retained history. Follow starts at the
+current end unless `--after` or `--since` is supplied. `--after` is exclusive;
+`--after 0` replays retained history. `--since` accepts an RFC3339 timestamp with
+optional fractional seconds and includes that instant. Repeated `--filter` values
+are ANDed and support `event=TYPE`, `container=FULL_ID|EXACT_NAME`, `project=NAME`
+and `service=KEY`. Exact names can match several historical containers after name
+reuse; use a full ID for one immutable container. No prefix resolution or label
+value export occurs. A resume cursor ahead of this store or behind retained history
+fails explicitly. Slow followers also fail on retention overrun rather than silently
+skipping events. Time filtering cannot recover already discarded history.
+
+`--json` writes one `schema_version: 1` object per line, for snapshots and streams.
+Fields include sequence, UTC time, full container ID, name, event type, generation,
+state and optional health/exit reason/status, sanitized cleanup stages and project/
+service keys. Plain output abbreviates IDs. Environment values, command arguments,
+probe output, raw private errors and engine paths are not included. Readers release
+metadata locks before output; cancellation/output failure stops observation without
+stopping workloads, including when stdout is blocked.
+
+History begins with this engine version. Supervisors already running an older
+engine do not emit newly supported transitions until restarted. State publication
+and journal publication are separate atomic files, so a crash between them can
+leave an event gap. Journal storage failures warn and attempt to persist an incomplete-history marker;
+they do not block container lifecycle operations or resource cleanup. Readers refuse
+marked history rather than presenting it as complete. After correcting storage,
+explicit operator acknowledgement/reset is required; see the development guide.
+This bounded stream is an operational observation interface, not a complete audit
+log. It covers retained containers, not standalone foreground runs.
+
 ## IPv4 networking
 
 ```sh
@@ -1457,6 +1503,61 @@ and a cancelable project lock live under the local casklet configuration directo
 `CASKLET_MACHINE_STATE_DIR` relocates this state together with isolated machine
 state. Keep ownership files with the machine they describe; without receipts,
 containers can still be discovered by their labels but networks/volumes are preserved.
+
+### One-shot project tasks
+
+A service with `"task": true` runs to completion. Declare `"completed"` dependencies
+on tasks; ordinary services continue to use `"started"` or `"healthy"`:
+
+```json
+{
+  "name": "demo",
+  "services": {
+    "migrate": {"task": true, "run": {"image": "example/app:1", "command": ["/app/migrate"]}},
+    "api": {"run": {"image": "example/app:1"}, "depends-on": {"migrate": "completed"}}
+  }
+}
+```
+
+Tasks require `restart=no` and cannot enable health checks; inherited image checks
+are disabled. Every task must exit normally with code zero and no cleanup failures
+before up succeeds or its dependents start. Task completion is awaited even without
+`--wait`; one shared `--timeout` covers lock acquisition, preparation, startup and
+tasks. Nonzero task statuses propagate to the caller; an infrastructure failure is
+125 and the deployment deadline is 124. Ordinary service startup behavior is unchanged.
+
+Matching successful tasks are reused on later up calls, running tasks are awaited,
+and existing failed tasks block deployment. Explicit `project restart demo migrate`
+or `project up --recreate migrate --config project.json` reruns a task. Failed new
+tasks follow ordinary transaction rollback; retrying up creates missing tasks again.
+Completed task IDs and generations remain pinned during dependency/readiness checks.
+Default project start/restart skips tasks so routine service maintenance cannot
+rerun migrations; explicit task selections may rerun them. Preview reports
+`reuse/task_completed`, `reuse/task_running` or `blocked/task_failed` for matching
+tasks. These jobs are deployment steps, not scheduled or periodically recurring jobs.
+
+### Project service operations
+
+```sh
+casklet project exec -it demo api -- /bin/sh
+casklet project stop --timeout 10s demo
+casklet project start demo
+casklet project restart demo api worker
+```
+
+`exec` takes exactly one logical service key and supports the ordinary exec flags,
+including local env-files, terminals and command exit statuses. It remains usable
+while deployment waits. Lifecycle commands take zero or more logical service keys;
+omitting them selects the project. All selections and generated names are checked
+before mutations, and complete container IDs are pinned so reused names cannot
+redirect an operation. Lifecycle commands serialize with local project up/down.
+They preserve retained roots, logs, networks and volumes. Start/restart use creation
+order, stop uses reverse creation order; config-free operations do not reconstruct
+the dependency graph or wait for readiness. Use `project up --wait` for that.
+Successful lifecycle operations print full IDs. Individual failures are aggregated
+and return 125 while other selected services continue; cancellation or output errors
+stop further work. Exec forwards its command's exit status and affects only that
+exec session. Flags precede the project name. All scoped help forms are equivalent.
 
 ### Project logs
 

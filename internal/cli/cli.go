@@ -46,8 +46,8 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	if r.Action == "cp" {
 		return executeCopy(r, stderr)
 	}
-	if r.Action == "project-logs" || r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
-		return executeProject(r, stdout, stderr)
+	if r.Action == "project-exec" || r.Action == "project-start" || r.Action == "project-stop" || r.Action == "project-restart" || r.Action == "project-logs" || r.Action == "project-validate" || r.Action == "project-up" || r.Action == "project-down" || r.Action == "project-ps" {
+		return executeProject(r, stdout, stderr, stdin)
 	}
 	if handled, code := executePlatform(args, r, stdin, stdout, stderr); handled {
 		return code
@@ -71,7 +71,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return executeManagement(r, stdout, stderr)
 	case "project-reservations", "project-records", "project-status", "project-resource", "project-replace", "project-preflight", "project-start-preflight":
 		return executeManagement(r, stdout, stderr)
-	case "system-df":
+	case "events", "system-df":
 		return executeManagement(r, stdout, stderr)
 	case "volume-create", "volume-ls", "volume-inspect", "volume-rm", "volume-export", "volume-restore":
 		return executeManagement(r, stdout, stderr, stdin)

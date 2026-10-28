@@ -277,6 +277,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	if err := syncDirectory(store.root); err != nil {
 		return Record{}, err
 	}
+	store.publishEventsLocked(lifecycleEvents(eventSnapshot{}, record))
 	return record, nil
 }
 
@@ -458,6 +459,7 @@ func (store *Store) Update(ctx context.Context, id string, update func(*Record) 
 	if err != nil {
 		return err
 	}
+	before := snapshotEvents(record)
 	originalName := record.Name
 	labels := maps.Clone(record.Labels)
 	if err := update(&record); err != nil {
@@ -472,7 +474,7 @@ func (store *Store) Update(ctx context.Context, id string, update func(*Record) 
 	if err := validateRecord(record, id); err != nil {
 		return err
 	}
-	return store.writeJSON(filepath.Join(store.root, id), "state.json", record, maxRecordBytes)
+	return store.writeStateEvents(id, before, record)
 }
 
 func (store *Store) Config(ctx context.Context, id string) (config.Config, error) {
@@ -595,6 +597,7 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if err := syncDirectory(store.root); err != nil {
 		return err
 	}
+	store.publishEventsLocked([]Event{newLifecycleEvent(record, "remove")})
 	// Publication is complete. Recursive deletion is fenced by the stable
 	// transaction lock, so logs and metadata for other containers can proceed.
 	lock.Close()

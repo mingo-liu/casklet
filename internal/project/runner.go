@@ -96,7 +96,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	}
 	parent := ctx
 	failureCaptured, deadlineFailure := false, false
-	if options.Wait {
+	if options.Wait || plan.HasTasks() {
 		var cancel context.CancelFunc
 		if options.Deadline.IsZero() {
 			ctx, cancel = context.WithTimeout(ctx, options.Timeout)
@@ -141,6 +141,11 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 				}
 				if !matches && !selected[service.Key] && !options.DryRun {
 					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
+				}
+				if service.Task && record.Terminal() && !selected[service.Key] && !options.DryRun {
+					if _, e := taskResult(service.Key, record.State, record.ExitCode, record.ExitReason, record.CleanupFailures); e != nil {
+						return nil, e
+					}
 				}
 				matching[service.Key] = matches
 				existing[service.Key] = record
@@ -267,7 +272,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		for _, service := range plan.Services {
 			if record, found := existing[service.Key]; found && !selected[service.Key] {
-				if record.State != container.StateRunning {
+				if record.State != container.StateRunning && !service.Task {
 					args, err := runner.retainedPreflightArguments(ctx, record, plan.Name, service.Key)
 					if err != nil {
 						return nil, err
@@ -386,7 +391,11 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		sort.Strings(dependencies)
 		for _, dep := range dependencies {
-			if service.DependsOn[dep] == "healthy" {
+			if service.DependsOn[dep] == "completed" {
+				if err = runner.waitTask(ctx, plan.Name, dep, executions[dep]); err != nil {
+					return nil, err
+				}
+			} else if service.DependsOn[dep] == "healthy" {
 				if _, err = runner.Call(ctx, "wait", "--healthy", "--timeout", options.Timeout.String(), ids[dep]); err != nil {
 					return nil, fmt.Errorf("service %q dependency %q did not become healthy: %w", service.Key, dep, err)
 				}
@@ -403,7 +412,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		if record, ok := existing[service.Key]; ok {
 			ids[service.Key] = record.ID
-			if record.State != container.StateRunning {
+			if record.State != container.StateRunning && !service.Task {
 				if _, err = runner.Call(ctx, "start", record.ID); err != nil {
 					return nil, err
 				}
@@ -427,17 +436,22 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			}
 			ids[service.Key] = id
 		}
-		if options.Wait {
+		if options.Wait || service.Task {
 			inspection, e := runner.inspectService(ctx, service.Key, ids[service.Key])
 			if e != nil {
 				return nil, e
 			}
-			if record, reused := existing[service.Key]; reused && record.State == container.StateRunning && record.Generation != inspection.Generation {
+			if record, reused := existing[service.Key]; reused && (record.State == container.StateRunning || service.Task) && record.Generation != inspection.Generation {
 				return nil, fmt.Errorf("service %q execution changed during startup", service.Key)
 			}
 			health := inspection.Config.Healthcheck
-			executions[service.Key] = serviceExecution{ID: inspection.ID, Generation: inspection.Generation,
+			executions[service.Key] = serviceExecution{Task: service.Task, ID: inspection.ID, Generation: inspection.Generation,
 				Healthcheck: health != nil && len(health.Test) > 0 && health.Test[0] != "NONE"}
+		}
+		if service.Task {
+			if err = runner.waitTask(ctx, plan.Name, service.Key, executions[service.Key]); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if options.Wait {
@@ -449,7 +463,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	if err != nil {
 		return nil, err
 	}
-	if options.Wait && ctx.Err() != nil {
+	if (options.Wait || plan.HasTasks()) && ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	records = Managed(all, plan.Name)
@@ -460,9 +474,17 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		if previous, reused := existing[record.Labels[LabelService]]; reused && previous.State == container.StateRunning && record.Generation != previous.Generation {
 			return nil, errors.New("project service execution changed during startup")
 		}
-		if options.Wait {
+		if options.Wait || executions[record.Labels[LabelService]].Task {
 			execution := executions[record.Labels[LabelService]]
-			if record.Generation != execution.Generation || !execution.ready(record.State, record.Health) {
+			ready := execution.ready(record.State, record.Health)
+			if execution.Task {
+				var e error
+				ready, e = taskResult(record.Labels[LabelService], record.State, record.ExitCode, record.ExitReason, record.CleanupFailures)
+				if e != nil {
+					return nil, e
+				}
+			}
+			if record.Generation != execution.Generation || !ready {
 				return nil, errors.New("project service readiness changed during startup")
 			}
 		}

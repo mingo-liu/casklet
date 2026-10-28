@@ -48,7 +48,7 @@ func writeProjectStatus(out io.Writer, records []container.Record) error {
 	}
 	result := make([]project.ServiceStatus, 0, len(records))
 	for _, record := range records {
-		status := project.ServiceStatus{ID: record.ID, Project: record.Labels[project.LabelName], Service: record.Labels[project.LabelService], Generation: record.Generation, State: record.State}
+		status := project.ServiceStatus{ExitCode: record.ExitCode, ExitReason: record.ExitReason, CleanupFailures: record.CleanupFailures, ID: record.ID, Project: record.Labels[project.LabelName], Service: record.Labels[project.LabelService], Generation: record.Generation, State: record.State}
 		if record.Health != nil {
 			status.Health = record.Health.Status
 		}

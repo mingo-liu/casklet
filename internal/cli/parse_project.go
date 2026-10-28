@@ -20,7 +20,7 @@ import (
 
 func parseProject(r Request, args []string) (Request, error) {
 	if len(args) == 0 {
-		return r, errors.New("project requires validate, up, down, ps, or logs")
+		return r, errors.New("project requires validate, up, down, ps, logs, exec, start, stop, or restart")
 	}
 	if args[0] == "--help" || args[0] == "-h" {
 		if len(args) != 1 {
@@ -29,6 +29,9 @@ func parseProject(r Request, args []string) (Request, error) {
 		return helpRequest([]string{"project"})
 	}
 	r.Action = "project-" + args[0]
+	if args[0] == "exec" {
+		return parseExecOperands(r, args[1:], 2)
+	}
 	fs := flag.NewFlagSet(r.Action, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	switch args[0] {
@@ -43,6 +46,16 @@ func parseProject(r Request, args []string) (Request, error) {
 		fs.StringVar(&r.ProjectConfig, "config", "", "project JSON file")
 		fs.DurationVar(&r.WaitTimeout, "timeout", 30*time.Second, "dependency health wait deadline")
 		fs.BoolVar(&r.JSON, "json", false, "print JSON records")
+	case "stop", "restart":
+		fs.Func("timeout", "graceful shutdown override", func(value string) error {
+			duration, err := time.ParseDuration(value)
+			if err != nil {
+				return err
+			}
+			r.StopTimeout = &duration
+			return nil
+		})
+	case "start":
 	case "down":
 		fs.BoolVar(&r.RemoveVolumes, "volumes", false, "also remove project-owned data volumes")
 	case "logs":
@@ -87,6 +100,28 @@ func parseProject(r Request, args []string) (Request, error) {
 		if (explicit && r.Tail < 0) || r.Tail > 1000000 {
 			return r, errors.New("--tail must be between 0 and 1000000")
 		}
+	}
+	if args[0] == "start" || args[0] == "stop" || args[0] == "restart" {
+		if fs.NArg() < 1 {
+			return r, errors.New("project lifecycle command requires PROJECT [SERVICE ...]")
+		}
+		r.Reference, r.Services = fs.Arg(0), fs.Args()[1:]
+		if r.StopTimeout != nil {
+			if err := config.ValidateStopTimeout(*r.StopTimeout); err != nil {
+				return r, err
+			}
+		}
+		if len(r.Services) > 64 {
+			return r, errors.New("project operations support at most 64 services")
+		}
+		seen := map[string]bool{}
+		for _, key := range r.Services {
+			if project.ValidateName(key) != nil || seen[key] {
+				return r, errors.New("invalid or duplicate project service selection")
+			}
+			seen[key] = true
+		}
+		return r, project.ValidateName(r.Reference)
 	}
 	if fs.NArg() != 1 {
 		return r, errors.New("project command requires exactly one project name; flags precede it")
@@ -210,8 +245,8 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				return plan, errors.New("io.casklet.project.* labels are reserved")
 			}
 		}
-		if len(request.Config.Labels) > 60 {
-			return plan, errors.New("project services support at most 60 user labels")
+		if len(request.Config.Labels) > 60 || service.Task && len(request.Config.Labels) > 59 {
+			return plan, errors.New("project services support at most 60 user labels (59 for tasks)")
 		}
 		for _, port := range request.Config.Publish {
 			for _, previous := range published {
@@ -220,6 +255,28 @@ func readProjectPlan(filename string) (project.Plan, error) {
 				}
 			}
 			published = append(published, port)
+		}
+		if service.Task {
+			if request.Config.RestartMode() != "no" {
+				return plan, fmt.Errorf("task %q requires restart=no", key)
+			}
+			h := request.Config.Healthcheck
+			if h != nil && (len(h.Test) == 0 || h.Enabled()) {
+				return plan, fmt.Errorf("task %q cannot enable health checks", key)
+			}
+			request.Config.Healthcheck = &config.HealthConfig{Test: []string{"NONE"}}
+			if request.Config.Labels == nil {
+				request.Config.Labels = map[string]string{}
+			}
+			request.Config.Labels[project.LabelTask] = "true"
+			end := len(args)
+			for i, arg := range args {
+				if arg == "--" {
+					end = i
+					break
+				}
+			}
+			args = append(append(append([]string(nil), args[:end]...), "--no-healthcheck", "--label", project.LabelTask+"=true"), args[end:]...)
 		}
 		// Keep absence distinct from explicit overrides of image-provided defaults.
 		request.Config.Env = canonicalProjectEnvironment(request.Config.Env)
@@ -248,7 +305,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		if _, err := Parse(validationArgs); err != nil {
 			return plan, fmt.Errorf("invalid generated configuration for service %q", key)
 		}
-		plan.Services = append(plan.Services, project.Service{Config: request.Config, Fields: project.FieldDigests(request.Config, request.Entrypoint), Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
+		plan.Services = append(plan.Services, project.Service{Task: service.Task, Config: request.Config, Fields: project.FieldDigests(request.Config, request.Entrypoint), Key: key, Name: name, Args: args, Fingerprint: fingerprint, DependsOn: service.DependsOn,
 			MatchLegacyFingerprint: func(saved string, aliases []string) bool {
 				// The store appends the container name if it is not already an
 				// explicit alias. It was absent from that legacy config hash.

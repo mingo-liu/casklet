@@ -16,6 +16,7 @@ Commands:
   inspect   Show a container's configuration and lifecycle as JSON
   stats     Sample or monitor container memory and CPU usage
   logs      Read or follow retained container output
+  events    Read or follow retained lifecycle events
   stop      Stop a container gracefully
   wait      Wait for container exit or health
   start     Start a stopped container with its retained files
@@ -112,6 +113,109 @@ Notes:
 `
 
 var commandHelp = map[string]string{
+	"events": `Usage: casklet events [OPTIONS]
+
+Options:
+  --json           Print one schema_version:1 JSON object per event (NDJSON)
+  -f, --follow     Follow future events until canceled
+  --since TIME     Include retained events at/after RFC3339 time (nanoseconds allowed)
+  --after SEQUENCE Resume after a global sequence; 0 replays retained history
+  --filter FILTER  event=TYPE, container=FULL_ID|EXACT_NAME, project=NAME,
+                   or service=KEY; repeat (AND)
+  -h, --help       Show this help
+
+Notes:
+  Default: snapshot the last 1024 retained container events. Follow starts with
+  future events unless --since or --after is present. Names can match reused names;
+  use a full immutable ID for one container. Filters are ANDed.
+  Types: create, starting, start, stopping, exit, restart, stop_requested,
+  restart_scheduled, health, cleanup_failed, remove. restart marks a new generation.
+  Global sequences survive VM reboots. Resume/follow errors explicitly on retention
+  overrun or a newer-store cursor. --since cannot recover discarded history.
+  Commands, environment values, probe output and raw private errors are excluded.
+  Cancellation and stdout failure release readers; workloads keep running.
+  History begins with this engine; older supervisors do not emit new transitions.
+  State and events publish separately: crashes can leave gaps. Recording failures
+  warn without blocking lifecycle cleanup and attempt an incomplete-history marker;
+  readers refuse marked history. This is not a complete audit log.
+
+Examples:
+  casklet events --filter project=demo --json
+  casklet events --follow --json
+  casklet events --after 120 --follow --filter event=exit
+`,
+
+	"project exec": `Usage: casklet project exec [OPTIONS] PROJECT SERVICE -- COMMAND [ARGS...]
+
+Options:
+  -i, --interactive  Forward stdin
+  -t, --tty          Allocate a terminal; -it combines both
+  --env KEY=VALUE    Override environment; repeat
+  --env-file FILE    Read local environment assignments; repeat
+  --workdir PATH     Override the working directory
+  --timeout DURATION  Limit the command duration; 0 disables it
+  -h, --help         Show this help
+
+Notes:
+  Flags precede PROJECT. SERVICE is a logical project key, not a container name.
+  Pins a full container ID after ownership checks. Requires a running service.
+  Uses ordinary exec terminal, signal and exit-status semantics; the main workload
+  remains running. Status and exec remain available during project deployments.
+
+Examples:
+  casklet project exec -it demo api -- /bin/sh
+  casklet project exec --env MODE=check demo api -- /app/check
+`,
+	"project start": `Usage: casklet project start PROJECT [SERVICE ...]
+
+Notes:
+  Omit SERVICE to select the managed project. Uses logical service keys.
+  Pins full IDs, validates all selections before changes, and serializes with up/down.
+  Starts retained containers in creation order; running containers are reused.
+  Does not apply configuration changes or dependency/health waits; use project up.
+  Default start skips tasks; select a task explicitly to rerun it.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Persistent data is retained.
+
+Examples:
+  casklet project start demo
+  casklet project start demo api worker
+`,
+	"project stop": `Usage: casklet project stop [--timeout DURATION] PROJECT [SERVICE ...]
+
+Options:
+  --timeout DURATION  Override graceful shutdown, 0s-1m
+
+Notes:
+  Uses logical service keys; omitting them selects the managed project.
+  Validates selection and pins full IDs before changes; serializes with up/down.
+  Stops in reverse creation order and preserves roots, logs, networks and volumes.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Flags precede PROJECT.
+
+Examples:
+  casklet project stop demo
+  casklet project stop --timeout 10s demo api
+`,
+	"project restart": `Usage: casklet project restart [--timeout DURATION] PROJECT [SERVICE ...]
+
+Options:
+  --timeout DURATION  Override graceful shutdown, 0s-1m
+
+Notes:
+  Uses logical service keys; omitting them selects the managed project.
+  Validates selection and pins full IDs before changes; serializes with up/down.
+  Restarts retained commands in creation order, preserving roots and persistent data.
+  Does not apply new configuration or dependency/health waits; use project up.
+  Default restart skips tasks; select a task explicitly to rerun it.
+  Prints completed IDs. Per-service errors are aggregated; partial failure returns 125.
+  Cancellation/output errors stop further work. Flags precede PROJECT.
+
+Examples:
+  casklet project restart demo
+  casklet project restart --timeout 10s demo api worker
+`,
+
 	"cp": `Usage: casklet cp [--] SOURCE DESTINATION
        casklet cp LOCAL_PATH ID|NAME:PATH
        casklet cp ID|NAME:PATH LOCAL_PATH
@@ -453,6 +557,8 @@ Commands:
   down  Stop and remove managed containers and owned networks
   ps    Show all retained containers belonging to a project
   logs  Read or follow output grouped by logical service
+  exec  Run a command in one logical service
+  start/stop/restart  Operate on retained project services
 
 Notes:
   Project names and logical service/resource names use lowercase DNS labels.
@@ -538,6 +644,15 @@ Notes:
   Wait pins each service ID/generation; exit, removal or restart fails readiness.
   Its deadline covers the local project lock, startup and readiness after parsing.
   A deployment deadline returns 124 after bounded rollback; other failures return 125.
+
+Task notes:
+  Set service task:true and use depends-on:{"migrate":"completed"} for one-shot jobs.
+  Tasks require restart=no and no health checks; inherited image checks are disabled.
+  Up waits for every task under the shared --timeout, even without --wait.
+  Successful matching tasks are reused. Existing failed tasks block deployment;
+  select them with project restart or up --recreate to rerun explicitly.
+  Task failures retain their nonzero exit status; deployment deadlines return 124.
+  Preview can report reuse/task_completed or blocked/task_failed.
 
 Examples:
   casklet project up --config project.json

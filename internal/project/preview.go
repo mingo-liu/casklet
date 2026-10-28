@@ -96,6 +96,17 @@ func (runner *Runner) serviceChange(service Service, record container.Record, fo
 		change.Action, change.Reason = "start", "service_stopped"
 	}
 	if matches && !selected {
+		if service.Task {
+			change.Action, change.Reason = "reuse", "task_running"
+			if record.Terminal() {
+				_, err := taskResult(service.Key, record.State, record.ExitCode, record.ExitReason, record.CleanupFailures)
+				if err == nil {
+					change.Reason = "task_completed"
+				} else {
+					change.Action, change.Reason = "blocked", "task_failed"
+				}
+			}
+		}
 		return change
 	}
 	change.Action, change.Reason = "recreate", "explicit_recreate"

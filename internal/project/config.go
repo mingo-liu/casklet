@@ -18,6 +18,7 @@ const LabelName = LabelPrefix + "name"
 const LabelService = LabelPrefix + "service"
 const LabelSpec = LabelPrefix + "spec"
 const LabelTransaction = LabelPrefix + "transaction"
+const LabelTask = LabelPrefix + "task"
 
 var dnsName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -42,11 +43,13 @@ type Document struct {
 }
 
 type ServiceConfig struct {
+	Task      bool              `json:"task,omitempty"`
 	Run       json.RawMessage   `json:"run"`
 	DependsOn map[string]string `json:"depends-on"`
 }
 
 type Service struct {
+	Task   bool
 	Config config.Config
 	Fields map[string]string
 
@@ -136,8 +139,14 @@ func Decode(data []byte) (Document, error) {
 			if _, exists := doc.Services[dependency]; !exists || dependency == key {
 				return doc, fmt.Errorf("service %q has an invalid dependency", key)
 			}
-			if condition != "started" && condition != "healthy" {
-				return doc, errors.New("dependency condition must be started or healthy")
+			if condition == "completed" && !doc.Services[dependency].Task {
+				return doc, errors.New("completed dependencies require a task")
+			}
+			if doc.Services[dependency].Task && condition != "completed" {
+				return doc, errors.New("task dependencies require completed condition")
+			}
+			if condition != "started" && condition != "healthy" && condition != "completed" {
+				return doc, errors.New("dependency condition must be started, healthy, or completed")
 			}
 		}
 	}
@@ -227,4 +236,14 @@ func (doc Document) Order() ([]string, error) {
 		}
 	}
 	return order, nil
+}
+
+// HasTasks determines whether up needs a completion deadline without --wait.
+func (plan Plan) HasTasks() bool {
+	for _, service := range plan.Services {
+		if service.Task {
+			return true
+		}
+	}
+	return false
 }

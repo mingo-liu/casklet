@@ -137,6 +137,15 @@ After removing services from the configuration, use `project up --remove-orphans
 to delete those containers while retaining matching running services and persistent
 data. Add `--dry-run` to preview the removals first.
 
+Operate on logical service keys with `project exec`, `project start`, `project stop`
+and `project restart`; see [service operations](guides/usage.md#project-service-operations).
+
+Project configurations also support [one-shot tasks](guides/usage.md#one-shot-project-tasks)
+and successful-completion dependencies, for example migrations before application startup.
+
+Use [lifecycle events](guides/usage.md#lifecycle-events) to replay recent container
+changes or subscribe with `casklet events --follow --json`.
+
 ## Capabilities
 
 See the [usage guide](guides/usage.md) for full examples, defaults, and limits.
