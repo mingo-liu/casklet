@@ -27,6 +27,50 @@ type registryFixture struct {
 	MetricsURL string
 }
 
+func TestImagePullProgressThroughVMAndHostTerminal(t *testing.T) {
+	client(t)
+	fixture := progressRegistryDetails(t)
+	refs := fixture.References
+	out, stderr, code := command(t, "image", "pull", refs[0])
+	if code != 0 || image.ValidateID(strings.TrimSpace(out)) != nil || strings.Count(out, "\n") != 1 {
+		t.Fatalf("plain image result: %d %q %q", code, out, stderr)
+	}
+	id := strings.TrimSpace(out)
+	t.Cleanup(func() { command(t, "image", "rm", id) })
+	for _, phase := range []string{"Pulling", "Downloading", "Extracting", "Pull complete", "Image ready:"} {
+		if !strings.Contains(stderr, phase) {
+			t.Fatalf("plain pull missing %s: %q", phase, stderr)
+		}
+	}
+	if strings.ContainsAny(stderr, "\x1b\r") {
+		t.Fatalf("non-terminal output contains controls: %q", stderr)
+	}
+	before := layerDownloadCounts(t, fixture)
+	for _, digest := range fixture.Layers {
+		if before[digest] != 1 {
+			t.Fatalf("cold pull downloaded layer %s %d times", digest, before[digest])
+		}
+	}
+	ttyOut, ttyStderr := ttyImagePull(t, refs[1])
+	if ttyOut != id+"\n" || !strings.Contains(ttyStderr, "\x1b[1A") || !strings.Contains(ttyStderr, "Already exists") || strings.Contains(ttyStderr, "Downloading") || !strings.Contains(ttyStderr, "Extracting [") {
+		t.Fatalf("host TTY progress or stream separation: %q %q", ttyOut, ttyStderr)
+	}
+	after := layerDownloadCounts(t, fixture)
+	for _, digest := range fixture.Layers {
+		if after[digest] != before[digest] {
+			t.Fatalf("warm pull downloaded shared layer %s again: %d -> %d", digest, before[digest], after[digest])
+		}
+	}
+	out, stderr, code = command(t, "image", "pull", "--progress=plain", refs[1])
+	if code != 0 || out != id+"\n" || !strings.Contains(stderr, "Image is up to date") || strings.ContainsAny(stderr, "\x1b\r") {
+		t.Fatalf("refresh progress: %d %q %q", code, out, stderr)
+	}
+	out, stderr, code = command(t, "run", "--image", refs[0])
+	if code != 0 || out != "image-progress-ok\n" || !strings.Contains(stderr, "Using cached image") || strings.Contains(stderr, "Downloading") {
+		t.Fatalf("cached run progress: %d %q %q", code, out, stderr)
+	}
+}
+
 func progressRegistry(t *testing.T) []string {
 	t.Helper()
 	return progressRegistryDetails(t).References
@@ -134,48 +178,4 @@ func ttyImagePull(t *testing.T, ref string) (string, string) {
 		}
 	}
 	return stdout.String(), stderr.String()
-}
-
-func TestImagePullProgressThroughVMAndHostTerminal(t *testing.T) {
-	client(t)
-	fixture := progressRegistryDetails(t)
-	refs := fixture.References
-	out, stderr, code := command(t, "image", "pull", refs[0])
-	if code != 0 || image.ValidateID(strings.TrimSpace(out)) != nil || strings.Count(out, "\n") != 1 {
-		t.Fatalf("plain image result: %d %q %q", code, out, stderr)
-	}
-	id := strings.TrimSpace(out)
-	t.Cleanup(func() { command(t, "image", "rm", id) })
-	for _, phase := range []string{"Pulling", "Downloading", "Extracting", "Pull complete", "Image ready:"} {
-		if !strings.Contains(stderr, phase) {
-			t.Fatalf("plain pull missing %s: %q", phase, stderr)
-		}
-	}
-	if strings.ContainsAny(stderr, "\x1b\r") {
-		t.Fatalf("non-terminal output contains controls: %q", stderr)
-	}
-	before := layerDownloadCounts(t, fixture)
-	for _, digest := range fixture.Layers {
-		if before[digest] != 1 {
-			t.Fatalf("cold pull downloaded layer %s %d times", digest, before[digest])
-		}
-	}
-	ttyOut, ttyStderr := ttyImagePull(t, refs[1])
-	if ttyOut != id+"\n" || !strings.Contains(ttyStderr, "\x1b[1A") || !strings.Contains(ttyStderr, "Already exists") || strings.Contains(ttyStderr, "Downloading") || !strings.Contains(ttyStderr, "Extracting [") {
-		t.Fatalf("host TTY progress or stream separation: %q %q", ttyOut, ttyStderr)
-	}
-	after := layerDownloadCounts(t, fixture)
-	for _, digest := range fixture.Layers {
-		if after[digest] != before[digest] {
-			t.Fatalf("warm pull downloaded shared layer %s again: %d -> %d", digest, before[digest], after[digest])
-		}
-	}
-	out, stderr, code = command(t, "image", "pull", "--progress=plain", refs[1])
-	if code != 0 || out != id+"\n" || !strings.Contains(stderr, "Image is up to date") || strings.ContainsAny(stderr, "\x1b\r") {
-		t.Fatalf("refresh progress: %d %q %q", code, out, stderr)
-	}
-	out, stderr, code = command(t, "run", "--image", refs[0])
-	if code != 0 || out != "image-progress-ok\n" || !strings.Contains(stderr, "Using cached image") || strings.Contains(stderr, "Downloading") {
-		t.Fatalf("cached run progress: %d %q %q", code, out, stderr)
-	}
 }

@@ -19,7 +19,7 @@ import (
 func TestProjectRemoveOrphansPreservesRunningServicesAndData(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
-	source := template
+	source := _template
 	name := fmt.Sprintf("orphans-%x", time.Now().UnixNano())
 	file := filepath.Join(t.TempDir(), "project.json")
 	services := map[string]any{

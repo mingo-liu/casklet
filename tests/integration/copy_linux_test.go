@@ -90,16 +90,16 @@ func TestCopyCancellationProtectsOldFileAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
-	defer output.Close()
-	cmd := exec.CommandContext(ctx, binary, "__copy-in", id, "/value")
+	defer func() { _ = input.Close() }()
+	defer func() { _ = output.Close() }()
+	cmd := exec.CommandContext(ctx, _binary, "__copy-in", id, "/value")
 	cmd.Stdin = input
 	var diagnostic bytes.Buffer
 	cmd.Stderr = &diagnostic
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	tw := tar.NewWriter(output)
 	if err := tw.WriteHeader(&tar.Header{Name: "source", Typeflag: tar.TypeReg, Mode: 0600, Size: 1 << 20}); err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestCopyCancellationProtectsOldFileAndLifecycle(t *testing.T) {
 	operation, err := store.AcquireOperation(lockCtx, id)
 	lockCancel()
 	if operation != nil {
-		operation.Close()
+		_ = operation.Close()
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("copy did not fence lifecycle: %v", err)
@@ -148,14 +148,16 @@ func TestCopyCancellationProtectsOldFileAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	operation.Close()
+	_ = operation.Close()
 	backgroundSuccess(t, "start", id)
 }
 
 func TestCopyWithoutContainerToolsAndArchiveEscape(t *testing.T) {
 	require(t)
 	tree := t.TempDir()
-	os.Chmod(tree, 0755)
+	if err := os.Chmod(tree, 0755); err != nil {
+		t.Fatal(err)
+	}
 	helper, err := os.ReadFile(os.Getenv("CASKLET_HELPER"))
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +167,9 @@ func TestCopyWithoutContainerToolsAndArchiveEscape(t *testing.T) {
 	}
 	id := backgroundID(t, backgroundSuccess(t, "run", "-d", "--name", backgroundName(t), "--rootfs", tree, "--", "/app", "copy-hold"))
 	local := filepath.Join(t.TempDir(), "payload")
-	os.WriteFile(local, []byte("no tools"), 0600)
+	if err := os.WriteFile(local, []byte("no tools"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	backgroundSuccess(t, "cp", local, id+":/value")
 	out := filepath.Join(t.TempDir(), "out")
 	backgroundSuccess(t, "cp", id+":/value", out)
@@ -174,11 +178,13 @@ func TestCopyWithoutContainerToolsAndArchiveEscape(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	tw.WriteHeader(&tar.Header{Name: "../escape", Typeflag: tar.TypeReg, Mode: 0600})
-	tw.Close()
+	if err := tw.WriteHeader(&tar.Header{Name: "../escape", Typeflag: tar.TypeReg, Mode: 0600}); err != nil {
+		t.Fatal(err)
+	}
+	_ = tw.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "__copy-in", id, "/safe")
+	cmd := exec.CommandContext(ctx, _binary, "__copy-in", id, "/safe")
 	cmd.Stdin = &buf
 	if output, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(output), "invalid copy root") {
 		t.Fatalf("archive escape %v %s", err, output)

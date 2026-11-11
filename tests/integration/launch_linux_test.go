@@ -35,10 +35,10 @@ func TestLaunchAutomaticScope(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			args := append([]string{"run", "--rootfs", template}, test.options...)
+			args := append([]string{"run", "--rootfs", _template}, test.options...)
 			args = append(args, "--")
 			args = append(args, test.command...)
-			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd := exec.CommandContext(ctx, _binary, args...)
 			cmd.Env = append(os.Environ(), "CASKLET_SCOPE_LAUNCHED=")
 			cmd.Stdin = strings.NewReader(test.input)
 			var stdout, stderr strings.Builder
@@ -67,13 +67,13 @@ func TestLaunchAutomaticScope(t *testing.T) {
 			}
 		})
 	}
-	backgroundSuccess(t, "doctor", "--rootfs", template)
+	backgroundSuccess(t, "doctor", "--rootfs", _template)
 }
 
 func TestLaunchScopeFailureDoesNotRecurse(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_SCOPE_LAUNCHED", "1")
-	code, out, stderr := backgroundCLI(t, "doctor", "--rootfs", template)
+	code, out, stderr := backgroundCLI(t, "doctor", "--rootfs", _template)
 	if code != 125 || out != "" || !strings.Contains(stderr, "automatic cgroup delegation failed:") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}

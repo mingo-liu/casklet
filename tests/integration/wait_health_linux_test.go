@@ -26,7 +26,7 @@ func TestWaitHealthyReadinessAndFailures(t *testing.T) {
 	// A delayed transition must keep the wait pending across unhealthy samples.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "wait", "--healthy", "--timeout", "5s", id[:12])
+	cmd := exec.CommandContext(ctx, _binary, "wait", "--healthy", "--timeout", "5s", id[:12])
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
@@ -34,7 +34,8 @@ func TestWaitHealthyReadinessAndFailures(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() { cancel(); <-done })
+	//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+	t.Cleanup(func() { cancel(); _ = <-done })
 	select {
 	case err := <-done:
 		done <- err
@@ -72,7 +73,7 @@ func TestWaitHealthyCancellationLeavesWorkloadRunning(t *testing.T) {
 	awaitHealth(t, id, container.HealthUnhealthy)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "wait", "--healthy", "--timeout", "0s", id)
+	cmd := exec.CommandContext(ctx, _binary, "wait", "--healthy", "--timeout", "0s", id)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
@@ -80,7 +81,8 @@ func TestWaitHealthyCancellationLeavesWorkloadRunning(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() { cancel(); <-done })
+	//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+	t.Cleanup(func() { cancel(); _ = <-done })
 	time.Sleep(200 * time.Millisecond)
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)

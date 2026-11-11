@@ -16,30 +16,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func macProjectConfig(t *testing.T, name string, ready bool) string {
-	t.Helper()
-	probe := "wget -T 1 -qO- http://127.0.0.1:8080"
-	if !ready {
-		probe = "exit 1"
-	}
-	document := map[string]any{
-		"name": name, "volumes": []string{"data"},
-		"services": map[string]any{
-			"db":  map[string]any{"run": map[string]any{"network-alias": []string{"database", "primary"}, "mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
-			"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"command": []string{"/bin/sleep", "300"}}},
-		},
-	}
-	data, err := json.Marshal(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(hostDirectory(t), "project.json")
-	if err := os.WriteFile(file, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	return file
-}
-
 func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	client(t)
 	name := fmt.Sprintf("deploy-%x", time.Now().UnixNano())
@@ -157,6 +133,30 @@ func TestProjectCancellationCleansOnlyNewResources(t *testing.T) {
 	for _, wait := range []bool{false, true} {
 		t.Run(fmt.Sprintf("wait-%v", wait), func(t *testing.T) { projectCancellation(t, wait) })
 	}
+}
+
+func macProjectConfig(t *testing.T, name string, ready bool) string {
+	t.Helper()
+	probe := "wget -T 1 -qO- http://127.0.0.1:8080"
+	if !ready {
+		probe = "exit 1"
+	}
+	document := map[string]any{
+		"name": name, "volumes": []string{"data"},
+		"services": map[string]any{
+			"db":  map[string]any{"run": map[string]any{"network-alias": []string{"database", "primary"}, "mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
+			"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"command": []string{"/bin/sleep", "300"}}},
+		},
+	}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(hostDirectory(t), "project.json")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return file
 }
 
 func projectCancellation(t *testing.T, wait bool) {

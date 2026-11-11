@@ -26,126 +26,6 @@ type execInvocation struct {
 	waited         bool
 }
 
-func startExec(t *testing.T, input string, options []string, reference string, command ...string) *execInvocation {
-	t.Helper()
-	require(t)
-	args := append([]string{"exec"}, options...)
-	args = append(args, reference, "--")
-	args = append(args, command...)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	stdout, err := os.CreateTemp(t.TempDir(), "exec-stdout-")
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	stderr, err := os.CreateTemp(t.TempDir(), "exec-stderr-")
-	if err != nil {
-		cancel()
-		stdout.Close()
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=exec-host-only-secret")
-	call := &execInvocation{cmd: cmd, stdout: stdout, stderr: stderr, done: make(chan error, 1), cancel: cancel}
-	t.Cleanup(func() {
-		cancel()
-		if !call.waited && cmd.Process != nil {
-			select {
-			case <-call.done:
-			case <-time.After(5 * time.Second):
-				t.Error("exec client did not terminate during cleanup")
-			}
-		}
-		stdout.Close()
-		stderr.Close()
-	})
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	go func() { call.done <- cmd.Wait() }()
-	return call
-}
-
-func (call *execInvocation) wait(t *testing.T) (int, string, string) {
-	t.Helper()
-	var err error
-	select {
-	case err = <-call.done:
-		call.waited = true
-	case <-time.After(12 * time.Second):
-		out, _ := os.ReadFile(call.stdout.Name())
-		stderr, _ := os.ReadFile(call.stderr.Name())
-		t.Fatalf("exec did not terminate within its cleanup deadline: stdout=%q stderr=%q", out, stderr)
-	}
-	call.cancel()
-	code := 0
-	if err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatalf("wait for exec: %v", err)
-		}
-		code = exit.ExitCode()
-	}
-	out, outErr := os.ReadFile(call.stdout.Name())
-	stderr, errErr := os.ReadFile(call.stderr.Name())
-	if outErr != nil || errErr != nil {
-		t.Fatalf("read exec output: %v %v", outErr, errErr)
-	}
-	return code, string(out), string(stderr)
-}
-
-func (call *execInvocation) ready(t *testing.T, marker string) string {
-	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		out, err := os.ReadFile(call.stdout.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(out), marker) {
-			return string(out)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	out, _ := os.ReadFile(call.stdout.Name())
-	stderr, _ := os.ReadFile(call.stderr.Name())
-	t.Fatalf("exec did not become ready (%s): stdout=%q stderr=%q", marker, out, stderr)
-	return ""
-}
-
-func execSuccess(t *testing.T, options []string, reference string, command ...string) string {
-	t.Helper()
-	code, out, stderr := startExec(t, "", options, reference, command...).wait(t)
-	if code != 0 {
-		t.Fatalf("exec %q exit=%d stdout=%q stderr=%q", command, code, out, stderr)
-	}
-	return out
-}
-
-func execContainer(t *testing.T, options []string) (string, string) {
-	t.Helper()
-	name := backgroundName(t)
-	id := startBackground(t, name, options, "/bin/sh", "-c", "echo main-ready; sleep 60")
-	waitBackground(t, id, "running")
-	return name, id
-}
-
-func execCgroup(t *testing.T, output string) string {
-	t.Helper()
-	for _, line := range strings.Split(output, "\n") {
-		if relative, ok := strings.CutPrefix(line, "0::/"); ok {
-			if relative == "" || strings.Contains(relative, "..") {
-				t.Fatalf("unsafe exec cgroup path %q", relative)
-			}
-			return filepath.Join("/sys/fs/cgroup", relative)
-		}
-	}
-	t.Fatalf("exec did not publish a cgroups v2 path: %q", output)
-	return ""
-}
-
 func TestExecCleanupFailureReturnsNonzeroAndPreservesCommandStatus(t *testing.T) {
 	for _, status := range []int{0, 7} {
 		t.Run(fmt.Sprintf("exit-%d", status), func(t *testing.T) {
@@ -218,7 +98,7 @@ echo namespaces-ok`)
 	if out := execSuccess(t, nil, id, "/bin/cat", "/tmp/exec-shared"); out != "shared-filesystem" {
 		t.Fatalf("exec did not share the running filesystem: %q", out)
 	}
-	if _, err := os.Stat(filepath.Join(template, "tmp", "exec-shared")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(_template, "tmp", "exec-shared")); !os.IsNotExist(err) {
 		t.Fatalf("exec modified the original template: %v", err)
 	}
 	waitBackground(t, id, "running")
@@ -227,11 +107,11 @@ echo namespaces-ok`)
 func TestExecSurvivesLauncherRemoval(t *testing.T) {
 	require(t)
 	launcher := filepath.Join(t.TempDir(), "casklet")
-	source, err := os.Open(binary)
+	source, err := os.Open(_binary)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	destination, err := os.OpenFile(launcher, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +175,7 @@ func TestExecInheritsIdentityAndRestrictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	name, id := execContainer(t, []string{"--rootfs", source, "--user", "1000:1234", "--read-only"})
-	if out := execSuccess(t, nil, name, "/bin/sh", "-c", checkIdentity, "sh", "1000", "1234"); out != "identity-ok\n" {
+	if out := execSuccess(t, nil, name, "/bin/sh", "-c", _checkIdentity, "sh", "1000", "1234"); out != "identity-ok\n" {
 		t.Fatalf("exec identity/capability mismatch: %q", out)
 	}
 	out := execSuccess(t, nil, id, "/bin/sh", "-c", `
@@ -611,4 +491,125 @@ func TestExecRejectsStoppingContainer(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitBackground(t, id, "exited")
+}
+
+func (call *execInvocation) wait(t *testing.T) (int, string, string) {
+	t.Helper()
+	var err error
+	select {
+	case err = <-call.done:
+		call.waited = true
+	case <-time.After(12 * time.Second):
+		out, _ := os.ReadFile(call.stdout.Name())
+		stderr, _ := os.ReadFile(call.stderr.Name())
+		t.Fatalf("exec did not terminate within its cleanup deadline: stdout=%q stderr=%q", out, stderr)
+	}
+	call.cancel()
+	code := 0
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			t.Fatalf("wait for exec: %v", err)
+		}
+		code = exit.ExitCode()
+	}
+	out, outErr := os.ReadFile(call.stdout.Name())
+	stderr, errErr := os.ReadFile(call.stderr.Name())
+	if outErr != nil || errErr != nil {
+		t.Fatalf("read exec output: %v %v", outErr, errErr)
+	}
+	return code, string(out), string(stderr)
+}
+
+func (call *execInvocation) ready(t *testing.T, marker string) string {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		out, err := os.ReadFile(call.stdout.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(out), marker) {
+			return string(out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	out, _ := os.ReadFile(call.stdout.Name())
+	stderr, _ := os.ReadFile(call.stderr.Name())
+	t.Fatalf("exec did not become ready (%s): stdout=%q stderr=%q", marker, out, stderr)
+	return ""
+}
+
+func startExec(t *testing.T, input string, options []string, reference string, command ...string) *execInvocation {
+	t.Helper()
+	require(t)
+	args := append([]string{"exec"}, options...)
+	args = append(args, reference, "--")
+	args = append(args, command...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	stdout, err := os.CreateTemp(t.TempDir(), "exec-stdout-")
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "exec-stderr-")
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, _binary, args...)
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=exec-host-only-secret")
+	call := &execInvocation{cmd: cmd, stdout: stdout, stderr: stderr, done: make(chan error, 1), cancel: cancel}
+	t.Cleanup(func() {
+		cancel()
+		if !call.waited && cmd.Process != nil {
+			select {
+			//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+			case _ = <-call.done:
+			case <-time.After(5 * time.Second):
+				t.Error("exec client did not terminate during cleanup")
+			}
+		}
+		_ = stdout.Close()
+		_ = stderr.Close()
+	})
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() { call.done <- cmd.Wait() }()
+	return call
+}
+
+func execSuccess(t *testing.T, options []string, reference string, command ...string) string {
+	t.Helper()
+	code, out, stderr := startExec(t, "", options, reference, command...).wait(t)
+	if code != 0 {
+		t.Fatalf("exec %q exit=%d stdout=%q stderr=%q", command, code, out, stderr)
+	}
+	return out
+}
+
+func execContainer(t *testing.T, options []string) (string, string) {
+	t.Helper()
+	name := backgroundName(t)
+	id := startBackground(t, name, options, "/bin/sh", "-c", "echo main-ready; sleep 60")
+	waitBackground(t, id, "running")
+	return name, id
+}
+
+func execCgroup(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if relative, ok := strings.CutPrefix(line, "0::/"); ok {
+			if relative == "" || strings.Contains(relative, "..") {
+				t.Fatalf("unsafe exec cgroup path %q", relative)
+			}
+			return filepath.Join("/sys/fs/cgroup", relative)
+		}
+	}
+	t.Fatalf("exec did not publish a cgroups v2 path: %q", output)
+	return ""
 }

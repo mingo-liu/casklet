@@ -43,7 +43,9 @@ func TestOCIStopSignalIsRetainedAfterRegistryDisappears(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		store.Remove(context.Background(), id, func(context.Context, string) (bool, error) { return false, nil })
+		if err := store.Remove(context.Background(), id, func(context.Context, string) (bool, error) { return false, nil }); err != nil {
+			t.Fatal(err)
+		}
 	})
 	closeRegistry()
 	for _, override := range []bool{false, true} {

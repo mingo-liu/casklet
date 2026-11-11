@@ -29,7 +29,7 @@ func TestNamedVolumePersistsAcrossContainerReplacement(t *testing.T) {
 	backgroundSuccess(t, "start", id)
 	backgroundSuccess(t, "stop", id)
 	backgroundSuccess(t, "rm", id)
-	code, out, err := start(t, "", "run", "--rootfs", template, "--mount", mount+",readonly", "--", "/bin/sh", "-c", "cat /data/message; ! touch /data/refused").wait(t)
+	code, out, err := start(t, "", "run", "--rootfs", _template, "--mount", mount+",readonly", "--", "/bin/sh", "-c", "cat /data/message; ! touch /data/refused").wait(t)
 	if code != 0 || out != "preserved\n" || !strings.Contains(err, "Read-only") {
 		t.Fatalf("volume reuse: %d %q %q", code, out, err)
 	}
@@ -41,7 +41,7 @@ func TestForegroundNamedVolumeLease(t *testing.T) {
 	name := fmt.Sprintf("foreground-volume-%d", time.Now().UnixNano())
 	backgroundSuccess(t, "volume", "create", name)
 	t.Cleanup(func() { backgroundCLI(t, "volume", "rm", name) })
-	call := start(t, "", "run", "--rootfs", template, "--mount", "type=volume,source="+name+",target=/data", "--", "/bin/sh", "-c", "echo ready; sleep 300")
+	call := start(t, "", "run", "--rootfs", _template, "--mount", "type=volume,source="+name+",target=/data", "--", "/bin/sh", "-c", "echo ready; sleep 300")
 	pid := call.supervisor(t)
 	if code, _, _ := backgroundCLI(t, "volume", "rm", name); code != 125 {
 		t.Fatal("removed foreground volume")

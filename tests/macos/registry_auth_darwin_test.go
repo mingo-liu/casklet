@@ -15,28 +15,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/registryauth"
 )
 
-func registryInputCommand(t *testing.T, input string, args ...string) (string, string, int) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, client(t), args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(input), &stdout, &stderr
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("registry command timed out: %s", stderr.String())
-	}
-	code := 0
-	if err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatal(err)
-		}
-		code = exit.ExitCode()
-	}
-	return stdout.String(), stderr.String(), code
-}
-
 func TestPrivateRegistryLoginPullAutomaticRunAndLogout(t *testing.T) {
 	client(t)
 	fixture := progressRegistryDetails(t, true)
@@ -101,4 +79,26 @@ func TestPrivateRegistryLoginPullAutomaticRunAndLogout(t *testing.T) {
 	if code != 0 || out != "image-progress-ok\n" {
 		t.Fatalf("failed refresh changed cached image: %d %q %q", code, out, diagnostic)
 	}
+}
+
+func registryInputCommand(t *testing.T, input string, args ...string) (string, string, int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, client(t), args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(input), &stdout, &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("registry command timed out: %s", stderr.String())
+	}
+	code := 0
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			t.Fatal(err)
+		}
+		code = exit.ExitCode()
+	}
+	return stdout.String(), stderr.String(), code
 }

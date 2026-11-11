@@ -11,18 +11,6 @@ import (
 	"time"
 )
 
-func guestRootCommand(t *testing.T, args ...string) (string, error) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "casklet-runtime", "sudo", "-n", "--"}, args...)...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(output), fmt.Errorf("guest command: %w: %s", err, output)
-	}
-	return string(output), nil
-}
-
 func TestMachineRepairsBuiltinTemplate(t *testing.T) {
 	success(t, "doctor")
 	const template = "/var/lib/casklet/templates/busybox"
@@ -76,4 +64,16 @@ func TestMachineRepairsBuiltinTemplate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func guestRootCommand(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "limactl", append([]string{"shell", "casklet-runtime", "sudo", "-n", "--"}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("guest command: %w: %s", err, output)
+	}
+	return string(output), nil
 }

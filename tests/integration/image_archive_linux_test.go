@@ -25,7 +25,7 @@ func TestOCIArchiveOfflineBinaryTransportAndRetainedRestart(t *testing.T) {
 	backgroundSuccess(t, "image", "rm", id)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "image", "load")
+	cmd := exec.CommandContext(ctx, _binary, "image", "load")
 	cmd.Stdin = bytes.NewReader(archive)
 	var out, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &diagnostic
@@ -63,14 +63,14 @@ func TestOCIArchiveCancellationUnblocksInputAndOutput(t *testing.T) {
 			if action == "save" {
 				args = append(args, id)
 			}
-			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd := exec.CommandContext(ctx, _binary, args...)
 			cmd.WaitDelay = 3 * time.Second
 			reader, writer, err := os.Pipe()
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer reader.Close()
-			defer writer.Close()
+			defer func() { _ = reader.Close() }()
+			defer func() { _ = writer.Close() }()
 			cmd.Stderr = io.Discard
 			if action == "load" {
 				cmd.Stdin = reader

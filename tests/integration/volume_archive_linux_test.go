@@ -36,13 +36,13 @@ func TestVolumeArchiveWithRetainedReferencesAndMountedTrees(t *testing.T) {
 	archive := []byte(backgroundSuccess(t, "volume", "export", name))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "volume", "restore", copyName)
+	cmd := exec.CommandContext(ctx, _binary, "volume", "restore", copyName)
 	cmd.Stdin = bytes.NewReader(archive)
 	out, err := cmd.CombinedOutput()
 	if err != nil || string(out) != copyName+"\n" {
 		t.Fatalf("restore: %q %v", out, err)
 	}
-	code, outText, diagnostic := start(t, "", "run", "--rootfs", template, "--mount", "type=volume,source="+copyName+",target=/data,readonly", "--", "/bin/sh", "-c", "cat /data/value; stat -c '%u:%g' /data/value").wait(t)
+	code, outText, diagnostic := start(t, "", "run", "--rootfs", _template, "--mount", "type=volume,source="+copyName+",target=/data,readonly", "--", "/bin/sh", "-c", "cat /data/value; stat -c '%u:%g' /data/value").wait(t)
 	if code != 0 || outText != "durable\n1000:1001\n" {
 		t.Fatalf("restored: %d %q %q", code, outText, diagnostic)
 	}
@@ -57,7 +57,7 @@ func TestVolumeArchiveWithRetainedReferencesAndMountedTrees(t *testing.T) {
 	if err := unix.Mount(t.TempDir(), mounted, "", unix.MS_BIND, ""); err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Unmount(mounted, 0)
+	defer func() { _ = unix.Unmount(mounted, 0) }()
 	var buf bytes.Buffer
 	if err := store.Export(ctx, name, &buf); err == nil || !strings.Contains(err.Error(), "mount") {
 		t.Fatalf("exported mounted tree: %v", err)

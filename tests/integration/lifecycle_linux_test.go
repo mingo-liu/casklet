@@ -15,30 +15,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func lifecycleReady(t *testing.T, id, marker string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.Contains(backgroundSuccess(t, "logs", id), marker) {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("container did not log %q: %s", marker, backgroundSuccess(t, "logs", id))
-}
-
-func lifecycleWait(t *testing.T, id string, expected int) {
-	t.Helper()
-	code, out, stderr := backgroundCLI(t, "wait", id)
-	if code != expected || out != fmt.Sprintf("%d\n", expected) || stderr != "" {
-		t.Fatalf("wait exit=%d stdout=%q stderr=%q, want %d", code, out, stderr, expected)
-	}
+type lifecycleWaitCall struct {
+	cmd         *exec.Cmd
+	out, stderr *os.File
+	done        chan error
 }
 
 func TestLifecycleRetainedFilesystem(t *testing.T) {
 	name := backgroundName(t)
 	source := t.TempDir()
-	if out, err := exec.Command("cp", "-a", template+"/.", source).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cp", "-a", _template+"/.", source).CombinedOutput(); err != nil {
 		t.Fatalf("copy: %v %s", err, out)
 	}
 	data := t.TempDir()
@@ -142,48 +128,6 @@ func TestLifecycleStopDeadlines(t *testing.T) {
 				t.Fatalf("override changed saved default: %+v", got.Config)
 			}
 		})
-	}
-}
-
-type lifecycleWaitCall struct {
-	cmd         *exec.Cmd
-	out, stderr *os.File
-	done        chan error
-}
-
-func startLifecycleWait(t *testing.T, ref string) *lifecycleWaitCall {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	out, err := os.CreateTemp(t.TempDir(), "wait-out-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stderr, err := os.CreateTemp(t.TempDir(), "wait-err-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(ctx, binary, "wait", ref)
-	cmd.Stdout, cmd.Stderr = out, stderr
-	call := &lifecycleWaitCall{cmd: cmd, out: out, stderr: stderr, done: make(chan error, 1)}
-	if err := cmd.Start(); err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	go func() { call.done <- cmd.Wait() }()
-	t.Cleanup(func() { cancel(); out.Close(); stderr.Close() })
-	return call
-}
-func (call *lifecycleWaitCall) check(t *testing.T, expected int, output string) {
-	t.Helper()
-	select {
-	case <-call.done:
-	case <-time.After(8 * time.Second):
-		t.Fatal("wait did not complete")
-	}
-	out, _ := os.ReadFile(call.out.Name())
-	stderr, _ := os.ReadFile(call.stderr.Name())
-	if call.cmd.ProcessState.ExitCode() != expected || string(out) != output || len(stderr) != 0 {
-		t.Fatalf("wait exit=%d stdout=%q stderr=%q", call.cmd.ProcessState.ExitCode(), out, stderr)
 	}
 }
 
@@ -393,4 +337,62 @@ func TestLifecycleImageAndStats(t *testing.T) {
 	assertImageInUse(t, imageID)
 	backgroundSuccess(t, "rm", id)
 	backgroundSuccess(t, "image", "rm", imageID)
+}
+
+func (call *lifecycleWaitCall) check(t *testing.T, expected int, output string) {
+	t.Helper()
+	select {
+	//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+	case _ = <-call.done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("wait did not complete")
+	}
+	out, _ := os.ReadFile(call.out.Name())
+	stderr, _ := os.ReadFile(call.stderr.Name())
+	if call.cmd.ProcessState.ExitCode() != expected || string(out) != output || len(stderr) != 0 {
+		t.Fatalf("wait exit=%d stdout=%q stderr=%q", call.cmd.ProcessState.ExitCode(), out, stderr)
+	}
+}
+
+func lifecycleReady(t *testing.T, id, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(backgroundSuccess(t, "logs", id), marker) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("container did not log %q: %s", marker, backgroundSuccess(t, "logs", id))
+}
+
+func lifecycleWait(t *testing.T, id string, expected int) {
+	t.Helper()
+	code, out, stderr := backgroundCLI(t, "wait", id)
+	if code != expected || out != fmt.Sprintf("%d\n", expected) || stderr != "" {
+		t.Fatalf("wait exit=%d stdout=%q stderr=%q, want %d", code, out, stderr, expected)
+	}
+}
+
+func startLifecycleWait(t *testing.T, ref string) *lifecycleWaitCall {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	out, err := os.CreateTemp(t.TempDir(), "wait-out-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "wait-err-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, _binary, "wait", ref)
+	cmd.Stdout, cmd.Stderr = out, stderr
+	call := &lifecycleWaitCall{cmd: cmd, out: out, stderr: stderr, done: make(chan error, 1)}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	go func() { call.done <- cmd.Wait() }()
+	t.Cleanup(func() { cancel(); _ = out.Close(); _ = stderr.Close() })
+	return call
 }

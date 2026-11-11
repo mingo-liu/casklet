@@ -23,7 +23,7 @@ func TestTemplatePublicationPreservesMountedTrees(t *testing.T) {
 				if err := os.Mkdir(path, 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := rootfs.Copy(context.Background(), template, path); err != nil {
+				if err := rootfs.Copy(context.Background(), _template, path); err != nil {
 					t.Fatal(err)
 				}
 			}

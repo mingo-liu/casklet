@@ -18,20 +18,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func linuxTaskConfig(t *testing.T, name, task string) string {
-	t.Helper()
-	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
-		"migrate": map[string]any{"task": true, "run": map[string]any{"rootfs": template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
-		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"rootfs": template, "env": []string{"PRIVATE=event-secret"}, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
-	}}
-	data, _ := json.Marshal(doc)
-	filename := filepath.Join(t.TempDir(), "tasks.json")
-	if err := os.WriteFile(filename, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { backgroundCLI(t, "project", "down", "--volumes", name) })
-	return filename
-}
 func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
@@ -85,7 +71,7 @@ func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "events", "--follow", "--json", "--after", fmt.Sprint(last), "--filter", "project="+name, "--filter", "event=start")
+	cmd := exec.CommandContext(ctx, _binary, "events", "--follow", "--json", "--after", fmt.Sprint(last), "--filter", "project="+name, "--filter", "event=start")
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +81,7 @@ func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	observed := make(chan error, 1)
 	go func() { var e container.Event; observed <- json.NewDecoder(pipe).Decode(&e) }()
 	backgroundSuccess(t, "project", "restart", name, "api")
@@ -107,12 +93,15 @@ func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("no event")
 	}
-	cmd.Process.Signal(syscall.SIGTERM)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Wait(); err == nil {
 		t.Fatal("canceled event follower succeeded")
 	}
 	backgroundSuccess(t, "project", "exec", name, "api", "--", "true")
 }
+
 func TestProjectTaskFailureAndDeadlineLinux(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
@@ -167,4 +156,19 @@ func TestEventJournalFailureDoesNotBlockStopOrRemoval(t *testing.T) {
 	if _, err := os.Stat(filepath.Join("/var/lib/casklet/containers", id)); !os.IsNotExist(err) {
 		t.Fatalf("container storage was not removed: %v", err)
 	}
+}
+
+func linuxTaskConfig(t *testing.T, name, task string) string {
+	t.Helper()
+	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
+		"migrate": map[string]any{"task": true, "run": map[string]any{"rootfs": _template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
+		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"rootfs": _template, "env": []string{"PRIVATE=event-secret"}, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
+	}}
+	data, _ := json.Marshal(doc)
+	filename := filepath.Join(t.TempDir(), "tasks.json")
+	if err := os.WriteFile(filename, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { backgroundCLI(t, "project", "down", "--volumes", name) })
+	return filename
 }

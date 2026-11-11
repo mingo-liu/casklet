@@ -18,24 +18,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func namedNetwork(t *testing.T) string {
-	t.Helper()
-	name := fmt.Sprintf("named-%d-%d", time.Now().UnixNano(), sequence.Add(1))
-	backgroundSuccess(t, "network", "create", name)
-	t.Cleanup(func() { backgroundCLI(t, "network", "rm", name) })
-	return name
-}
-func namedAddress(t *testing.T, id string) string {
-	t.Helper()
-	fields := strings.Fields(backgroundSuccess(t, "exec", id, "--", "/bin/ip", "-4", "addr", "show", "dev", "eth0"))
-	for i, f := range fields {
-		if f == "inet" {
-			return strings.Split(fields[i+1], "/")[0]
-		}
-	}
-	t.Fatal("no network address")
-	return ""
-}
 func TestNamedNetworkDiscoveryIsolationRestartAndReferences(t *testing.T) {
 	require(t)
 	before := networkSnapshot(t)
@@ -93,17 +75,18 @@ func TestNamedNetworkDiscoveryIsolationRestartAndReferences(t *testing.T) {
 	backgroundSuccess(t, "network", "rm", one)
 	backgroundSuccess(t, "network", "rm", two)
 }
+
 func TestNamedNetworkUpstreamDNSPublishAndForegroundLease(t *testing.T) {
 	require(t)
 	before := networkSnapshot(t)
 	networkUpstream(t)
 	name := namedNetwork(t)
-	code, out, stderr := start(t, "", "run", "--rootfs", template, "--network", name, "--dns", "198.18.0.2", "--", "/bin/integration-helper", "network-client").wait(t)
+	code, out, stderr := start(t, "", "run", "--rootfs", _template, "--network", name, "--dns", "198.18.0.2", "--", "/bin/integration-helper", "network-client").wait(t)
 	if code != 0 || !strings.Contains(out, "network-ok") {
 		t.Fatalf("named upstream: %d %s %s", code, out, stderr)
 	}
 	for _, protocol := range []string{"udp", "tcp"} {
-		code, out, stderr := start(t, "", "run", "--rootfs", template, "--network", name, "--dns", "198.18.0.2", "--", "/bin/integration-helper", "network-resolve", protocol, "fixture.test").wait(t)
+		code, out, stderr := start(t, "", "run", "--rootfs", _template, "--network", name, "--dns", "198.18.0.2", "--", "/bin/integration-helper", "network-resolve", protocol, "fixture.test").wait(t)
 		if code != 0 || strings.TrimSpace(out) != "198.18.0.2" {
 			t.Fatalf("upstream %s: %d %s %s", protocol, code, out, stderr)
 		}
@@ -129,7 +112,7 @@ func TestNamedNetworkExternalDNSIgnoresUnrelatedJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(poison) })
+	t.Cleanup(func() { _ = os.RemoveAll(poison) })
 	journal := filepath.Join(poison, "network-named.json")
 	if err := os.WriteFile(journal, []byte("invalid journal"), 0600); err != nil {
 		t.Fatal(err)
@@ -152,6 +135,7 @@ func TestNamedNetworkExternalDNSIgnoresUnrelatedJournal(t *testing.T) {
 		t.Fatalf("local lookup did not recover: %s != %s", out, address)
 	}
 }
+
 func TestNamedNetworkMetadataAndAliasValidation(t *testing.T) {
 	require(t)
 	name := namedNetwork(t)
@@ -164,7 +148,7 @@ func TestNamedNetworkMetadataAndAliasValidation(t *testing.T) {
 	}
 	backgroundSuccess(t, "network", "create", name)
 	for _, options := range [][]string{{"--network", name, "--name", "invalid_name"}, {"--network", name, "--network-alias", "Bad"}, {"--network", name, "--network-alias", "same", "--network-alias", "same"}} {
-		args := append([]string{"run", "-d", "--rootfs", template}, options...)
+		args := append([]string{"run", "-d", "--rootfs", _template}, options...)
 		args = append(args, "--", "/bin/true")
 		if code, _, _ := backgroundCLI(t, args...); code != 125 {
 			t.Fatalf("accepted invalid named args %v", args)
@@ -175,7 +159,7 @@ func TestNamedNetworkMetadataAndAliasValidation(t *testing.T) {
 func TestNamedNetworkForegroundLease(t *testing.T) {
 	require(t)
 	name := namedNetwork(t)
-	call := start(t, "", "run", "--rootfs", template, "--network", name, "--", "/bin/sh", "-c", "echo ready; sleep 300")
+	call := start(t, "", "run", "--rootfs", _template, "--network", name, "--", "/bin/sh", "-c", "echo ready; sleep 300")
 	pid := call.supervisor(t)
 	if code, _, _ := backgroundCLI(t, "network", "rm", name); code != 125 {
 		t.Fatal("removed active foreground network")
@@ -186,22 +170,27 @@ func TestNamedNetworkForegroundLease(t *testing.T) {
 	call.wait(t)
 	backgroundSuccess(t, "network", "rm", name)
 }
+
 func TestNamedNetworkBridgeCleanupFailurePreservesJournal(t *testing.T) {
 	require(t)
 	name := namedNetwork(t)
 	var meta network.Record
-	json.Unmarshal([]byte(backgroundSuccess(t, "network", "inspect", name)), &meta)
+	if err := json.Unmarshal([]byte(backgroundSuccess(t, "network", "inspect", name)), &meta); err != nil {
+		t.Fatal(err)
+	}
 	id := startBackground(t, backgroundName(t), []string{"--network", name}, "/bin/sleep", "300")
 	record := waitBackground(t, id, "running")
 	var links []struct {
 		Group uint32 `json:"group,string"`
 	}
-	json.Unmarshal([]byte(networkCommand(t, "ip", "-N", "-j", "-d", "link", "show", meta.Bridge)), &links)
+	if err := json.Unmarshal([]byte(networkCommand(t, "ip", "-N", "-j", "-d", "link", "show", meta.Bridge)), &links); err != nil {
+		t.Fatal(err)
+	}
 	if len(links) != 1 {
 		t.Fatal("missing named bridge")
 	}
 	group := strconv.FormatUint(uint64(links[0].Group), 10)
-	t.Cleanup(func() { exec.Command("ip", "link", "set", meta.Bridge, "group", group).Run() })
+	t.Cleanup(func() { _ = exec.Command("ip", "link", "set", meta.Bridge, "group", group).Run() })
 	networkCommand(t, "ip", "link", "set", meta.Bridge, "group", "0")
 	code, _, diagnostic := backgroundCLI(t, "stop", id)
 	if code != 125 || !strings.Contains(diagnostic, "unowned named bridge") {
@@ -227,6 +216,7 @@ func TestNamedNetworkBridgeCleanupFailurePreservesJournal(t *testing.T) {
 	backgroundSuccess(t, "rm", id)
 	backgroundSuccess(t, "network", "rm", name)
 }
+
 func TestNamedNetworkForwardingCleanupOrders(t *testing.T) {
 	require(t)
 	if _, err := os.Stat("/var/lib/casklet/runs/.network-shared.json"); !os.IsNotExist(err) {
@@ -237,9 +227,15 @@ func TestNamedNetworkForwardingCleanupOrders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.WriteFile(path, saved, 0600) })
+	t.Cleanup(func() {
+		if err := os.WriteFile(path, saved, 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
 	for _, namedFirst := range []bool{true, false} {
-		os.WriteFile(path, []byte("0\n"), 0600)
+		if err := os.WriteFile(path, []byte("0\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		name := namedNetwork(t)
 		legacy := startBackground(t, backgroundName(t), []string{"--network", "bridge"}, "/bin/sleep", "300")
 		named := startBackground(t, backgroundName(t), []string{"--network", name}, "/bin/sleep", "300")
@@ -284,8 +280,14 @@ func TestNamedNetworkPinnedLegacySupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.WriteFile(forwarding, saved, 0600) })
-	os.WriteFile(forwarding, []byte("0\n"), 0600)
+	t.Cleanup(func() {
+		if err := os.WriteFile(forwarding, saved, 0600); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := os.WriteFile(forwarding, []byte("0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	networkUpstream(t)
 	legacyName := backgroundName(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -314,4 +316,24 @@ func TestNamedNetworkPinnedLegacySupervisor(t *testing.T) {
 	backgroundSuccess(t, "rm", legacyID)
 	backgroundSuccess(t, "rm", id)
 	backgroundSuccess(t, "network", "rm", name)
+}
+
+func namedNetwork(t *testing.T) string {
+	t.Helper()
+	name := fmt.Sprintf("named-%d-%d", time.Now().UnixNano(), _sequence.Add(1))
+	backgroundSuccess(t, "network", "create", name)
+	t.Cleanup(func() { backgroundCLI(t, "network", "rm", name) })
+	return name
+}
+
+func namedAddress(t *testing.T, id string) string {
+	t.Helper()
+	fields := strings.Fields(backgroundSuccess(t, "exec", id, "--", "/bin/ip", "-4", "addr", "show", "dev", "eth0"))
+	for i, f := range fields {
+		if f == "inet" {
+			return strings.Split(fields[i+1], "/")[0]
+		}
+	}
+	t.Fatal("no network address")
+	return ""
 }

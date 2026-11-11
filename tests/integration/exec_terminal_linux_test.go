@@ -17,65 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func startExecTerminal(t *testing.T, options []string, reference string, command ...string) *terminalInvocation {
-	t.Helper()
-	args := append([]string{"exec", "-it"}, options...)
-	args = append(args, reference, "--")
-	args = append(args, command...)
-	return startTerminalArguments(t, args)
-}
-
-func signalExecTerminal(t *testing.T, call *terminalInvocation, sig syscall.Signal) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	control, err := exec.CommandContext(ctx, "systemctl", "show", call.unit, "--property=ControlGroup", "--value").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative := strings.TrimSpace(string(control))
-	if relative == "" || relative == "/" || !strings.HasPrefix(relative, "/") || filepath.Clean(relative) != relative {
-		t.Fatalf("invalid exec client scope cgroup: %q", relative)
-	}
-	root := "/sys/fs/cgroup" + relative
-	for _, file := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
-		processes, _ := os.ReadFile(file)
-		for _, value := range strings.Fields(string(processes)) {
-			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
-			executable, _ := os.Readlink("/proc/" + value + "/exe")
-			command := strings.Split(string(args), "\x00")
-			if executable == binary && len(command) > 1 && command[1] == "exec" {
-				pid, err := strconv.Atoi(value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := syscall.Kill(pid, sig); err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-		}
-	}
-	t.Fatal("exec client is missing from its terminal scope")
-}
-
-func execTerminalCgroup(t *testing.T, call *terminalInvocation, marker string) string {
-	t.Helper()
-	call.outputContains(t, marker)
-	out, err := call.captured()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return execCgroup(t, strings.ReplaceAll(out, "\r\n", "\n"))
-}
-
-func assertExecTerminalReleased(t *testing.T, reference string) {
-	t.Helper()
-	if out := execSuccess(t, nil, reference, "/bin/sh", "-c", `[ "$(ls /dev/pts)" = ptmx ] && echo terminals-released`); out != "terminals-released\n" {
-		t.Fatalf("exec retained a private PTY: %q", out)
-	}
-}
-
 func TestExecTerminalShellInteractionAndResize(t *testing.T) {
 	name, id := execContainer(t, nil)
 	call := startExecTerminal(t, nil, name, "/bin/sh", "-c", `
@@ -373,4 +314,63 @@ func TestExecTerminalSupervisorLossRestoresHost(t *testing.T) {
 	}
 	assertCgroupRemoved(t, group)
 	assertBackgroundUnitStopped(t, id)
+}
+
+func startExecTerminal(t *testing.T, options []string, reference string, command ...string) *terminalInvocation {
+	t.Helper()
+	args := append([]string{"exec", "-it"}, options...)
+	args = append(args, reference, "--")
+	args = append(args, command...)
+	return startTerminalArguments(t, args)
+}
+
+func signalExecTerminal(t *testing.T, call *terminalInvocation, sig syscall.Signal) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	control, err := exec.CommandContext(ctx, "systemctl", "show", call.unit, "--property=ControlGroup", "--value").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative := strings.TrimSpace(string(control))
+	if relative == "" || relative == "/" || !strings.HasPrefix(relative, "/") || filepath.Clean(relative) != relative {
+		t.Fatalf("invalid exec client scope cgroup: %q", relative)
+	}
+	root := "/sys/fs/cgroup" + relative
+	for _, file := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
+		processes, _ := os.ReadFile(file)
+		for _, value := range strings.Fields(string(processes)) {
+			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
+			executable, _ := os.Readlink("/proc/" + value + "/exe")
+			command := strings.Split(string(args), "\x00")
+			if executable == _binary && len(command) > 1 && command[1] == "exec" {
+				pid, err := strconv.Atoi(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Kill(pid, sig); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("exec client is missing from its terminal scope")
+}
+
+func execTerminalCgroup(t *testing.T, call *terminalInvocation, marker string) string {
+	t.Helper()
+	call.outputContains(t, marker)
+	out, err := call.captured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return execCgroup(t, strings.ReplaceAll(out, "\r\n", "\n"))
+}
+
+func assertExecTerminalReleased(t *testing.T, reference string) {
+	t.Helper()
+	if out := execSuccess(t, nil, reference, "/bin/sh", "-c", `[ "$(ls /dev/pts)" = ptmx ] && echo terminals-released`); out != "terminals-released\n" {
+		t.Fatalf("exec retained a private PTY: %q", out)
+	}
 }

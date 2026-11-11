@@ -11,24 +11,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func macHealth(t *testing.T, id, status string) container.Inspection {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var i container.Inspection
-		if err := json.Unmarshal([]byte(success(t, "inspect", id)), &i); err != nil {
-			t.Fatal(err)
-		}
-		if i.Health != nil && i.Health.Status == status {
-			return i
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("health did not become %s: %+v", status, i.Health)
-		}
-		time.Sleep(40 * time.Millisecond)
-	}
-}
-
 func TestHealthStatusThroughMacTransportAndRestart(t *testing.T) {
 	id := detached(t, "--health-cmd", `test "$READY_VALUE" = exact && test -f /ready`, "--env", "READY_VALUE=exact", "--health-interval", "100ms", "--health-timeout", "1s", "--health-retries", "2", "--", "/bin/sleep", "300")
 	macHealth(t, id, container.HealthUnhealthy)
@@ -81,5 +63,23 @@ func TestOCIHealthcheckThroughMacTransport(t *testing.T) {
 	}
 	if inspection.Health != nil || inspection.Config.Healthcheck != nil {
 		t.Fatal("inherited healthcheck was not disabled")
+	}
+}
+
+func macHealth(t *testing.T, id, status string) container.Inspection {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var i container.Inspection
+		if err := json.Unmarshal([]byte(success(t, "inspect", id)), &i); err != nil {
+			t.Fatal(err)
+		}
+		if i.Health != nil && i.Health.Status == status {
+			return i
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("health did not become %s: %+v", status, i.Health)
+		}
+		time.Sleep(40 * time.Millisecond)
 	}
 }

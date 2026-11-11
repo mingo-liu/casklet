@@ -16,31 +16,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func inspectBackground(t *testing.T, ref string) container.Inspection {
-	t.Helper()
-	out := backgroundSuccess(t, "inspect", ref)
-	var got container.Inspection
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("inspection: %q, %v", out, err)
-	}
-	for _, private := range []string{"inspection-secret-value", `"env"`, `"run_path"`, `"cgroup"`, `"boot_id"`, `"error"`} {
-		if strings.Contains(out, private) {
-			t.Fatalf("private data in inspection: %q", out)
-		}
-	}
-	return got
-}
-
-func statsBackground(t *testing.T, ref string) container.Statistics {
-	t.Helper()
-	out := backgroundSuccess(t, "stats", "--json", "--interval", "500ms", ref)
-	var got container.Statistics
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("stats: %q, %v", out, err)
-	}
-	return got
-}
-
 func TestInspectionAndStatsLifecycle(t *testing.T) {
 	name := backgroundName(t)
 	id := startBackground(t, name, []string{"--memory", "64m", "--pids-limit", "24", "--cpus", "0.25", "--env", "TOKEN=inspection-secret-value", "--user", "1000:1001", "--workdir", "/tmp", "--read-only"}, "/bin/sh", "-c", "while :; do :; done")
@@ -166,7 +141,7 @@ func TestInspectionAndStatsConcurrentRemoval(t *testing.T) {
 			if action == "stats" {
 				args = []string{action, "--json", "--interval", "1s", id}
 			}
-			cmd := exec.CommandContext(ctx, binary, args...)
+			cmd := exec.CommandContext(ctx, _binary, args...)
 			var out, stderr strings.Builder
 			cmd.Stdout, cmd.Stderr = &out, &stderr
 			if err := cmd.Start(); err != nil {
@@ -219,7 +194,7 @@ func TestStatsIdleExitAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "stats", "--json", "--interval", "5s", id)
+	cmd := exec.CommandContext(ctx, _binary, "stats", "--json", "--interval", "5s", id)
 	var out, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	if err := cmd.Start(); err != nil {
@@ -236,7 +211,7 @@ func TestStatsIdleExitAndCancellation(t *testing.T) {
 	if got := inspectBackground(t, id); got.State != "running" {
 		t.Fatalf("stats cancellation stopped workload: %+v", got)
 	}
-	cmd = exec.CommandContext(ctx, binary, "stats", "--json", "--interval", "2s", id)
+	cmd = exec.CommandContext(ctx, _binary, "stats", "--json", "--interval", "2s", id)
 	out.Reset()
 	stderr.Reset()
 	cmd.Stdout, cmd.Stderr = &out, &stderr
@@ -254,6 +229,52 @@ func TestStatsIdleExitAndCancellation(t *testing.T) {
 	if got.State != "exited" || got.CPUPercent != nil || got.MemoryBytes != nil {
 		t.Fatalf("metrics after concurrent exit: %+v", got)
 	}
+}
+
+func TestStatsMultipleShareSamplingWindow(t *testing.T) {
+	first := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
+	second := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
+	started := time.Now()
+	output := backgroundSuccess(t, "stats", "--json", "--interval", "2s", first, second)
+	elapsed := time.Since(started)
+	var rows []container.Statistics
+	if err := json.Unmarshal([]byte(output), &rows); err != nil || len(rows) != 2 || rows[0].ID != first || rows[1].ID != second || rows[0].MemoryBytes == nil || rows[1].CPUPercent == nil {
+		t.Fatalf("multi sample: %s %v", output, err)
+	}
+	if elapsed < 2*time.Second || elapsed > 3500*time.Millisecond {
+		t.Fatalf("serial or skipped sampling window: %v", elapsed)
+	}
+	for _, row := range rows {
+		interval, err := time.ParseDuration(row.Interval)
+		if err != nil || interval < 2*time.Second {
+			t.Fatalf("interval: %s %v", row.Interval, err)
+		}
+	}
+}
+
+func inspectBackground(t *testing.T, ref string) container.Inspection {
+	t.Helper()
+	out := backgroundSuccess(t, "inspect", ref)
+	var got container.Inspection
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("inspection: %q, %v", out, err)
+	}
+	for _, private := range []string{"inspection-secret-value", `"env"`, `"run_path"`, `"cgroup"`, `"boot_id"`, `"error"`} {
+		if strings.Contains(out, private) {
+			t.Fatalf("private data in inspection: %q", out)
+		}
+	}
+	return got
+}
+
+func statsBackground(t *testing.T, ref string) container.Statistics {
+	t.Helper()
+	out := backgroundSuccess(t, "stats", "--json", "--interval", "500ms", ref)
+	var got container.Statistics
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stats: %q, %v", out, err)
+	}
+	return got
 }
 
 // Observe the pinned workload descriptor so interruption and removal really occur
@@ -276,25 +297,4 @@ func waitStatsSampling(t *testing.T, cmd *exec.Cmd, id string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("statistics request did not pin its workload cgroup")
-}
-
-func TestStatsMultipleShareSamplingWindow(t *testing.T) {
-	first := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
-	second := startBackground(t, backgroundName(t), nil, "/bin/sleep", "30")
-	started := time.Now()
-	output := backgroundSuccess(t, "stats", "--json", "--interval", "2s", first, second)
-	elapsed := time.Since(started)
-	var rows []container.Statistics
-	if err := json.Unmarshal([]byte(output), &rows); err != nil || len(rows) != 2 || rows[0].ID != first || rows[1].ID != second || rows[0].MemoryBytes == nil || rows[1].CPUPercent == nil {
-		t.Fatalf("multi sample: %s %v", output, err)
-	}
-	if elapsed < 2*time.Second || elapsed > 3500*time.Millisecond {
-		t.Fatalf("serial or skipped sampling window: %v", elapsed)
-	}
-	for _, row := range rows {
-		interval, err := time.ParseDuration(row.Interval)
-		if err != nil || interval < 2*time.Second {
-			t.Fatalf("interval: %s %v", row.Interval, err)
-		}
-	}
 }

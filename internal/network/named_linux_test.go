@@ -87,7 +87,7 @@ func TestNamedLeaseReferenceAndCancelledLock(t *testing.T) {
 	}); !errors.Is(err, ErrInUse) {
 		t.Fatalf("active removal: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	if err := s.Remove(context.Background(), "demo", func(context.Context, string) (bool, error) { return true, nil }); !errors.Is(err, ErrInUse) {
 		t.Fatalf("retained reference removal: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestNamedLeaseReferenceAndCancelledLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if _, err := s.List(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -166,7 +166,7 @@ func TestAbandonedRunDoesNotRemainInDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if live, err := activeRun(path); err != nil || live {
 		t.Fatalf("abandoned lock visible: %t %v", live, err)
 	}

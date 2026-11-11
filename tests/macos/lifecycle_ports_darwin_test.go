@@ -12,21 +12,6 @@ import (
 	"time"
 )
 
-func listenMacPort(protocol, address string) (io.Closer, int, error) {
-	if protocol == "udp" {
-		listener, err := net.ListenPacket("udp4", address)
-		if err != nil {
-			return nil, 0, err
-		}
-		return listener, listener.LocalAddr().(*net.UDPAddr).Port, nil
-	}
-	listener, err := net.Listen("tcp4", address)
-	if err != nil {
-		return nil, 0, err
-	}
-	return listener, listener.Addr().(*net.TCPAddr).Port, nil
-}
-
 func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 	for _, test := range []struct{ action, protocol, host string }{
 		{"start", "tcp", "0.0.0.0"},
@@ -82,4 +67,29 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func listenMacPort(protocol, address string) (io.Closer, int, error) {
+	if protocol == "udp" {
+		listener, err := net.ListenPacket("udp4", address)
+		if err != nil {
+			return nil, 0, err
+		}
+		local, ok := listener.LocalAddr().(*net.UDPAddr)
+		if !ok {
+			_ = listener.Close()
+			return nil, 0, fmt.Errorf("unexpected UDP listener address %T", listener.LocalAddr())
+		}
+		return listener, local.Port, nil
+	}
+	listener, err := net.Listen("tcp4", address)
+	if err != nil {
+		return nil, 0, err
+	}
+	local, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = listener.Close()
+		return nil, 0, fmt.Errorf("unexpected TCP listener address %T", listener.Addr())
+	}
+	return listener, local.Port, nil
 }

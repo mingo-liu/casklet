@@ -27,7 +27,7 @@ func TestSecuritySeccomp(t *testing.T) {
 				t.Fatalf("probe = %q", out)
 			}
 			name := backgroundName(t)
-			backgroundSuccess(t, "run", "-d", "--name", name, "--rootfs", template, "--seccomp", profile, "--", "/bin/sleep", "30")
+			backgroundSuccess(t, "run", "-d", "--name", name, "--rootfs", _template, "--seccomp", profile, "--", "/bin/sleep", "30")
 			if out := backgroundSuccess(t, "exec", name, "--", "/bin/integration-helper", command); out != "security-ok\n" {
 				t.Fatalf("exec probe = %q", out)
 			}
@@ -41,10 +41,6 @@ func TestSecuritySeccomp(t *testing.T) {
 	}
 }
 
-func mappedOptions() []string {
-	return []string{"--userns", "--uid-map", "0:200000:1000", "--uid-map", "1000:400000:1000", "--gid-map", "0:300000:2000"}
-}
-
 func TestSecurityUserNamespaces(t *testing.T) {
 	require(t)
 	source := executionTemplate(t)
@@ -53,7 +49,7 @@ func TestSecurityUserNamespaces(t *testing.T) {
 		t.Run(identity, func(t *testing.T) {
 			options := append(mappedOptions(), "--rootfs", source, "--user", identity)
 			uid, gid, _ := strings.Cut(identity, ":")
-			if out := success(t, options, "/bin/sh", "-c", checkIdentity, "sh", uid, gid); out != "identity-ok\n" {
+			if out := success(t, options, "/bin/sh", "-c", _checkIdentity, "sh", uid, gid); out != "identity-ok\n" {
 				t.Fatalf("identity = %q", out)
 			}
 			out := success(t, options, "/bin/sh", "-c", "cat /proc/self/uid_map; cat /proc/self/gid_map; /bin/integration-helper security")
@@ -68,7 +64,7 @@ func TestSecurityUserNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(data)
+	defer func() { _ = os.RemoveAll(data) }()
 	if err := os.Chown(data, 200000, 300000); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +112,7 @@ func TestSecurityUserNamespaces(t *testing.T) {
 		})
 	}
 	t.Run("supervisor-recovery", func(t *testing.T) {
-		args := append([]string{"run", "--rootfs", template, "--stop-timeout", "0s"}, mappedOptions()...)
+		args := append([]string{"run", "--rootfs", _template, "--stop-timeout", "0s"}, mappedOptions()...)
 		args = append(args, "--", "/bin/sh", "-c", "echo ready; sleep 30")
 		call := start(t, "", args...)
 		pid := call.supervisor(t)
@@ -158,8 +154,8 @@ func TestSecurityRootless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(source)
-	for _, args := range [][]string{{"cp", "-a", template + "/.", source}, {"chown", "-R", uid + ":" + account.Gid, source}} {
+	defer func() { _ = os.RemoveAll(source) }()
+	for _, args := range [][]string{{"cp", "-a", _template + "/.", source}, {"chown", "-R", uid + ":" + account.Gid, source}} {
 		if output, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
 			t.Fatalf("prepare rootless template: %v: %s", err, output)
 		}
@@ -175,7 +171,7 @@ func TestSecurityRootless(t *testing.T) {
 		if strings.TrimSpace(string(policy)) == "1" {
 			args = append(args, "aa-exec", "-p", "casklet-rootless", "--")
 		}
-		args = append(args, binary, "run", "--rootless", "--rootfs", source)
+		args = append(args, _binary, "run", "--rootless", "--rootfs", source)
 		args = append(args, options...)
 		args = append(args, "--")
 		args = append(args, command...)
@@ -185,8 +181,8 @@ func TestSecurityRootless(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer os.Remove(capture.Name())
-		defer capture.Close()
+		defer func() { _ = os.Remove(capture.Name()) }()
+		defer func() { _ = capture.Close() }()
 		owner, _ := strconv.Atoi(uid)
 		group, _ := strconv.Atoi(account.Gid)
 		if err := capture.Chown(owner, group); err != nil {
@@ -220,7 +216,7 @@ func TestSecurityRootless(t *testing.T) {
 	}{
 		{name: "identity", options: nil, command: []string{"/bin/sh", "-c", "id -u; cat /proc/self/uid_map; cat /proc/self/gid_map; /bin/integration-helper security"}, code: 0, text: "security-ok"},
 		{name: "read-only", options: []string{"--read-only"}, command: []string{"/bin/sh", "-c", "echo tmp > /tmp/probe; ! touch /root-probe; cat /tmp/probe"}, code: 0, text: "tmp"},
-		{name: "tmpfs", options: []string{"--tmp-size", "32m", "--shm-size", "96m"}, command: []string{"/bin/sh", "-c", tmpfsCapacityProbe + " && echo tmpfs-ok"}, code: 0, text: "tmpfs-ok"},
+		{name: "tmpfs", options: []string{"--tmp-size", "32m", "--shm-size", "96m"}, command: []string{"/bin/sh", "-c", _tmpfsCapacityProbe + " && echo tmpfs-ok"}, code: 0, text: "tmpfs-ok"},
 		{name: "tty", options: []string{"--tty"}, command: []string{"/bin/integration-helper", "security"}, code: 0, text: "security-ok"},
 		{name: "pids", options: []string{"--pids-limit", "32"}, command: []string{"/bin/integration-helper", "pids"}, code: 0, text: "process creation denied"},
 		{name: "memory", options: []string{"--memory", "32m"}, command: []string{"/bin/integration-helper", "memory"}, code: 137, text: "OOM"},
@@ -250,7 +246,7 @@ func TestSecurityRootless(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(data)
+	defer func() { _ = os.RemoveAll(data) }()
 	owner, _ := strconv.Atoi(uid)
 	group, _ := strconv.Atoi(account.Gid)
 	if err := os.Chown(data, owner, group); err != nil {
@@ -281,6 +277,10 @@ func TestSecurityRootless(t *testing.T) {
 			t.Fatalf("rootless run leaked: %s", entry.Name())
 		}
 	}
+}
+
+func mappedOptions() []string {
+	return []string{"--userns", "--uid-map", "0:200000:1000", "--uid-map", "1000:400000:1000", "--gid-map", "0:300000:2000"}
 }
 
 func checkCPUQuota(t *testing.T, output string) {

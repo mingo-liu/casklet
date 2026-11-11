@@ -26,7 +26,7 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 	closeRegistry()
 	archive := []byte(backgroundSuccess(t, "image", "save", id))
 	backgroundSuccess(t, "image", "rm", id)
-	cmd := exec.Command(binary, "image", "load")
+	cmd := exec.Command(_binary, "image", "load")
 	cmd.Stdin = bytes.NewReader(archive)
 	var output, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
@@ -38,7 +38,7 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 	imageRun := map[string]any{"image": id, "network": "none", "command": []string{"sleep 300"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}}
 	document := map[string]any{"name": name, "networks": []string{}, "volumes": []string{"data"}, "services": map[string]any{
 		"app":    map[string]any{"run": imageRun},
-		"writer": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sleep", "300"}, "mount": []string{"type=volume,source=data,target=/data"}}},
+		"writer": map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "command": []string{"/bin/sleep", "300"}, "mount": []string{"type=volume,source=data,target=/data"}}},
 	}}
 	file := filepath.Join(t.TempDir(), "project.json")
 	save := func() {

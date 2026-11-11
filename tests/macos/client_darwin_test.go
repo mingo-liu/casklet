@@ -22,81 +22,6 @@ import (
 	"time"
 )
 
-func client(t *testing.T) string {
-	t.Helper()
-	if os.Getenv("CASKLET_MACOS_INTEGRATION") != "1" {
-		t.Skip("set CASKLET_MACOS_INTEGRATION=1 or run make test-macos")
-	}
-	path := os.Getenv("CASKLET_MACOS_BINARY")
-	if path == "" {
-		path = "../../bin/casklet"
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return absolute
-}
-
-func command(t *testing.T, args ...string) (string, string, int) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, client(t), args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("client timed out: %q: %s", args, stderr.String())
-	}
-	code := 0
-	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			code = exit.ExitCode()
-		} else {
-			t.Fatal(err)
-		}
-	}
-	return stdout.String(), stderr.String(), code
-}
-
-func success(t *testing.T, args ...string) string {
-	t.Helper()
-	out, diagnostic, code := command(t, args...)
-	if code != 0 {
-		t.Fatalf("casklet %q returned %d: %s %s", args, code, out, diagnostic)
-	}
-	return out
-}
-
-func hostDirectory(t *testing.T) string {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	directory, err := os.MkdirTemp(home, ".casklet-macos-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(directory); err != nil {
-			t.Error(err)
-		}
-	})
-	return directory
-}
-
-func detached(t *testing.T, args ...string) string {
-	t.Helper()
-	id := strings.TrimSpace(success(t, append([]string{"run", "-d"}, args...)...))
-	if len(id) != 32 {
-		t.Fatalf("invalid ID: %q", id)
-	}
-	t.Cleanup(func() { command(t, "stop", "--timeout", "0s", id); command(t, "rm", id) })
-	return id
-}
-
 func TestDefaultRootFSAndExactStreams(t *testing.T) {
 	client(t)
 	literal := "a'b $HOME $(printf unexpected)\nline"
@@ -153,21 +78,6 @@ func TestLifecycleRetainsContainerWrites(t *testing.T) {
 	success(t, "inspect", id)
 }
 
-func waitForContents(t *testing.T, id, expected string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var last string
-	for time.Now().Before(deadline) {
-		out, diagnostic, code := command(t, "exec", id, "--", "/bin/cat", "/count")
-		if code == 0 && out == expected {
-			return
-		}
-		last = out + diagnostic
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("container did not publish %q: %s", expected, last)
-}
-
 func TestLiveBindAndLocalImage(t *testing.T) {
 	directory := hostDirectory(t)
 	file := filepath.Join(directory, "input")
@@ -205,16 +115,6 @@ func TestRootlessUsesGuestIdentity(t *testing.T) {
 	if len(fields) != 4 || fields[0] != "0" || fields[2] != strings.TrimSpace(string(data)) {
 		t.Fatalf("guest rootless mapping: %q (gid %s)", out, data)
 	}
-}
-
-func freePort(t *testing.T) int {
-	t.Helper()
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = listener.Close() }()
-	return requireType[*net.TCPAddr](t, listener.Addr()).Port
 }
 
 func TestMachineStopStartRetainsContainers(t *testing.T) {
@@ -316,42 +216,6 @@ func TestSignalForwardingAndCleanup(t *testing.T) {
 	}
 }
 
-func signalForwardingAndCleanup(t *testing.T, sig syscall.Signal) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, client(t), "run", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' INT TERM; echo signal-ready; while :; do sleep 1; done")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var diagnostic bytes.Buffer
-	cmd.Stderr = &diagnostic
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
-	buffer := make([]byte, 64)
-	n, err := stdout.Read(buffer)
-	if err != nil || !strings.Contains(string(buffer[:n]), "signal-ready") {
-		t.Fatalf("readiness: %q %v", buffer[:n], err)
-	}
-	if err := cmd.Process.Signal(sig); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := io.ReadAll(stdout)
-	err = cmd.Wait()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.ExitCode() != 9 || !strings.Contains(string(data), "signal-received") {
-		t.Fatalf("signal: %v %q %s", err, data, diagnostic.String())
-	}
-	// Listing remains usable after the remote foreground session ends.
-	var records []json.RawMessage
-	if err := json.Unmarshal([]byte(success(t, "ps", "--json")), &records); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -394,4 +258,140 @@ func TestAbruptClientLossCleansForegroundSession(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("foreground guest session survived abrupt client loss")
+}
+
+func client(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("CASKLET_MACOS_INTEGRATION") != "1" {
+		t.Skip("set CASKLET_MACOS_INTEGRATION=1 or run make test-macos")
+	}
+	path := os.Getenv("CASKLET_MACOS_BINARY")
+	if path == "" {
+		path = "../../bin/casklet"
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return absolute
+}
+
+func command(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, client(t), args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("client timed out: %q: %s", args, stderr.String())
+	}
+	code := 0
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			code = exit.ExitCode()
+		} else {
+			t.Fatal(err)
+		}
+	}
+	return stdout.String(), stderr.String(), code
+}
+
+func success(t *testing.T, args ...string) string {
+	t.Helper()
+	out, diagnostic, code := command(t, args...)
+	if code != 0 {
+		t.Fatalf("casklet %q returned %d: %s %s", args, code, out, diagnostic)
+	}
+	return out
+}
+
+func hostDirectory(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := os.MkdirTemp(home, ".casklet-macos-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil {
+			t.Error(err)
+		}
+	})
+	return directory
+}
+
+func detached(t *testing.T, args ...string) string {
+	t.Helper()
+	id := strings.TrimSpace(success(t, append([]string{"run", "-d"}, args...)...))
+	if len(id) != 32 {
+		t.Fatalf("invalid ID: %q", id)
+	}
+	t.Cleanup(func() { command(t, "stop", "--timeout", "0s", id); command(t, "rm", id) })
+	return id
+}
+
+func waitForContents(t *testing.T, id, expected string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		out, diagnostic, code := command(t, "exec", id, "--", "/bin/cat", "/count")
+		if code == 0 && out == expected {
+			return
+		}
+		last = out + diagnostic
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("container did not publish %q: %s", expected, last)
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	return requireType[*net.TCPAddr](t, listener.Addr()).Port
+}
+
+func signalForwardingAndCleanup(t *testing.T, sig syscall.Signal) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, client(t), "run", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' INT TERM; echo signal-ready; while :; do sleep 1; done")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnostic bytes.Buffer
+	cmd.Stderr = &diagnostic
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	buffer := make([]byte, 64)
+	n, err := stdout.Read(buffer)
+	if err != nil || !strings.Contains(string(buffer[:n]), "signal-ready") {
+		t.Fatalf("readiness: %q %v", buffer[:n], err)
+	}
+	if err := cmd.Process.Signal(sig); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(stdout)
+	err = cmd.Wait()
+	exit, ok := err.(*exec.ExitError)
+	if !ok || exit.ExitCode() != 9 || !strings.Contains(string(data), "signal-received") {
+		t.Fatalf("signal: %v %q %s", err, data, diagnostic.String())
+	}
+	// Listing remains usable after the remote foreground session ends.
+	var records []json.RawMessage
+	if err := json.Unmarshal([]byte(success(t, "ps", "--json")), &records); err != nil {
+		t.Fatal(err)
+	}
 }

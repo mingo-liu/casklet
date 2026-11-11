@@ -20,20 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func macTaskConfig(t *testing.T, name, task string) string {
-	t.Helper()
-	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
-		"migrate": map[string]any{"task": true, "run": map[string]any{"mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
-		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"env": []string{"PRIVATE=must-not-appear-in-events"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}, "health-cmd": "test -f /data/count", "health-interval": "100ms", "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
-	}}
-	data, _ := json.Marshal(doc)
-	filename := filepath.Join(hostDirectory(t), "tasks.json")
-	if err := os.WriteFile(filename, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
-	return filename
-}
 func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	client(t)
 	name := fmt.Sprintf("tasks-%x", time.Now().UnixNano())
@@ -138,6 +124,7 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	}
 	success(t, "project", "exec", name, "api", "--", "true")
 }
+
 func TestProjectTaskFailureAndDeadlineThroughMac(t *testing.T) {
 	client(t)
 	for _, tc := range []struct {
@@ -211,4 +198,19 @@ func TestEventsCancelWithFullHostOutputPipe(t *testing.T) {
 		t.Fatal("blocked event output prevented cancellation")
 	}
 	success(t, "exec", id, "--", "true")
+}
+
+func macTaskConfig(t *testing.T, name, task string) string {
+	t.Helper()
+	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
+		"migrate": map[string]any{"task": true, "run": map[string]any{"mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
+		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"env": []string{"PRIVATE=must-not-appear-in-events"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}, "health-cmd": "test -f /data/count", "health-interval": "100ms", "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
+	}}
+	data, _ := json.Marshal(doc)
+	filename := filepath.Join(hostDirectory(t), "tasks.json")
+	if err := os.WriteFile(filename, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
+	return filename
 }

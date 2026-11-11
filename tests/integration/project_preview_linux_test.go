@@ -22,7 +22,7 @@ func TestProjectPreviewExplainsDriftWithoutMutation(t *testing.T) {
 	name := fmt.Sprintf("preview-%x", time.Now().UnixNano())
 	file := filepath.Join(t.TempDir(), "project.json")
 	run := map[string]any{"command": []string{"/bin/sleep", "300"}, "memory": "128m", "env": []string{"TOKEN=before-preview-secret"}, "network": "none"}
-	run["rootfs"] = template
+	run["rootfs"] = _template
 	document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{"api": map[string]any{"run": run}}}
 	write := func() {
 		data, err := json.Marshal(document)

@@ -30,7 +30,9 @@ func TestProjectHistoryRollbackPinsImagesAndRecoversFailedReplacement(t *testing
 	doc := map[string]any{"name": name, "networks": []string{}, "volumes": []string{"data"}, "services": map[string]any{"app": map[string]any{"run": run}}}
 	save := func(version string) {
 		t.Helper()
-		os.WriteFile(envfile, []byte("APP_VERSION="+version+"\n"), 0600)
+		if err := os.WriteFile(envfile, []byte("APP_VERSION="+version+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		data, _ := json.Marshal(doc)
 		if err := os.WriteFile(file, data, 0600); err != nil {
 			t.Fatal(err)
@@ -79,8 +81,12 @@ func TestProjectHistoryRollbackPinsImagesAndRecoversFailedReplacement(t *testing
 	if len(history()) != 2 || inspectBackground(t, ref).Config.Image != freshID {
 		t.Fatal("new deployment not recorded")
 	}
-	os.Remove(file)
-	os.Remove(envfile)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(envfile); err != nil {
+		t.Fatal(err)
+	}
 	backgroundSuccess(t, "project", "rollback", "--wait", name, "1")
 	restored := inspectBackground(t, ref)
 	if restored.Config.Image != old.Config.Image {
@@ -125,9 +131,11 @@ func TestProjectRollbackRerunsTasksRemovesOrphansAndRefreshesSecrets(t *testing.
 	dir := t.TempDir()
 	file := filepath.Join(dir, "project.json")
 	secret := filepath.Join(dir, "secret")
-	os.WriteFile(secret, []byte("first"), 0600)
-	task := map[string]any{"task": true, "run": map[string]any{"rootfs": template, "network": "none", "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", "echo migration >> /data/runs"}}}
-	app := map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"rootfs": template, "network": "none", "mount": []string{"type=volume,source=data,target=/data"}, "secret": []string{"source=secret,target=token"}, "command": []string{"/bin/sleep", "300"}}}
+	if err := os.WriteFile(secret, []byte("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	task := map[string]any{"task": true, "run": map[string]any{"rootfs": _template, "network": "none", "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", "echo migration >> /data/runs"}}}
+	app := map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"rootfs": _template, "network": "none", "mount": []string{"type=volume,source=data,target=/data"}, "secret": []string{"source=secret,target=token"}, "command": []string{"/bin/sleep", "300"}}}
 	services := map[string]any{"migrate": task, "app": app}
 	doc := map[string]any{"name": name, "networks": []string{}, "volumes": []string{"data"}, "services": services}
 	save := func() {
@@ -140,10 +148,12 @@ func TestProjectRollbackRerunsTasksRemovesOrphansAndRefreshesSecrets(t *testing.
 	t.Cleanup(func() { backgroundCLI(t, "project", "down", "--volumes", name) })
 	save()
 	backgroundSuccess(t, "project", "up", "--config", file)
-	services["extra"] = map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sleep", "300"}}}
+	services["extra"] = map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "command": []string{"/bin/sleep", "300"}}}
 	save()
 	backgroundSuccess(t, "project", "up", "--config", file)
-	os.WriteFile(secret, []byte("rotated"), 0600)
+	if err := os.WriteFile(secret, []byte("rotated"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	backgroundSuccess(t, "project", "rollback", name, "1")
 	ref := "cp-" + name + "-app"
 	if got := backgroundSuccess(t, "exec", ref, "--", "/bin/sh", "-c", "wc -l < /data/runs; cat /run/secrets/token"); got != "2\nrotated" {

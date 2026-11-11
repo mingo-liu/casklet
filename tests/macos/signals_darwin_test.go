@@ -17,49 +17,6 @@ import (
 	"time"
 )
 
-// Resolve this invocation's private run through its workload cgroup. Other
-// foreground sessions may be active in the product VM during these tests.
-func foregroundRun(t *testing.T, membership string) (string, string) {
-	t.Helper()
-	relative := strings.TrimPrefix(strings.TrimSpace(membership), "0::")
-	if !strings.HasPrefix(relative, "/") || !strings.Contains(relative, "/container-") {
-		t.Fatalf("invalid workload cgroup: %q", membership)
-	}
-	cgroup := "/sys/fs/cgroup" + relative
-	script := `for path in /var/lib/casklet/runs/run-*; do
-  if [ -f "$path/state.json" ] && grep -Fq -- "\"cgroup\":\"$1\"" "$path/state.json"; then
-    printf '%s\n' "$path"
-  fi
-done`
-	output, err := guestRootCommand(t, "/bin/sh", "-c", script, "find-run", cgroup)
-	path := strings.TrimSpace(output)
-	if err != nil || !strings.HasPrefix(path, "/var/lib/casklet/runs/run-") || strings.Contains(path, "\n") {
-		t.Fatalf("resolve foreground run: %q %v", output, err)
-	}
-	return path, cgroup
-}
-
-func waitForegroundCleanup(t *testing.T, path, cgroup string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		_, err := guestRootCommand(t, "/bin/sh", "-c", `test ! -e "$1" && test ! -e "$2"`, "check-cleanup", path, cgroup)
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("foreground resources remain: run=%s cgroup=%s: %v", path, cgroup, err)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	sum := sha256.Sum256([]byte(filepath.Base(path)))
-	table := fmt.Sprintf("table ip casklet_%x", sum[:6])
-	output, err := guestRootCommand(t, "nft", "list", "tables")
-	if err != nil || strings.Contains(output, table) {
-		t.Fatalf("foreground NAT cleanup: %q %v", output, err)
-	}
-}
-
 func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -102,5 +59,48 @@ func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
 			}
 			waitForegroundCleanup(t, path, cgroup)
 		})
+	}
+}
+
+// Resolve this invocation's private run through its workload cgroup. Other
+// foreground sessions may be active in the product VM during these tests.
+func foregroundRun(t *testing.T, membership string) (string, string) {
+	t.Helper()
+	relative := strings.TrimPrefix(strings.TrimSpace(membership), "0::")
+	if !strings.HasPrefix(relative, "/") || !strings.Contains(relative, "/container-") {
+		t.Fatalf("invalid workload cgroup: %q", membership)
+	}
+	cgroup := "/sys/fs/cgroup" + relative
+	script := `for path in /var/lib/casklet/runs/run-*; do
+  if [ -f "$path/state.json" ] && grep -Fq -- "\"cgroup\":\"$1\"" "$path/state.json"; then
+    printf '%s\n' "$path"
+  fi
+done`
+	output, err := guestRootCommand(t, "/bin/sh", "-c", script, "find-run", cgroup)
+	path := strings.TrimSpace(output)
+	if err != nil || !strings.HasPrefix(path, "/var/lib/casklet/runs/run-") || strings.Contains(path, "\n") {
+		t.Fatalf("resolve foreground run: %q %v", output, err)
+	}
+	return path, cgroup
+}
+
+func waitForegroundCleanup(t *testing.T, path, cgroup string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := guestRootCommand(t, "/bin/sh", "-c", `test ! -e "$1" && test ! -e "$2"`, "check-cleanup", path, cgroup)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("foreground resources remain: run=%s cgroup=%s: %v", path, cgroup, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	sum := sha256.Sum256([]byte(filepath.Base(path)))
+	table := fmt.Sprintf("table ip casklet_%x", sum[:6])
+	output, err := guestRootCommand(t, "nft", "list", "tables")
+	if err != nil || strings.Contains(output, table) {
+		t.Fatalf("foreground NAT cleanup: %q %v", output, err)
 	}
 }

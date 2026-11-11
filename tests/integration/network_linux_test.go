@@ -24,145 +24,12 @@ import (
 	"github.com/mingo-liu/casklet/internal/network"
 )
 
-func networkCommand(t *testing.T, tool string, args ...string) string {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, tool, args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %q: %v: %s", tool, args, err, out)
-	}
-	return string(out)
-}
-
-func networkSnapshot(t *testing.T) string {
-	t.Helper()
-	var links []struct {
-		Name  string `json:"ifname"`
-		Alias string `json:"ifalias"`
-	}
-	if err := json.Unmarshal([]byte(networkCommand(t, "ip", "-j", "link", "show")), &links); err != nil {
-		t.Fatal(err)
-	}
-	var owned []string
-	for _, link := range links {
-		if strings.HasPrefix(link.Name, "csn") || strings.HasPrefix(link.Alias, "casklet") || strings.HasPrefix(link.Alias, "casklet_") {
-			owned = append(owned, link.Name)
-		}
-	}
-	tables := strings.Split(networkCommand(t, "nft", "list", "tables"), "\n")
-	for _, table := range tables {
-		if strings.Contains(table, "casklet_") {
-			owned = append(owned, table)
-		}
-	}
-	entries, err := os.ReadDir("/var/lib/casklet/runs")
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		for _, journal := range []string{"network.json", "network-named.json"} {
-			if _, err := os.Lstat(filepath.Join("/var/lib/casklet/runs", entry.Name(), journal)); err == nil {
-				owned = append(owned, entry.Name()+"/"+journal)
-			}
-		}
-	}
-	if _, err := os.Lstat("/var/lib/casklet/runs/.network-shared.json"); err == nil {
-		owned = append(owned, "shared-state")
-	}
-	sort.Strings(owned)
-	value, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.Join(owned, ",") + " forwarding=" + strings.TrimSpace(string(value))
-}
-
-func assertNetworkSnapshot(t *testing.T, before string) {
-	t.Helper()
-	if after := networkSnapshot(t); after != before {
-		t.Fatalf("network resources leaked: before=%s after=%s", before, after)
-	}
-}
-
-// The upstream namespace has no route to the container subnet. Successful
-// requests, with its observed source address, prove masquerading and DNS work.
-func networkUpstream(t *testing.T) string {
-	t.Helper()
-	require(t)
-	namespace := fmt.Sprintf("casklet-upstream-%d-%d", os.Getpid(), sequence.Add(1))
-	host := fmt.Sprintf("mx%d", sequence.Add(1))
-	networkCommand(t, "ip", "netns", "add", namespace)
-	t.Cleanup(func() {
-		_ = exec.Command("ip", "netns", "delete", namespace).Run()
-		_ = exec.Command("ip", "link", "delete", host).Run()
-	})
-	networkCommand(t, "ip", "link", "add", host, "type", "veth", "peer", "name", host+"p")
-	networkCommand(t, "ip", "address", "add", "198.18.0.1/30", "dev", host)
-	networkCommand(t, "ip", "link", "set", host, "up")
-	networkCommand(t, "ip", "link", "set", host+"p", "netns", namespace)
-	for _, args := range [][]string{{"link", "set", "lo", "up"}, {"address", "add", "198.18.0.2/30", "dev", host + "p"}, {"link", "set", host + "p", "up"}} {
-		networkCommand(t, "ip", append([]string{"netns", "exec", namespace, "ip"}, args...)...)
-	}
-	// Intentionally no default route: return packets require host-side SNAT.
-	cmd := exec.Command("ip", "netns", "exec", namespace, os.Getenv("CASKLET_HELPER"), "network-server")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	networkHTTP(t, "198.18.0.2:8080")
-	return namespace
-}
-
-func networkHTTP(t *testing.T, addr string) string {
-	t.Helper()
-	client := &http.Client{Transport: &http.Transport{}, Timeout: 500 * time.Millisecond}
-	deadline := time.Now().Add(5 * time.Second)
-	var last error
-	for time.Now().Before(deadline) {
-		response, err := client.Get("http://" + addr + "/")
-		if err == nil {
-			body, readErr := io.ReadAll(response.Body)
-			response.Body.Close()
-			if readErr == nil && strings.Contains(string(body), "network-ok") {
-				return string(body)
-			}
-			last = readErr
-		} else {
-			last = err
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("HTTP %s unavailable: %v", addr, last)
-	return ""
-}
-
-func freeNetworkPort(t *testing.T, protocol string) int {
-	t.Helper()
-	if protocol == "udp" {
-		socket, err := net.ListenPacket("udp4", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		port := requireType[*net.UDPAddr](t, socket.LocalAddr()).Port
-		socket.Close()
-		return port
-	}
-	socket, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := requireType[*net.TCPAddr](t, socket.Addr()).Port
-	socket.Close()
-	return port
-}
-
 func TestNetworkConnectivityDNSAndReadOnly(t *testing.T) {
 	require(t)
 	before := networkSnapshot(t)
 	networkUpstream(t)
 	for _, options := range [][]string{nil, {"--read-only", "--user", "1234:1234"}} {
-		args := []string{"run", "--rootfs", template, "--network", "bridge", "--dns", "198.18.0.2"}
+		args := []string{"run", "--rootfs", _template, "--network", "bridge", "--dns", "198.18.0.2"}
 		args = append(args, options...)
 		args = append(args, "--", "/bin/integration-helper", "network-client")
 		code, out, stderr := start(t, "", args...).wait(t)
@@ -172,7 +39,7 @@ func TestNetworkConnectivityDNSAndReadOnly(t *testing.T) {
 		assertNetworkSnapshot(t, before)
 	}
 	// Auto-discovery must skip the systemd loopback stub and generate a usable file.
-	code, out, stderr := start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/cat", "/etc/resolv.conf").wait(t)
+	code, out, stderr := start(t, "", "run", "--rootfs", _template, "--network", "bridge", "--", "/bin/cat", "/etc/resolv.conf").wait(t)
 	if code != 0 || !strings.Contains(out, "nameserver ") || strings.Contains(out, "nameserver 127.") {
 		t.Fatalf("automatic DNS: exit=%d out=%q stderr=%q", code, out, stderr)
 	}
@@ -214,14 +81,16 @@ func TestNetworkPublishExecRestartAndConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	packet.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := packet.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	_, err = packet.Write([]byte("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	buffer := make([]byte, 64)
 	n, err := packet.Read(buffer)
-	packet.Close()
+	_ = packet.Close()
 	if err != nil || string(buffer[:n]) != "echo:hello" {
 		t.Fatalf("UDP mapping: %q %v", buffer[:n], err)
 	}
@@ -273,9 +142,9 @@ func TestNetworkWildcardHairpinAndHostConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	blockedPort := requireType[*net.TCPAddr](t, listener.Addr()).Port
-	code, _, stderr = start(t, "", "run", "--rootfs", template, "--network", "bridge", "-p", fmt.Sprintf("%d:8080", blockedPort), "--", "/bin/true").wait(t)
+	code, _, stderr = start(t, "", "run", "--rootfs", _template, "--network", "bridge", "-p", fmt.Sprintf("%d:8080", blockedPort), "--", "/bin/true").wait(t)
 	if code != 125 || !strings.Contains(stderr, "reserve") {
 		t.Fatalf("host conflict code=%d stderr=%q", code, stderr)
 	}
@@ -287,7 +156,7 @@ func TestNetworkStartupRollbackAndTimeout(t *testing.T) {
 	before := networkSnapshot(t)
 	for _, command := range [][]string{{"/missing"}, {"/bin/sleep", "30"}} {
 		port := freeNetworkPort(t, "tcp")
-		args := []string{"run", "--rootfs", template, "--network", "bridge", "-p", fmt.Sprintf("%d:8080", port), "--timeout", "100ms", "--stop-timeout", "0s", "--"}
+		args := []string{"run", "--rootfs", _template, "--network", "bridge", "-p", fmt.Sprintf("%d:8080", port), "--timeout", "100ms", "--stop-timeout", "0s", "--"}
 		code, _, stderr := start(t, "", append(args, command...)...).wait(t)
 		expected := 125
 		if command[0] == "/bin/sleep" {
@@ -301,7 +170,7 @@ func TestNetworkStartupRollbackAndTimeout(t *testing.T) {
 		if err != nil {
 			t.Fatalf("port retained: %v", err)
 		}
-		socket.Close()
+		_ = socket.Close()
 	}
 }
 
@@ -316,7 +185,7 @@ func TestNetworkConcurrentAllocationAndCleanup(t *testing.T) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			code, out, stderr, err := backgroundCommand(ctx, "run", "--rootfs", template, "--network", "bridge", "--", "/bin/sh", "-c", "ip -4 addr show dev eth0; sleep .2")
+			code, out, stderr, err := backgroundCommand(ctx, "run", "--rootfs", _template, "--network", "bridge", "--", "/bin/sh", "-c", "ip -4 addr show dev eth0; sleep .2")
 			if err != nil || code != 0 || !strings.Contains(out, "10.231.0.") {
 				errors <- fmt.Sprintf("exit=%d out=%s stderr=%s err=%v", code, out, stderr, err)
 			}
@@ -352,7 +221,7 @@ func TestNetworkRefusesHostConflicts(t *testing.T) {
 	before := networkSnapshot(t)
 	networkCommand(t, "ip", "link", "add", "casklet0", "type", "dummy")
 	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", "casklet0").Run() })
-	code, _, stderr := start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/true").wait(t)
+	code, _, stderr := start(t, "", "run", "--rootfs", _template, "--network", "bridge", "--", "/bin/true").wait(t)
 	if code != 125 || !strings.Contains(stderr, "casklet0") {
 		t.Fatalf("bridge conflict: code=%d stderr=%q", code, stderr)
 	}
@@ -360,12 +229,12 @@ func TestNetworkRefusesHostConflicts(t *testing.T) {
 	networkCommand(t, "ip", "link", "show", "casklet0")
 	networkCommand(t, "ip", "link", "delete", "casklet0")
 	assertNetworkSnapshot(t, before)
-	name := fmt.Sprintf("mc%d", sequence.Add(1))
+	name := fmt.Sprintf("mc%d", _sequence.Add(1))
 	networkCommand(t, "ip", "link", "add", name, "type", "dummy")
 	t.Cleanup(func() { _ = exec.Command("ip", "link", "delete", name).Run() })
 	networkCommand(t, "ip", "address", "add", "10.231.0.99/24", "dev", name)
 	networkCommand(t, "ip", "link", "set", name, "up")
-	code, _, stderr = start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/true").wait(t)
+	code, _, stderr = start(t, "", "run", "--rootfs", _template, "--network", "bridge", "--", "/bin/true").wait(t)
 	if code != 125 || !strings.Contains(stderr, "overlaps") {
 		t.Fatalf("subnet conflict: code=%d stderr=%q", code, stderr)
 	}
@@ -454,14 +323,14 @@ func TestNetworkPartialSetupRetainsReservations(t *testing.T) {
 				namespace = candidate
 				break
 			}
-			candidate.Close()
+			_ = candidate.Close()
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if namespace == nil {
 		t.Fatal("unshare did not create a separate network namespace")
 	}
-	defer namespace.Close()
+	defer func() { _ = namespace.Close() }()
 	// A conflicting interface inside the private namespace forces failure after
 	// the host veth, bridge, and address reservation have already been created.
 	poison := exec.Command("nsenter", "--net=/proc/self/fd/3", "--", "ip", "link", "add", "eth0", "type", "dummy")
@@ -490,7 +359,7 @@ func TestNetworkPartialSetupRetainsReservations(t *testing.T) {
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	if socket, err := net.Listen("tcp4", addr); err == nil {
-		socket.Close()
+		_ = socket.Close()
 		t.Fatal("partial startup released port before rollback")
 	}
 	if err := network.Cleanup(path); err != nil {
@@ -501,6 +370,139 @@ func TestNetworkPartialSetupRetainsReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rollback retained port: %v", err)
 	}
-	socket.Close()
+	_ = socket.Close()
 	assertNetworkSnapshot(t, before)
+}
+
+func networkCommand(t *testing.T, tool string, args ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, tool, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %q: %v: %s", tool, args, err, out)
+	}
+	return string(out)
+}
+
+func networkSnapshot(t *testing.T) string {
+	t.Helper()
+	var links []struct {
+		Name  string `json:"ifname"`
+		Alias string `json:"ifalias"`
+	}
+	if err := json.Unmarshal([]byte(networkCommand(t, "ip", "-j", "link", "show")), &links); err != nil {
+		t.Fatal(err)
+	}
+	var owned []string
+	for _, link := range links {
+		if strings.HasPrefix(link.Name, "csn") || strings.HasPrefix(link.Alias, "casklet") || strings.HasPrefix(link.Alias, "casklet_") {
+			owned = append(owned, link.Name)
+		}
+	}
+	tables := strings.Split(networkCommand(t, "nft", "list", "tables"), "\n")
+	for _, table := range tables {
+		if strings.Contains(table, "casklet_") {
+			owned = append(owned, table)
+		}
+	}
+	entries, err := os.ReadDir("/var/lib/casklet/runs")
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		for _, journal := range []string{"network.json", "network-named.json"} {
+			if _, err := os.Lstat(filepath.Join("/var/lib/casklet/runs", entry.Name(), journal)); err == nil {
+				owned = append(owned, entry.Name()+"/"+journal)
+			}
+		}
+	}
+	if _, err := os.Lstat("/var/lib/casklet/runs/.network-shared.json"); err == nil {
+		owned = append(owned, "shared-state")
+	}
+	sort.Strings(owned)
+	value, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(owned, ",") + " forwarding=" + strings.TrimSpace(string(value))
+}
+
+func assertNetworkSnapshot(t *testing.T, before string) {
+	t.Helper()
+	if after := networkSnapshot(t); after != before {
+		t.Fatalf("network resources leaked: before=%s after=%s", before, after)
+	}
+}
+
+// The upstream namespace has no route to the container subnet. Successful
+// requests, with its observed source address, prove masquerading and DNS work.
+func networkUpstream(t *testing.T) string {
+	t.Helper()
+	require(t)
+	namespace := fmt.Sprintf("casklet-upstream-%d-%d", os.Getpid(), _sequence.Add(1))
+	host := fmt.Sprintf("mx%d", _sequence.Add(1))
+	networkCommand(t, "ip", "netns", "add", namespace)
+	t.Cleanup(func() {
+		_ = exec.Command("ip", "netns", "delete", namespace).Run()
+		_ = exec.Command("ip", "link", "delete", host).Run()
+	})
+	networkCommand(t, "ip", "link", "add", host, "type", "veth", "peer", "name", host+"p")
+	networkCommand(t, "ip", "address", "add", "198.18.0.1/30", "dev", host)
+	networkCommand(t, "ip", "link", "set", host, "up")
+	networkCommand(t, "ip", "link", "set", host+"p", "netns", namespace)
+	for _, args := range [][]string{{"link", "set", "lo", "up"}, {"address", "add", "198.18.0.2/30", "dev", host + "p"}, {"link", "set", host + "p", "up"}} {
+		networkCommand(t, "ip", append([]string{"netns", "exec", namespace, "ip"}, args...)...)
+	}
+	// Intentionally no default route: return packets require host-side SNAT.
+	cmd := exec.Command("ip", "netns", "exec", namespace, os.Getenv("CASKLET_HELPER"), "network-server")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	networkHTTP(t, "198.18.0.2:8080")
+	return namespace
+}
+
+func networkHTTP(t *testing.T, addr string) string {
+	t.Helper()
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 500 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		response, err := client.Get("http://" + addr + "/")
+		if err == nil {
+			body, readErr := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if readErr == nil && strings.Contains(string(body), "network-ok") {
+				return string(body)
+			}
+			last = readErr
+		} else {
+			last = err
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("HTTP %s unavailable: %v", addr, last)
+	return ""
+}
+
+func freeNetworkPort(t *testing.T, protocol string) int {
+	t.Helper()
+	if protocol == "udp" {
+		socket, err := net.ListenPacket("udp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := requireType[*net.UDPAddr](t, socket.LocalAddr()).Port
+		_ = socket.Close()
+		return port
+	}
+	socket, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := requireType[*net.TCPAddr](t, socket.Addr()).Port
+	_ = socket.Close()
+	return port
 }

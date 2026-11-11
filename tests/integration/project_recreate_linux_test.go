@@ -27,7 +27,7 @@ import (
 func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
-	source := template
+	source := _template
 	name := fmt.Sprintf("recreate-%x", time.Now().UnixNano())
 	file := filepath.Join(t.TempDir(), "project.json")
 	external := name + "-external"
@@ -95,7 +95,7 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 			response, err := client.Get("http://" + address)
 			if err == nil {
 				data, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-				response.Body.Close()
+				_ = response.Body.Close()
 				if len(data) > 0 {
 					available = true
 					break
@@ -110,11 +110,15 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		buffer := make([]byte, 64)
 		for time.Now().Before(deadline) {
-			connection.SetDeadline(time.Now().Add(300 * time.Millisecond))
-			connection.Write([]byte("recreate"))
+			if err := connection.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := connection.Write([]byte("recreate")); err != nil {
+				t.Fatal(err)
+			}
 			n, err := connection.Read(buffer)
 			if err == nil && string(buffer[:n]) == "echo:recreate" {
 				return
@@ -202,11 +206,6 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 	}
 }
 
-func projectRecreateCode(t *testing.T, args ...string) int {
-	code, _, _ := backgroundCLI(t, args...)
-	return code
-}
-
 func TestProjectRecreationUsesExplicitlyRefreshedMutableImageTag(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
@@ -275,4 +274,9 @@ func TestProjectRecreationUsesExplicitlyRefreshedMutableImageTag(t *testing.T) {
 		t.Fatalf("image defaults %q", got)
 	}
 	backgroundSuccess(t, "project", "down", name)
+}
+
+func projectRecreateCode(t *testing.T, args ...string) int {
+	code, _, _ := backgroundCLI(t, args...)
+	return code
 }

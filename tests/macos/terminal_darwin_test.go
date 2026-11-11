@@ -16,33 +16,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func openPTY(t *testing.T) (*os.File, *os.File) {
-	t.Helper()
-	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	master := os.NewFile(uintptr(fd), "macos-test-master")
-	t.Cleanup(func() { _ = master.Close() })
-	for _, operation := range []uint{unix.TIOCPTYGRANT, unix.TIOCPTYUNLK} {
-		if err := unix.IoctlSetInt(fd, operation, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var name [128]byte
-	//lint:ignore SA1019 x/sys has no typed wrapper for the Darwin TIOCPTYGNAME request.
-	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.TIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0])))
-	if errno != 0 {
-		t.Fatal(errno)
-	}
-	slave, err := os.OpenFile(strings.TrimRight(string(name[:]), "\x00"), os.O_RDWR|syscall.O_NOCTTY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = slave.Close() })
-	return master, slave
-}
-
 func TestInteractiveRunAndExecResizeAndRestore(t *testing.T) {
 	client(t)
 	id := detached(t, "--", "/bin/sleep", "60")
@@ -142,4 +115,31 @@ func TestInteractiveRunAndExecResizeAndRestore(t *testing.T) {
 			}
 		})
 	}
+}
+
+func openPTY(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := os.NewFile(uintptr(fd), "macos-test-master")
+	t.Cleanup(func() { _ = master.Close() })
+	for _, operation := range []uint{unix.TIOCPTYGRANT, unix.TIOCPTYUNLK} {
+		if err := unix.IoctlSetInt(fd, operation, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var name [128]byte
+	//lint:ignore SA1019 x/sys has no typed wrapper for the Darwin TIOCPTYGNAME request.
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.TIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0])))
+	if errno != 0 {
+		t.Fatal(errno)
+	}
+	slave, err := os.OpenFile(strings.TrimRight(string(name[:]), "\x00"), os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = slave.Close() })
+	return master, slave
 }
