@@ -30,7 +30,9 @@ func TestDNSUDPAndTCPRefreshAndMissingNames(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c.SetDeadline(time.Now().Add(time.Second))
+		if err := c.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		q := query("redis", 1)
 		if protocol == "tcp" {
 			q = append([]byte{0, byte(len(q))}, q...)
@@ -52,7 +54,7 @@ func TestDNSUDPAndTCPRefreshAndMissingNames(t *testing.T) {
 			err = e
 			answer = buf[:n]
 		}
-		c.Close()
+		_ = c.Close()
 		if err != nil || len(answer) < 4 || !net.IP(answer[len(answer)-4:]).Equal(ip) || answer[3]&15 != 0 {
 			t.Fatalf("%s answer %x: %v", protocol, answer, err)
 		}
@@ -87,7 +89,7 @@ func TestDNSCloseCancelsIncompleteTCPAndBoundsWorkers(t *testing.T) {
 	var conns []net.Conn
 	defer func() {
 		for _, c := range conns {
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 	for i := 0; i < 32; i++ {
@@ -96,7 +98,9 @@ func TestDNSCloseCancelsIncompleteTCPAndBoundsWorkers(t *testing.T) {
 			t.Fatal(err)
 		}
 		conns = append(conns, c)
-		c.Write([]byte{0})
+		if _, err := c.Write([]byte{0}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	deadline := time.Now().Add(time.Second)
 	for len(s.slots) < 32 && time.Now().Before(deadline) {
@@ -109,8 +113,10 @@ func TestDNSCloseCancelsIncompleteTCPAndBoundsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
-	c.SetReadDeadline(time.Now().Add(time.Second))
+	defer func() { _ = c.Close() }()
+	if err := c.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.Read(make([]byte, 1)); err == nil {
 		t.Fatal("excess connection accepted")
 	}

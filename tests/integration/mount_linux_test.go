@@ -84,7 +84,7 @@ touch /tmp/writable`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stat := info.Sys().(*syscall.Stat_t)
+	stat := requireType[*syscall.Stat_t](t, info.Sys())
 	if stat.Uid != 1000 || stat.Gid != 1234 {
 		t.Fatalf("bind file owner=%d:%d", stat.Uid, stat.Gid)
 	}

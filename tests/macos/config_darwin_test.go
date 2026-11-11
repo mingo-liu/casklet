@@ -24,8 +24,12 @@ func TestLocalConfigAndEnvFilesSurviveRestart(t *testing.T) {
 	if out := success(t, "exec", "--env-file", envfile, "--env", "MODE=exec", id, "--", "/bin/sh", "-c", "printf '%s\\n' \"$MODE\" \"$LITERAL\""); out != "exec\n$HOME # text\n" {
 		t.Fatal(out)
 	}
-	os.Remove(envfile)
-	os.Remove(filename)
+	if err := os.Remove(envfile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filename); err != nil {
+		t.Fatal(err)
+	}
 	success(t, "restart", id)
 	if out := success(t, "exec", id, "--", "/bin/sh", "-c", "echo $MODE"); out != "cli\n" {
 		t.Fatalf("saved environment: %q", out)

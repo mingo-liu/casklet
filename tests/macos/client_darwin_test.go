@@ -213,8 +213,8 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port
+	defer func() { _ = listener.Close() }()
+	return requireType[*net.TCPAddr](t, listener.Addr()).Port
 }
 
 func TestMachineStopStartRetainsContainers(t *testing.T) {
@@ -278,7 +278,7 @@ func TestPublishedTCPAndUDP(t *testing.T) {
 		response, err := httpClient.Get("http://" + address)
 		if err == nil {
 			data, _ := io.ReadAll(response.Body)
-			response.Body.Close()
+			_ = response.Body.Close()
 			if strings.Contains(string(data), "network-ok") {
 				last = nil
 				break
@@ -295,7 +295,7 @@ func TestPublishedTCPAndUDP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	var buffer [64]byte
 	deadline = time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {

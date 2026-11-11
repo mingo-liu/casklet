@@ -74,7 +74,9 @@ func TestCopyOverlayAndMountedStorage(t *testing.T) {
 	}
 	id := detached(t, "--image", image, "--mount", "type=bind,source="+bind+",target=/data", "--", "/bin/sleep", "300")
 	local := filepath.Join(t.TempDir(), "payload")
-	os.WriteFile(local, []byte("overlay-copy"), 0600)
+	if err := os.WriteFile(local, []byte("overlay-copy"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	success(t, "cp", local, id+":/upper")
 	success(t, "cp", local, id+":/data/value")
 	if got, _ := os.ReadFile(filepath.Join(bind, "value")); string(got) != "overlay-copy" {

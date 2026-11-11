@@ -24,7 +24,9 @@ func TestMacDeploymentHistoryAndExplicitRollback(t *testing.T) {
 	doc := map[string]any{"name": name, "networks": []string{}, "volumes": []string{"data"}, "services": map[string]any{"app": map[string]any{"run": run}}}
 	save := func(version string) {
 		t.Helper()
-		os.WriteFile(envfile, []byte("APP_VERSION="+version+"\n"), 0600)
+		if err := os.WriteFile(envfile, []byte("APP_VERSION="+version+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		data, _ := json.Marshal(doc)
 		if err := os.WriteFile(file, data, 0600); err != nil {
 			t.Fatal(err)
@@ -50,8 +52,12 @@ func TestMacDeploymentHistoryAndExplicitRollback(t *testing.T) {
 	}
 	save("two")
 	success(t, "project", "up", "--config", file, "--recreate", "app")
-	os.Remove(file)
-	os.Remove(envfile)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(envfile); err != nil {
+		t.Fatal(err)
+	}
 	success(t, "project", "rollback", "--wait", name, "1")
 	if got := success(t, "exec", ref, "--", "/bin/sh", "-c", "printf '%s:' \"$APP_VERSION\"; cat /data/value"); got != "one:durable\n" {
 		t.Fatalf("rollback: %q", got)

@@ -21,7 +21,7 @@ func TestImageTagPushPrivateRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { store.Delete(registry) })
+	t.Cleanup(func() { _ = store.Delete(registry) })
 	_, diagnostic, code := registryInputCommand(t, "casklet-fixture-token\n", "login", "-u", "casklet-test", "--password-stdin", registry)
 	if code != 0 {
 		t.Fatal(diagnostic)
@@ -42,7 +42,7 @@ func TestImageTagPushPrivateRegistry(t *testing.T) {
 		t.Fatalf("defaults lost: %q", got)
 	}
 	success(t, "logout", registry)
-	_, diagnostic, code = command(t, "image", "push", id, target)
+	_, _, code = command(t, "image", "push", id, target)
 	if code == 0 {
 		t.Fatal("anonymous push to private registry succeeded")
 	}

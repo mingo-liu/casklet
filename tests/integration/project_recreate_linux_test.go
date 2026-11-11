@@ -140,7 +140,7 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 	}
 	// Missing bind sources must fail before removing the old container.
 	mounts := dbRun["mount"]
-	dbRun["mount"] = append(append([]string(nil), mounts.([]string)...), "type=bind,source="+filepath.Join(filepath.Dir(file), "missing")+",target=/missing")
+	dbRun["mount"] = append(append([]string(nil), requireType[[]string](t, mounts)...), "type=bind,source="+filepath.Join(filepath.Dir(file), "missing")+",target=/missing")
 	save()
 	if projectRecreateCode(t, "project", "up", "--config", file, "--recreate", "db") != 125 || inspect("db").ID != db.ID {
 		t.Fatal("invalid source removed old service")

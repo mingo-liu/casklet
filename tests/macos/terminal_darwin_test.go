@@ -23,13 +23,14 @@ func openPTY(t *testing.T) (*os.File, *os.File) {
 		t.Fatal(err)
 	}
 	master := os.NewFile(uintptr(fd), "macos-test-master")
-	t.Cleanup(func() { master.Close() })
+	t.Cleanup(func() { _ = master.Close() })
 	for _, operation := range []uint{unix.TIOCPTYGRANT, unix.TIOCPTYUNLK} {
 		if err := unix.IoctlSetInt(fd, operation, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var name [128]byte
+	//lint:ignore SA1019 x/sys has no typed wrapper for the Darwin TIOCPTYGNAME request.
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.TIOCPTYGNAME, uintptr(unsafe.Pointer(&name[0])))
 	if errno != 0 {
 		t.Fatal(errno)
@@ -38,7 +39,7 @@ func openPTY(t *testing.T) (*os.File, *os.File) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { slave.Close() })
+	t.Cleanup(func() { _ = slave.Close() })
 	return master, slave
 }
 
@@ -137,7 +138,7 @@ func TestInteractiveRunAndExecResizeAndRestore(t *testing.T) {
 			}
 			after, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TIOCGETA)
 			if err != nil || *before != *after {
-				t.Fatal(fmt.Sprintf("host terminal was not restored: %v", err))
+				t.Fatalf("host terminal was not restored: %v", err)
 			}
 		})
 	}

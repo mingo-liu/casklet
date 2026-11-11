@@ -144,7 +144,7 @@ func freeNetworkPort(t *testing.T, protocol string) int {
 		if err != nil {
 			t.Fatal(err)
 		}
-		port := socket.LocalAddr().(*net.UDPAddr).Port
+		port := requireType[*net.UDPAddr](t, socket.LocalAddr()).Port
 		socket.Close()
 		return port
 	}
@@ -152,7 +152,7 @@ func freeNetworkPort(t *testing.T, protocol string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := socket.Addr().(*net.TCPAddr).Port
+	port := requireType[*net.TCPAddr](t, socket.Addr()).Port
 	socket.Close()
 	return port
 }
@@ -274,7 +274,7 @@ func TestNetworkWildcardHairpinAndHostConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	blockedPort := listener.Addr().(*net.TCPAddr).Port
+	blockedPort := requireType[*net.TCPAddr](t, listener.Addr()).Port
 	code, _, stderr = start(t, "", "run", "--rootfs", template, "--network", "bridge", "-p", fmt.Sprintf("%d:8080", blockedPort), "--", "/bin/true").wait(t)
 	if code != 125 || !strings.Contains(stderr, "reserve") {
 		t.Fatalf("host conflict code=%d stderr=%q", code, stderr)

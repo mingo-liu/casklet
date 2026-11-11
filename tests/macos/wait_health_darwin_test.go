@@ -32,7 +32,11 @@ func TestWaitHealthyThroughMacTransport(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		cancel()
+		//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+		_ = <-done
+	})
 	select {
 	case err := <-done:
 		done <- err
@@ -77,7 +81,11 @@ func TestWaitHealthyMacCancellationLeavesWorkloadRunning(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		cancel()
+		//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+		_ = <-done
+	})
 	// Let the guest signal session become active before interrupting the host.
 	time.Sleep(time.Second)
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {

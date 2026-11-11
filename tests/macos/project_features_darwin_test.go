@@ -109,7 +109,7 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	if err := follow.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { follow.Process.Kill(); follow.Wait() }()
+	defer func() { _ = follow.Process.Kill(); _ = follow.Wait() }()
 	observed := make(chan error, 1)
 	go func() {
 		var e container.Event
@@ -163,8 +163,8 @@ func TestEventsCancelWithFullHostOutputPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	fd := int(writer.Fd())
 	if err := unix.SetNonblock(fd, true); err != nil {
 		t.Fatal(err)
@@ -205,8 +205,9 @@ func TestEventsCancelWithFullHostOutputPipe(t *testing.T) {
 			t.Fatalf("event cancellation %v %s", err, &diagnostic)
 		}
 	case <-time.After(5 * time.Second):
-		cmd.Process.Kill()
-		<-done
+		_ = cmd.Process.Kill()
+		//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+		_ = <-done
 		t.Fatal("blocked event output prevented cancellation")
 	}
 	success(t, "exec", id, "--", "true")

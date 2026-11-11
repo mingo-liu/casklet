@@ -33,8 +33,8 @@ func TestStatsMultipleAndWatchThroughMacClient(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
-			cmd.Process.Kill()
-			cmd.Wait()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
 		}
 	})
 	frames := make(chan error, 1)

@@ -47,7 +47,7 @@ func TestProjectNetworkReadinessAndBatchLifecycle(t *testing.T) {
 			response, err := host.Get(fmt.Sprintf("http://127.0.0.1:%d", port))
 			if err == nil {
 				body, readErr := io.ReadAll(io.LimitReader(response.Body, 1024))
-				response.Body.Close()
+				_ = response.Body.Close()
 				if readErr == nil && response.StatusCode == http.StatusOK && string(body) == "project-ready" {
 					return
 				}

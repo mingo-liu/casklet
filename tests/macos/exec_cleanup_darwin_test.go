@@ -41,8 +41,8 @@ exit %d`, status)
 			}
 			t.Cleanup(func() {
 				if cmd.ProcessState == nil {
-					cmd.Process.Kill()
-					cmd.Wait()
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
 				}
 			})
 			reader := bufio.NewReader(output)

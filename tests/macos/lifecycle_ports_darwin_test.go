@@ -40,7 +40,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			listener.Close()
+			_ = listener.Close()
 			id := detached(t, "--network", "bridge", "-p", fmt.Sprintf("%s:%d:8080/%s", test.host, port, test.protocol), "--", "/bin/sleep", "300")
 			// A running start is idempotent even while Lima owns its host sockets.
 			original := inspectHost(t, id)
@@ -62,7 +62,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 				}
 				time.Sleep(50 * time.Millisecond)
 			}
-			defer listener.Close()
+			defer func() { _ = listener.Close() }()
 			out, diagnostic, code := command(t, test.action, id)
 			if code != 125 || out != "" || !strings.Contains(diagnostic, "macOS host port unavailable") {
 				t.Fatalf("occupied port: exit=%d stdout=%q stderr=%q", code, out, diagnostic)
@@ -70,7 +70,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 			if next := inspectHost(t, id); next.Generation != stopped.Generation || next.State != stopped.State {
 				t.Fatalf("failed preflight changed execution: before=%+v after=%+v", stopped, next)
 			}
-			listener.Close()
+			_ = listener.Close()
 			success(t, test.action, id)
 			if next := inspectHost(t, id); next.Generation != stopped.Generation+1 || next.State != "running" {
 				t.Fatalf("retry did not start a new execution: %+v", next)
