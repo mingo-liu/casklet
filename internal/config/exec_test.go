@@ -33,20 +33,27 @@ func TestExecValidation(t *testing.T) {
 }
 
 func TestExecTerminalEnvironment(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		name     string
 		baseEnv  []string
 		execEnv  []string
 		terminal bool
 		wantTerm string
 	}{
-		{"default terminal", nil, nil, true, "TERM=xterm"},
-		{"inherit explicit TERM", []string{"TERM=vt100"}, nil, true, "TERM=vt100"},
-		{"override inherited TERM", []string{"TERM=vt100"}, []string{"TERM=screen"}, true, "TERM=screen"},
-		{"allow empty TERM", nil, []string{"TERM="}, true, "TERM="},
-		{"nonterminal default", nil, nil, false, ""},
-		{"nonterminal explicit TERM", []string{"TERM=screen"}, nil, false, "TERM=screen"},
-	} {
+		{name: "default terminal", terminal: true, wantTerm: "TERM=xterm"},
+		{name: "inherit explicit TERM", baseEnv: []string{"TERM=vt100"}, terminal: true, wantTerm: "TERM=vt100"},
+		{
+			name:     "override inherited TERM",
+			baseEnv:  []string{"TERM=vt100"},
+			execEnv:  []string{"TERM=screen"},
+			terminal: true,
+			wantTerm: "TERM=screen",
+		},
+		{name: "allow empty TERM", execEnv: []string{"TERM="}, terminal: true, wantTerm: "TERM="},
+		{name: "nonterminal default", terminal: false, wantTerm: ""},
+		{name: "nonterminal explicit TERM", baseEnv: []string{"TERM=screen"}, terminal: false, wantTerm: "TERM=screen"},
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			request := Exec{Command: []string{"sh"}, TTY: tt.terminal, Env: tt.execEnv}
 			cfg := request.Apply(Config{Env: tt.baseEnv, User: &User{UID: 123, GID: 456}, ReadOnly: true})

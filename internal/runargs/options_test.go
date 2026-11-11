@@ -9,7 +9,7 @@ import (
 func TestWalkPreservesValuesBoundariesAndOriginalSpelling(t *testing.T) {
 	args := []string{"run", "-it", "--read-only=false", "--health-cmd", "--publish", "-p", "8080:80", "--image=old", "--image", "last", "--", "--image", "workload"}
 	original := append([]string(nil), args...)
-	names := []string{}
+	var names []string
 	err := Walk(args, func(name, value string, start, end int) error {
 		names = append(names, name)
 		if name == "health-cmd" && value != "--publish" {
