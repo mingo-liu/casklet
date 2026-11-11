@@ -9,10 +9,10 @@ import (
 	"strings"
 )
 
-func checkMounts(source string) error { return rejectMounts(source, false) }
-
 // CheckUnmounted refuses mounted storage before recursive deletion.
 func CheckUnmounted(source string) error { return rejectMounts(source, true) }
+
+func checkMounts(source string) error { return rejectMounts(source, false) }
 
 func rejectMounts(source string, includeRoot bool) error {
 	f, err := os.Open("/proc/self/mountinfo")

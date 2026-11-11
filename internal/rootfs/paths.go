@@ -2,7 +2,6 @@ package rootfs
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path"
 	"strings"
@@ -80,7 +79,7 @@ func PrepareImageWorkdir(tree string, cfg config.Config) error {
 	info, err := root.Stat(name)
 	if err == nil {
 		if !info.IsDir() {
-			return fmt.Errorf("image working directory must be a directory")
+			return errors.New("image working directory must be a directory")
 		}
 		return nil
 	}

@@ -13,6 +13,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ValidateSecretSources checks availability without retaining secret bytes.
+func ValidateSecretSources(secrets []config.Secret) error {
+	values, err := readSecrets(secrets)
+	for _, data := range values {
+		clear(data)
+	}
+	return err
+}
+
 // Read source files before pivot_root. No bytes enter the durable root, argv or
 // execution config; source descriptors are closed before any workload begins.
 func readSecrets(secrets []config.Secret) (values [][]byte, resultErr error) {
@@ -81,13 +90,4 @@ func mountSecrets(secrets []config.Secret, values [][]byte) error {
 		return fmt.Errorf("make secrets read-only: %w", err)
 	}
 	return nil
-}
-
-// ValidateSecretSources checks availability without retaining secret bytes.
-func ValidateSecretSources(secrets []config.Secret) error {
-	values, err := readSecrets(secrets)
-	for _, data := range values {
-		clear(data)
-	}
-	return err
 }

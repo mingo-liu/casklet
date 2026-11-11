@@ -11,14 +11,6 @@ import (
 	"time"
 )
 
-func testStore(t *testing.T) *Store {
-	t.Helper()
-	root := t.TempDir()
-	if err := os.Chmod(root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return &Store{root: root, owner: uint32(os.Geteuid())}
-}
 func TestVolumeDataSurvivesReuseAndRemovalIsFenced(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -56,12 +48,15 @@ func TestVolumeDataSurvivesReuseAndRemovalIsFenced(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	outside := t.TempDir()
 	marker := filepath.Join(outside, "keep")
-	os.WriteFile(marker, []byte("safe"), 0600)
+	if err := os.WriteFile(marker, []byte("safe"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(outside, filepath.Join(s.root, "linked")); err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +64,13 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 		t.Fatal("accepted symlink")
 	}
 	os.Remove(filepath.Join(s.root, "linked"))
-	s.Create(ctx, "data")
+	if _, err := s.Create(ctx, "data"); err != nil {
+		t.Fatal(err)
+	}
 	os.Remove(filepath.Join(s.root, "data", "data"))
-	os.Symlink(outside, filepath.Join(s.root, "data", "data"))
+	if err := os.Symlink(outside, filepath.Join(s.root, "data", "data")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Acquire(ctx, "data"); err == nil {
 		t.Fatal("accepted linked data")
 	}
@@ -82,10 +81,16 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Remove(filepath.Join(s.root, "data", "data"))
-	os.Mkdir(filepath.Join(s.root, "data", "data"), 0755)
+	if err := os.Mkdir(filepath.Join(s.root, "data", "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	stage := filepath.Join(s.root, ".create-abandoned")
-	os.Mkdir(stage, 0700)
-	os.WriteFile(filepath.Join(stage, "partial"), nil, 0600)
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "partial"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
 	records, err := s.List(ctx)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("list: %+v %v", records, err)
@@ -131,4 +136,13 @@ func TestVolumeProjectReceiptsFenceCreationAndRemoval(t *testing.T) {
 	if err := store.RemoveIfCreated(ctx, "data", record.CreatedAt, check); err != nil {
 		t.Fatalf("retry missing resource: %v", err)
 	}
+}
+
+func testStore(t *testing.T) *Store {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return &Store{root: root, owner: uint32(os.Geteuid())}
 }

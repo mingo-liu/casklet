@@ -45,151 +45,7 @@ func OpenStore() (*Store, error) {
 	}
 	return &Store{root: config.VolumeRoot}, nil
 }
-func checkDirectory(path string, owner uint32, private bool) error {
-	var st unix.Stat_t
-	if err := unix.Lstat(path, &st); err != nil {
-		return err
-	}
-	if st.Mode&unix.S_IFMT != unix.S_IFDIR || private && (st.Uid != owner || st.Mode&0077 != 0) {
-		return fmt.Errorf("unsafe volume directory: %s", path)
-	}
-	return nil
-}
-func (s *Store) openLock(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), path)
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil {
-		f.Close()
-		return nil, err
-	}
-	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != s.owner || st.Mode&0077 != 0 || st.Nlink != 1 {
-		f.Close()
-		return nil, errors.New("unsafe volume lock")
-	}
-	return f, nil
-}
-func (s *Store) lock(ctx context.Context) (*os.File, error) {
-	if err := checkDirectory(s.root, s.owner, true); err != nil {
-		return nil, err
-	}
-	f, err := s.openLock(filepath.Join(s.root, ".lock"))
-	if err != nil {
-		return nil, err
-	}
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			f.Close()
-			return nil, err
-		}
-		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return f, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			f.Close()
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			f.Close()
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
-	}
-}
-func syncDir(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
-}
-func (s *Store) read(name string) (Record, error) {
-	if err := config.ValidateVolumeName(name); err != nil {
-		return Record{}, err
-	}
-	p := filepath.Join(s.root, name)
-	if err := checkDirectory(p, s.owner, true); err != nil {
-		return Record{}, err
-	}
-	if err := checkDirectory(filepath.Join(p, "data"), s.owner, false); err != nil {
-		return Record{}, err
-	}
-	fd, err := unix.Open(filepath.Join(p, "volume.json"), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
-	if err != nil {
-		return Record{}, err
-	}
-	f := os.NewFile(uintptr(fd), "volume.json")
-	defer f.Close()
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil {
-		return Record{}, err
-	}
-	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != s.owner || st.Mode&0077 != 0 || st.Nlink != 1 || st.Size > 4096 {
-		return Record{}, errors.New("unsafe volume metadata")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, 4097))
-	if err != nil {
-		return Record{}, err
-	}
-	var r Record
-	if len(data) > 4096 || json.Unmarshal(data, &r) != nil || r.Name != name || r.CreatedAt.IsZero() {
-		return r, errors.New("invalid volume metadata")
-	}
-	return r, nil
-}
-func (s *Store) recover(ctx context.Context) error {
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(e.Name(), ".create-") && !strings.HasPrefix(e.Name(), ".remove-") {
-			continue
-		}
-		p := filepath.Join(s.root, e.Name())
-		if err := checkDirectory(p, s.owner, true); err != nil {
-			return err
-		}
-		// A restore releases the global lock while extracting, retaining its lease.
-		leasePath := filepath.Join(p, ".lease")
-		if _, err := os.Lstat(leasePath); err == nil {
-			lease, err := s.openLock(leasePath)
-			if err != nil {
-				return err
-			}
-			err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-			if errors.Is(err, unix.EWOULDBLOCK) {
-				lease.Close()
-				continue
-			}
-			if err != nil {
-				lease.Close()
-				return err
-			}
-			defer lease.Close()
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := rootfs.CheckUnmounted(p); err != nil {
-			return err
-		}
-		if err := os.RemoveAll(p); err != nil {
-			return err
-		}
-	}
-	return syncDir(s.root)
-}
+
 func (s *Store) Create(ctx context.Context, name string) (Record, error) {
 	return s.create(ctx, name, false)
 }
@@ -197,6 +53,77 @@ func (s *Store) Create(ctx context.Context, name string) (Record, error) {
 // CreateExclusive refuses to adopt an existing resource during project creation.
 func (s *Store) CreateExclusive(ctx context.Context, name string) (Record, error) {
 	return s.create(ctx, name, true)
+}
+
+func (s *Store) List(ctx context.Context) ([]Record, error) {
+	lock, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err := s.recover(ctx); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, err
+	}
+	records := []Record{}
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		r, err := s.read(e.Name())
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	return records, nil
+}
+
+func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
+	lock, err := s.lock(ctx)
+	if err != nil {
+		return Record{}, err
+	}
+	defer lock.Close()
+	return s.read(name)
+}
+
+func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
+	lock, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if _, err := s.read(name); err != nil {
+		return nil, err
+	}
+	f, err := s.openLock(filepath.Join(s.root, name, ".lease"))
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
+		f.Close()
+		return nil, ErrInUse
+	}
+	return f, nil
+}
+
+func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
+	return s.remove(ctx, name, time.Time{}, referenced)
+}
+
+// RemoveIfCreated fences a project receipt under the same lock as deletion.
+func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
+	if created.IsZero() {
+		return errors.New("resource removal requires a creation identity")
+	}
+	return s.remove(ctx, name, created, referenced)
 }
 
 func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record, error) {
@@ -258,73 +185,6 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	}
 	return r, syncDir(s.root)
 }
-func (s *Store) List(ctx context.Context) ([]Record, error) {
-	lock, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Close()
-	if err := s.recover(ctx); err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return nil, err
-	}
-	records := []Record{}
-	for _, e := range entries {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		r, err := s.read(e.Name())
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, r)
-	}
-	return records, nil
-}
-func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
-	lock, err := s.lock(ctx)
-	if err != nil {
-		return Record{}, err
-	}
-	defer lock.Close()
-	return s.read(name)
-}
-func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
-	lock, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Close()
-	if _, err := s.read(name); err != nil {
-		return nil, err
-	}
-	f, err := s.openLock(filepath.Join(s.root, name, ".lease"))
-	if err != nil {
-		return nil, err
-	}
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
-		f.Close()
-		return nil, ErrInUse
-	}
-	return f, nil
-}
-func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
-	return s.remove(ctx, name, time.Time{}, referenced)
-}
-
-// RemoveIfCreated fences a project receipt under the same lock as deletion.
-func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
-	if created.IsZero() {
-		return errors.New("resource removal requires a creation identity")
-	}
-	return s.remove(ctx, name, created, referenced)
-}
 
 func (s *Store) remove(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
 	lock, err := s.lock(ctx)
@@ -382,4 +242,155 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 		return err
 	}
 	return syncDir(s.root)
+}
+
+func (s *Store) lock(ctx context.Context) (*os.File, error) {
+	if err := checkDirectory(s.root, s.owner, true); err != nil {
+		return nil, err
+	}
+	f, err := s.openLock(filepath.Join(s.root, ".lock"))
+	if err != nil {
+		return nil, err
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return nil, err
+		}
+		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			f.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Store) openLock(path string) (*os.File, error) {
+	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != s.owner || st.Mode&0077 != 0 || st.Nlink != 1 {
+		f.Close()
+		return nil, errors.New("unsafe volume lock")
+	}
+	return f, nil
+}
+
+func (s *Store) read(name string) (Record, error) {
+	if err := config.ValidateVolumeName(name); err != nil {
+		return Record{}, err
+	}
+	p := filepath.Join(s.root, name)
+	if err := checkDirectory(p, s.owner, true); err != nil {
+		return Record{}, err
+	}
+	if err := checkDirectory(filepath.Join(p, "data"), s.owner, false); err != nil {
+		return Record{}, err
+	}
+	fd, err := unix.Open(filepath.Join(p, "volume.json"), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return Record{}, err
+	}
+	f := os.NewFile(uintptr(fd), "volume.json")
+	defer f.Close()
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		return Record{}, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != s.owner || st.Mode&0077 != 0 || st.Nlink != 1 || st.Size > 4096 {
+		return Record{}, errors.New("unsafe volume metadata")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil {
+		return Record{}, err
+	}
+	var r Record
+	if len(data) > 4096 || json.Unmarshal(data, &r) != nil || r.Name != name || r.CreatedAt.IsZero() {
+		return r, errors.New("invalid volume metadata")
+	}
+	return r, nil
+}
+
+func (s *Store) recover(ctx context.Context) error {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(e.Name(), ".create-") && !strings.HasPrefix(e.Name(), ".remove-") {
+			continue
+		}
+		p := filepath.Join(s.root, e.Name())
+		if err := checkDirectory(p, s.owner, true); err != nil {
+			return err
+		}
+		// A restore releases the global lock while extracting, retaining its lease.
+		leasePath := filepath.Join(p, ".lease")
+		if _, err := os.Lstat(leasePath); err == nil {
+			lease, err := s.openLock(leasePath)
+			if err != nil {
+				return err
+			}
+			err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+			if errors.Is(err, unix.EWOULDBLOCK) {
+				lease.Close()
+				continue
+			}
+			if err != nil {
+				lease.Close()
+				return err
+			}
+			defer lease.Close()
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := rootfs.CheckUnmounted(p); err != nil {
+			return err
+		}
+		if err := os.RemoveAll(p); err != nil {
+			return err
+		}
+	}
+	return syncDir(s.root)
+}
+
+func checkDirectory(path string, owner uint32, private bool) error {
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		return err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR || private && (st.Uid != owner || st.Mode&0077 != 0) {
+		return fmt.Errorf("unsafe volume directory: %s", path)
+	}
+	return nil
+}
+
+func syncDir(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return f.Sync()
 }

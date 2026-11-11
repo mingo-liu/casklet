@@ -13,6 +13,36 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ValidateMountSources checks sources before allocating a run or detached record.
+// Setup opens them again and pins them until all bind mounts have been installed.
+func ValidateMountSources(mounts []config.BindMount, root string) error {
+	files, err := openMountSources(mounts, root)
+	closeMountSources(files)
+	return err
+}
+
+func openMountSources(mounts []config.BindMount, root string) ([]*os.File, error) {
+	if err := config.ValidateMounts(mounts, root); err != nil {
+		return nil, err
+	}
+	files := make([]*os.File, 0, len(mounts))
+	for _, mount := range mounts {
+		file, err := openDirectory(mount.SourcePath(), false)
+		if err != nil {
+			closeMountSources(files)
+			return nil, fmt.Errorf("mount source: %w", err)
+		}
+		files = append(files, file)
+	}
+	return files, nil
+}
+
+func closeMountSources(files []*os.File) {
+	for _, file := range files {
+		file.Close()
+	}
+}
+
 // openDirectory walks from the current root using pinned, no-follow descriptors.
 // Newly created targets belong only to the private container filesystem.
 func openDirectory(path string, create bool) (*os.File, error) {
@@ -42,36 +72,6 @@ func openDirectory(path string, create bool) (*os.File, error) {
 		fd = next
 	}
 	return os.NewFile(uintptr(fd), path), nil
-}
-
-func openMountSources(mounts []config.BindMount, root string) ([]*os.File, error) {
-	if err := config.ValidateMounts(mounts, root); err != nil {
-		return nil, err
-	}
-	files := make([]*os.File, 0, len(mounts))
-	for _, mount := range mounts {
-		file, err := openDirectory(mount.SourcePath(), false)
-		if err != nil {
-			closeMountSources(files)
-			return nil, fmt.Errorf("mount source: %w", err)
-		}
-		files = append(files, file)
-	}
-	return files, nil
-}
-
-func closeMountSources(files []*os.File) {
-	for _, file := range files {
-		file.Close()
-	}
-}
-
-// ValidateMountSources checks sources before allocating a run or detached record.
-// Setup opens them again and pins them until all bind mounts have been installed.
-func ValidateMountSources(mounts []config.BindMount, root string) error {
-	files, err := openMountSources(mounts, root)
-	closeMountSources(files)
-	return err
 }
 
 // mountDirectories runs after pivot_root and runtime mounts, before any workload.

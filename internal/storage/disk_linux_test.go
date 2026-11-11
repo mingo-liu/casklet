@@ -5,28 +5,37 @@ package storage
 import (
 	"context"
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestAllocationExcludesSymlinksAndDeduplicatesHardlinks(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "file")
-	os.WriteFile(path, make([]byte, 8192), 0600)
+	if err := os.WriteFile(path, make([]byte, 8192), 0600); err != nil {
+		t.Fatal(err)
+	}
 	before, err := AllocatedBytes(context.Background(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Link(path, filepath.Join(dir, "alias"))
+	if err := os.Link(path, filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
 	after, err := AllocatedBytes(context.Background(), dir)
 	if err != nil || after != before {
 		t.Fatalf("hardlink counted twice: %d %d %v", before, after, err)
 	}
 	outside := t.TempDir()
-	os.WriteFile(filepath.Join(outside, "large"), make([]byte, 1<<20), 0600)
-	os.Symlink(outside, filepath.Join(dir, "outside"))
+	if err := os.WriteFile(filepath.Join(outside, "large"), make([]byte, 1<<20), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "outside")); err != nil {
+		t.Fatal(err)
+	}
 	after, err = AllocatedBytes(context.Background(), dir)
 	if err != nil || after > before+4096 {
 		t.Fatalf("followed symlink: %d %d %v", before, after, err)
@@ -40,14 +49,20 @@ func TestAllocationExcludesSymlinksAndDeduplicatesHardlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestDiskUsageCountsCategoriesAndSparseAllocation(t *testing.T) {
 	root := t.TempDir()
-	os.Mkdir(filepath.Join(root, "volumes"), 0700)
+	if err := os.Mkdir(filepath.Join(root, "volumes"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	f, err := os.Create(filepath.Join(root, "volumes", "sparse"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Truncate(1 << 30)
+	if err := f.Truncate(1 << 30); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
 	f.Close()
 	r, err := usageAt(context.Background(), root)
 	if err != nil {

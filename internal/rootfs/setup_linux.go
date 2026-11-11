@@ -4,6 +4,7 @@ package rootfs
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,7 +40,7 @@ func Setup(cfg config.Config) error {
 		return err
 	}
 	if root == "/" {
-		return fmt.Errorf("cannot switch to the host root")
+		return errors.New("cannot switch to the host root")
 	}
 	for _, name := range []string{"proc", "dev", "tmp"} {
 		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil && !os.IsExist(err) {
@@ -75,7 +76,10 @@ func Setup(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = unix.Unmount(oldRoot, unix.MNT_DETACH); _ = os.Remove(oldRoot) }()
+	defer func() {
+		_ = unix.Unmount(oldRoot, unix.MNT_DETACH)
+		_ = os.Remove(oldRoot)
+	}()
 	if err := unix.PivotRoot(root, oldRoot); err != nil {
 		return fmt.Errorf("pivot rootfs: %w", err)
 	}
@@ -106,7 +110,12 @@ func Setup(cfg config.Config) error {
 			return fmt.Errorf("bind device %s: %w", name, err)
 		}
 	}
-	for _, link := range []struct{ name, target string }{{"fd", "/proc/self/fd"}, {"stdin", "fd/0"}, {"stdout", "fd/1"}, {"stderr", "fd/2"}} {
+	for _, link := range []struct{ name, target string }{
+		{name: "fd", target: "/proc/self/fd"},
+		{name: "stdin", target: "fd/0"},
+		{name: "stdout", target: "fd/1"},
+		{name: "stderr", target: "fd/2"},
+	} {
 		if err := os.Symlink(link.target, "/dev/"+link.name); err != nil {
 			return err
 		}

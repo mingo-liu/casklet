@@ -23,8 +23,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxArchiveBytes int64 = 16 << 30
-const maxArchiveEntries = 1000000
+const (
+	_maxArchiveBytes   int64 = 16 << 30
+	_maxArchiveEntries       = 1000000
+)
+
+var (
+	_ io.Reader = (*archiveReader)(nil)
+	_ io.Writer = (*archiveWriter)(nil)
+)
 
 type archiveReader struct {
 	ctx    context.Context
@@ -33,43 +40,10 @@ type archiveReader struct {
 	tail   [1024]byte
 }
 
-func (r *archiveReader) Read(p []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if r.count >= maxArchiveBytes {
-		return 0, errors.New("volume archive exceeds 16 GiB")
-	}
-	if int64(len(p)) > maxArchiveBytes-r.count {
-		p = p[:maxArchiveBytes-r.count]
-	}
-	n, err := r.reader.Read(p)
-	if n >= len(r.tail) {
-		copy(r.tail[:], p[n-len(r.tail):n])
-	} else {
-		copy(r.tail[:], r.tail[n:])
-		copy(r.tail[len(r.tail)-n:], p[:n])
-	}
-	r.count += int64(n)
-	return n, err
-}
-
 type archiveWriter struct {
 	ctx    context.Context
 	writer io.Writer
 	count  int64
-}
-
-func (w *archiveWriter) Write(p []byte) (int, error) {
-	if err := w.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if int64(len(p)) > maxArchiveBytes-w.count {
-		return 0, errors.New("volume archive exceeds 16 GiB")
-	}
-	n, err := w.writer.Write(p)
-	w.count += int64(n)
-	return n, err
 }
 
 // Export holds an exclusive usage lease, allowing retained references but no
@@ -110,7 +84,7 @@ func (s *Store) Export(ctx context.Context, name string, destination io.Writer) 
 	defer lease.Close()
 	defer root.Close()
 	writer := tar.NewWriter(&archiveWriter{ctx: ctx, writer: destination})
-	links := map[[2]uint64]string{}
+	links := make(map[[2]uint64]string)
 	count := 0
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -120,7 +94,7 @@ func (s *Store) Export(ctx context.Context, name string, destination io.Writer) 
 			return err
 		}
 		count++
-		if count > maxArchiveEntries {
+		if count > _maxArchiveEntries {
 			return errors.New("volume archive exceeds entry limit")
 		}
 		info, err := root.Lstat(name)
@@ -142,7 +116,10 @@ func (s *Store) Export(ctx context.Context, name string, destination io.Writer) 
 			return err
 		}
 		header.Name = name
-		st := info.Sys().(*syscall.Stat_t)
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || st == nil {
+			return errors.New("volume ownership metadata is unavailable")
+		}
 		header.Uid, header.Gid = int(st.Uid), int(st.Gid)
 		header.Uname, header.Gname = "", ""
 		if info.Mode().IsRegular() {
@@ -276,70 +253,43 @@ func (s *Store) Restore(ctx context.Context, name string, source io.Reader) (Rec
 	return record, syncDir(s.root)
 }
 
-func safeArchivePath(name string) (string, error) {
-	if name == "" || path.IsAbs(name) || len(name) > 4096 || strings.ContainsRune(name, 0) {
-		return "", errors.New("invalid volume archive path")
+func (r *archiveReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	for _, part := range strings.Split(name, "/") {
-		if part == ".." {
-			return "", errors.New("volume archive path contains traversal")
-		}
+	if r.count >= _maxArchiveBytes {
+		return 0, errors.New("volume archive exceeds 16 GiB")
 	}
-	return path.Clean(name), nil
+	if int64(len(p)) > _maxArchiveBytes-r.count {
+		p = p[:_maxArchiveBytes-r.count]
+	}
+	n, err := r.reader.Read(p)
+	if n >= len(r.tail) {
+		copy(r.tail[:], p[n-len(r.tail):n])
+	} else {
+		copy(r.tail[:], r.tail[n:])
+		copy(r.tail[len(r.tail)-n:], p[:n])
+	}
+	r.count += int64(n)
+	return n, err
 }
 
-// No archive entry may write through a symlink, even a confined one.
-func archiveParents(root *os.Root, name string) error {
-	parts := strings.Split(path.Dir(name), "/")
-	parent := "."
-	for _, part := range parts {
-		parent = path.Join(parent, part)
-		info, err := root.Lstat(parent)
-		if errors.Is(err, os.ErrNotExist) {
-			if err := root.Mkdir(parent, 0755); err != nil {
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			return errors.New("archive parent must be a directory, not a symlink")
-		}
+func (w *archiveWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
 	}
-	return nil
-}
-
-func archiveMetadata(root *os.Root, h *tar.Header) error {
-	if err := root.Lchown(h.Name, h.Uid, h.Gid); err != nil {
-		return err
+	if int64(len(p)) > _maxArchiveBytes-w.count {
+		return 0, errors.New("volume archive exceeds 16 GiB")
 	}
-	if h.Typeflag != tar.TypeSymlink {
-		mode := fs.FileMode(h.Mode & 0777)
-		if h.Mode&01000 != 0 {
-			mode |= os.ModeSticky
-		}
-		if h.Mode&04000 != 0 {
-			mode |= os.ModeSetuid
-		}
-		if h.Mode&02000 != 0 {
-			mode |= os.ModeSetgid
-		}
-		if err := root.Chmod(h.Name, mode); err != nil {
-			return err
-		}
-		if err := root.Chtimes(h.Name, h.ModTime, h.ModTime); err != nil {
-			return err
-		}
-	}
-	return nil
+	n, err := w.writer.Write(p)
+	w.count += int64(n)
+	return n, err
 }
 
 func restoreArchive(ctx context.Context, root *os.Root, source io.Reader) error {
 	stream := &archiveReader{ctx: ctx, reader: source}
 	reader := tar.NewReader(stream)
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	var dirs, links []*tar.Header
 	for count := 0; ; count++ {
 		before := stream.count
@@ -375,7 +325,7 @@ func restoreArchive(ctx context.Context, root *os.Root, source io.Reader) error 
 		if err != nil {
 			return err
 		}
-		if count >= maxArchiveEntries {
+		if count >= _maxArchiveEntries {
 			return errors.New("volume archive exceeds entry limit")
 		}
 		name, err := safeArchivePath(header.Name)
@@ -390,7 +340,7 @@ func restoreArchive(ctx context.Context, root *os.Root, source io.Reader) error 
 		if header.Uid < 0 || header.Gid < 0 || uint64(header.Uid) >= uint64(^uint32(0)) || uint64(header.Gid) >= uint64(^uint32(0)) {
 			return errors.New("invalid volume archive ownership")
 		}
-		if header.Size < 0 || header.Size > maxArchiveBytes-stream.count {
+		if header.Size < 0 || header.Size > _maxArchiveBytes-stream.count {
 			return errors.New("volume archive exceeds size limit")
 		}
 		if err := archiveParents(root, name); err != nil {
@@ -496,4 +446,65 @@ func restoreArchive(ctx context.Context, root *os.Root, source io.Reader) error 
 		}
 	}
 	return ctx.Err()
+}
+
+func safeArchivePath(name string) (string, error) {
+	if name == "" || path.IsAbs(name) || len(name) > 4096 || strings.ContainsRune(name, 0) {
+		return "", errors.New("invalid volume archive path")
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return "", errors.New("volume archive path contains traversal")
+		}
+	}
+	return path.Clean(name), nil
+}
+
+// No archive entry may write through a symlink, even a confined one.
+func archiveParents(root *os.Root, name string) error {
+	parts := strings.Split(path.Dir(name), "/")
+	parent := "."
+	for _, part := range parts {
+		parent = path.Join(parent, part)
+		info, err := root.Lstat(parent)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := root.Mkdir(parent, 0755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return errors.New("archive parent must be a directory, not a symlink")
+		}
+	}
+	return nil
+}
+
+func archiveMetadata(root *os.Root, h *tar.Header) error {
+	if err := root.Lchown(h.Name, h.Uid, h.Gid); err != nil {
+		return err
+	}
+	if h.Typeflag == tar.TypeSymlink {
+		return nil
+	}
+	mode := fs.FileMode(h.Mode & 0777)
+	if h.Mode&01000 != 0 {
+		mode |= os.ModeSticky
+	}
+	if h.Mode&04000 != 0 {
+		mode |= os.ModeSetuid
+	}
+	if h.Mode&02000 != 0 {
+		mode |= os.ModeSetgid
+	}
+	if err := root.Chmod(h.Name, mode); err != nil {
+		return err
+	}
+	if err := root.Chtimes(h.Name, h.ModTime, h.ModTime); err != nil {
+		return err
+	}
+	return nil
 }

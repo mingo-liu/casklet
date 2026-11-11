@@ -15,11 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const overlayMarker = ".casklet-overlay-v1.json"
-
-// OverlayStoragePath is engine-owned storage separate from a legacy full root.
-// A file inside an arbitrary directory root can never select this backend.
-func OverlayStoragePath(retainedRoot string) string { return retainedRoot + ".overlay" }
+const _overlayMarker = ".casklet-overlay-v1.json"
 
 type overlayRecord struct {
 	Version int    `json:"version"`
@@ -34,23 +30,15 @@ type Overlay struct {
 	Target  string `json:"target"`
 }
 
-func validOverlayID(id string) bool {
-	if !strings.HasPrefix(id, "sha256:") || len(id) != 71 {
-		return false
-	}
-	for _, c := range id[7:] {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
+// OverlayStoragePath is engine-owned storage separate from a legacy full root.
+// A file inside an arbitrary directory root can never select this backend.
+func OverlayStoragePath(retainedRoot string) string { return retainedRoot + ".overlay" }
 
 // ReadOverlayImageID distinguishes retained overlay storage from legacy copied
 // roots. It validates the private envelope before callers reacquire the lower
 // image. The upper filesystem may have arbitrary image ownership and modes.
 func ReadOverlayImageID(storage string) (string, bool, error) {
-	fd, err := unix.Open(filepath.Join(storage, overlayMarker), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	fd, err := unix.Open(filepath.Join(storage, _overlayMarker), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", false, nil
 	}
@@ -63,7 +51,8 @@ func ReadOverlayImageID(storage string) (string, bool, error) {
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return "", false, err
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0077 != 0 || stat.Nlink != 1 || stat.Size > 1024 {
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0077 != 0 ||
+		stat.Nlink != 1 || stat.Size > 1024 {
 		return "", false, errors.New("unsafe retained overlay record")
 	}
 	if err := privateOverlayDirectory(storage); err != nil {
@@ -93,24 +82,6 @@ func ReadOverlayImageID(storage string) (string, bool, error) {
 		return "", false, err
 	}
 	return record.Image, true, nil
-}
-
-func privateOverlayDirectory(path string) error {
-	var stat unix.Stat_t
-	if err := unix.Lstat(path, &stat); err != nil {
-		return err
-	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0077 != 0 {
-		return errors.New("overlay storage must be a private directory owned by the engine")
-	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return err
-	}
-	if resolved != path {
-		return errors.New("overlay storage path contains a symlink")
-	}
-	return nil
 }
 
 // CreateOverlayStorage initializes an empty private directory without copying
@@ -164,7 +135,7 @@ func CreateOverlayStorage(ctx context.Context, lower, storage, image string) err
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(storage, overlayMarker), data, 0600)
+	return os.WriteFile(filepath.Join(storage, _overlayMarker), data, 0600)
 }
 
 // MountOverlay runs only inside init's new mount namespace. Pinned descriptors
@@ -199,12 +170,43 @@ func MountOverlay(overlay Overlay) error {
 		}
 		files = append(files, os.NewFile(uintptr(fd), "overlay-directory"))
 	}
-	if within(overlay.Lower, overlay.Target) || within(overlay.Target, overlay.Lower) || within(overlay.Storage, overlay.Target) || within(overlay.Target, overlay.Storage) {
+	if within(overlay.Lower, overlay.Target) || within(overlay.Target, overlay.Lower) ||
+		within(overlay.Storage, overlay.Target) || within(overlay.Target, overlay.Storage) {
 		return errors.New("overlay mount paths must not overlap")
 	}
 	options := fmt.Sprintf("lowerdir=/proc/self/fd/%d,upperdir=/proc/self/fd/%d,workdir=/proc/self/fd/%d,index=off,redirect_dir=nofollow,metacopy=off", files[0].Fd(), files[1].Fd(), files[2].Fd())
 	if err := unix.Mount("overlay", fmt.Sprintf("/proc/self/fd/%d", files[3].Fd()), "overlay", unix.MS_NOSUID|unix.MS_NODEV, options); err != nil {
 		return fmt.Errorf("mount image copy-on-write filesystem (OverlayFS support is required): %w", err)
+	}
+	return nil
+}
+
+func validOverlayID(id string) bool {
+	if !strings.HasPrefix(id, "sha256:") || len(id) != 71 {
+		return false
+	}
+	for _, c := range id[7:] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func privateOverlayDirectory(path string) error {
+	var stat unix.Stat_t
+	if err := unix.Lstat(path, &stat); err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != uint32(os.Geteuid()) || stat.Mode&0077 != 0 {
+		return errors.New("overlay storage must be a private directory owned by the engine")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	if resolved != path {
+		return errors.New("overlay storage path contains a symlink")
 	}
 	return nil
 }
