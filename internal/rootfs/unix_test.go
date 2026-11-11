@@ -39,11 +39,11 @@ func TestPinnedSourceRejectsEscapingAncestor(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(outside, "file"), []byte("host-secret"), 0600))
 	root, err := os.OpenRoot(source)
 	must(t, err)
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	must(t, os.Remove(filepath.Join(source, "directory")))
 	must(t, os.Symlink(outside, filepath.Join(source, "directory")))
 	if file, err := openRootSource(root, "directory/file"); err == nil {
-		file.Close()
+		_ = file.Close()
 		t.Fatal("pinned source read outside its root through a replaced ancestor")
 	}
 }

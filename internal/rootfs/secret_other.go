@@ -4,6 +4,7 @@ package rootfs
 
 import (
 	"errors"
+
 	"github.com/mingo-liu/casklet/internal/config"
 )
 

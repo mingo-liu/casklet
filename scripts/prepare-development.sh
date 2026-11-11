@@ -7,7 +7,7 @@ fail() { printf 'prepare-development: %s\n' "$*" >&2; exit 1; }
 sudo -n true || fail 'passwordless sudo is required'
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gcc make
-version=1.27.3
+version=1.27.4
 if command -v go >/dev/null 2>&1; then
     go version
     exit 0
@@ -15,11 +15,11 @@ fi
 case $(uname -m) in
     aarch64)
         arch=arm64
-        checksum=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+        checksum=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
         ;;
     x86_64)
         arch=amd64
-        checksum=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+        checksum=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
         ;;
     *) fail 'unsupported Linux architecture' ;;
 esac

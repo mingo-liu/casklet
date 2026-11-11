@@ -70,9 +70,9 @@ func TestProjectExternalVolumeDeclarations(t *testing.T) {
 		}
 	}
 	for _, owned := range []int{0, 1, 16} {
-		document := map[string]any{"name": "demo", "services": map[string]any{"app": map[string]any{"run": map[string]any{}}}}
+		document := map[string]any{"name": "demo", "services": map[string]any{"app": map[string]any{"run": make(map[string]any)}}}
 		volumes := []string{}
-		external := map[string]string{}
+		external := make(map[string]string)
 		for i := 0; i < owned; i++ {
 			volumes = append(volumes, fmt.Sprintf("owned-%d", i))
 		}

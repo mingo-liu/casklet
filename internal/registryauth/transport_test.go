@@ -9,36 +9,35 @@ import (
 
 type transportFunc func(*http.Request) (*http.Response, error)
 
-func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 func TestScopedTransportStripsRedirectAuthAndRejectsSecretPost(t *testing.T) {
 	registry, _ := url.Parse("https://registry.example:443")
 	realm, _ := url.Parse("https://auth.example/token")
-	for _, tc := range []struct {
+	tests := []struct {
 		url, method          string
 		authorized, rejected bool
 	}{
-		{"https://registry.example:443/v2/app", "GET", true, false},
-		{"https://registry.example:444/v2/app", "GET", false, false},
-		{"http://registry.example:443/v2/app", "GET", false, false},
-		{"https://auth.example/token?scope=pull", "POST", true, false},
-		{"https://auth.example/other", "POST", false, true},
-		{"https://cdn.example/blob", "GET", false, false},
-		{"https://other.example/token", "POST", false, true},
-	} {
+		{url: "https://registry.example:443/v2/app", method: "GET", authorized: true, rejected: false},
+		{url: "https://registry.example:444/v2/app", method: "GET", authorized: false, rejected: false},
+		{url: "http://registry.example:443/v2/app", method: "GET", authorized: false, rejected: false},
+		{url: "https://auth.example/token?scope=pull", method: "POST", authorized: true, rejected: false},
+		{url: "https://auth.example/other", method: "POST", authorized: false, rejected: true},
+		{url: "https://cdn.example/blob", method: "GET", authorized: false, rejected: false},
+		{url: "https://other.example/token", method: "POST", authorized: false, rejected: true},
+	}
+	for _, tt := range tests {
 		called := false
 		base := transportFunc(func(r *http.Request) (*http.Response, error) {
 			called = true
-			if (r.Header.Get("Authorization") != "") != tc.authorized {
-				t.Fatalf("authorization scope mismatch: %s", tc.url)
+			if (r.Header.Get("Authorization") != "") != tt.authorized {
+				t.Fatalf("authorization scope mismatch: %s", tt.url)
 			}
 			return &http.Response{StatusCode: 200}, nil
 		})
-		request, _ := http.NewRequest(tc.method, tc.url, strings.NewReader("sensitive body"))
+		request, _ := http.NewRequest(tt.method, tt.url, strings.NewReader("sensitive body"))
 		request.Header.Set("Authorization", "Basic fixture-secret")
 		_, err := (ScopedTransport{Base: base, Registry: registry, Realm: realm}).RoundTrip(request)
-		if (err != nil) != tc.rejected || called == tc.rejected {
-			t.Fatalf("redirect handling: %s %v", tc.url, err)
+		if (err != nil) != tt.rejected || called == tt.rejected {
+			t.Fatalf("redirect handling: %s %v", tt.url, err)
 		}
 		if request.Header.Get("Authorization") == "" {
 			t.Fatal("mutated original request")
@@ -47,7 +46,7 @@ func TestScopedTransportStripsRedirectAuthAndRejectsSecretPost(t *testing.T) {
 }
 
 func TestTokenRealmRequiresAbsoluteHTTPSOrLoopbackHTTP(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		registry, realm string
 		allowed         bool
 	}{
@@ -60,11 +59,14 @@ func TestTokenRealmRequiresAbsoluteHTTPSOrLoopbackHTTP(t *testing.T) {
 		{"https://registry.example", "/token", false},
 		{"https://registry.example", "https:///token", false},
 		{"https://registry.example", "https://user:password@auth.example/token", false},
-	} {
-		registry, _ := url.Parse(tc.registry)
-		_, err := TokenRealm(tc.realm, registry)
-		if (err == nil) != tc.allowed {
-			t.Fatalf("realm policy: %q -> %q: %v", tc.registry, tc.realm, err)
+	}
+	for _, tt := range tests {
+		registry, _ := url.Parse(tt.registry)
+		_, err := TokenRealm(tt.realm, registry)
+		if (err == nil) != tt.allowed {
+			t.Fatalf("realm policy: %q -> %q: %v", tt.registry, tt.realm, err)
 		}
 	}
 }
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

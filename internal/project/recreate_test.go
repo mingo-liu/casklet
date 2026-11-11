@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,21 +14,9 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func deployedProject(t *testing.T) (*fakeProject, *Runner, Plan) {
-	t.Helper()
-	fake := newFakeProject()
-	runner := fakeRunner(fake)
-	plan := fakePlan()
-	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err != nil {
-		t.Fatal(err)
-	}
-	fake.mutations = nil
-	return fake, runner, plan
-}
-
 func TestRecreateSelectedServicePreservesOtherIdentityAndVolumes(t *testing.T) {
 	fake, runner, plan := deployedProject(t)
-	before, resources := append([]container.Record(nil), fake.records...), cloneResources(fake.resources)
+	before, resources := append([]container.Record(nil), fake.records...), maps.Clone(fake.resources)
 	plan.Services[1].Fingerprint = "updated"
 	for i, arg := range plan.Services[1].Args {
 		if arg == LabelSpec+"=spec-api" {
@@ -49,14 +38,6 @@ func TestRecreateSelectedServicePreservesOtherIdentityAndVolumes(t *testing.T) {
 	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second, Recreate: []string{"api"}}); err != nil || len(fake.mutations) != 2 {
 		t.Fatalf("same config recreation: %v, %v", err, fake.mutations)
 	}
-}
-
-func cloneResources(values map[string]Resource) map[string]Resource {
-	result := map[string]Resource{}
-	for key, value := range values {
-		result[key] = value
-	}
-	return result
 }
 
 func TestRecreateRejectsUnselectedDriftAndOwnershipBeforeMutation(t *testing.T) {
@@ -98,7 +79,7 @@ func TestRecreateRejectsUnselectedDriftAndOwnershipBeforeMutation(t *testing.T) 
 
 func TestProjectPreviewNeverMutatesOrReleasesOwnership(t *testing.T) {
 	fake, runner, plan := deployedProject(t)
-	before, saved := cloneResources(runner.State.Resources), fake.saves
+	before, saved := maps.Clone(runner.State.Resources), fake.saves
 	plan.ExternalVolumes = plan.Volumes
 	plan.Volumes = nil
 	fake.records[0].State = container.StateExited
@@ -119,7 +100,7 @@ func TestProjectPreviewNeverMutatesOrReleasesOwnership(t *testing.T) {
 
 func TestRecreateFailurePreservesUnaffectedAndRetryCreatesMissingService(t *testing.T) {
 	fake, runner, plan := deployedProject(t)
-	db, resources := fake.records[0], cloneResources(fake.resources)
+	db, resources := fake.records[0], maps.Clone(fake.resources)
 	fake.failRun = "cp-demo-api"
 	if _, err := runner.Up(context.Background(), plan, UpOptions{Recreate: []string{"api"}, Timeout: time.Second}); err == nil {
 		t.Fatal("expected failure")
@@ -233,4 +214,16 @@ func TestPreflightSkipsPublishLikeOptionValues(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("preflight=%q want=%q", got, want)
 	}
+}
+
+func deployedProject(t *testing.T) (*fakeProject, *Runner, Plan) {
+	t.Helper()
+	fake := newFakeProject()
+	runner := fakeRunner(fake)
+	plan := fakePlan()
+	if _, err := runner.Up(context.Background(), plan, UpOptions{Timeout: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	fake.mutations = nil
+	return fake, runner, plan
 }

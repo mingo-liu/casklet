@@ -36,7 +36,10 @@ func TestLayerReassignsDirectoryOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, gid := rootfs.Ownership(info)
+	uid, gid, err := rootfs.Ownership(info)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if uid != uint32(os.Geteuid()) || gid != uint32(os.Getegid()) {
 		t.Fatalf("directory owner remained %d:%d", uid, gid)
 	}

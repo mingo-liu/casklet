@@ -71,7 +71,7 @@ func TestMountTargetCreationRejectsSymlinksAndFiles(t *testing.T) {
 	}
 	for _, target := range []string{link, link + "/created", file, file + "/created", "relative", dir + "/../escape"} {
 		if f, err := openDirectory(target, true); err == nil {
-			f.Close()
+			_ = f.Close()
 			t.Errorf("accepted target %s", target)
 		}
 	}
@@ -83,7 +83,7 @@ func TestMountTargetCreationRejectsSymlinksAndFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		t.Fatalf("target not created: %v", err)
 	}

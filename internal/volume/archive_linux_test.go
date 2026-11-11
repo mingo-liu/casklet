@@ -19,16 +19,30 @@ import (
 func TestArchiveRoundTripAndExclusiveLease(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	s.Create(ctx, "source")
+	if _, err := s.Create(ctx, "source"); err != nil {
+		t.Fatal(err)
+	}
 	data := filepath.Join(s.root, "source", "data")
-	os.Mkdir(filepath.Join(data, "private"), 0700)
+	if err := os.Mkdir(filepath.Join(data, "private"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	filename := filepath.Join(data, "private", "value")
-	os.WriteFile(filename, []byte("persistent\x00data"), 0640)
+	if err := os.WriteFile(filename, []byte("persistent\x00data"), 0640); err != nil {
+		t.Fatal(err)
+	}
 	timestamp := time.Unix(1600000000, 0)
-	os.Chtimes(filename, timestamp, timestamp)
-	os.Link(filename, filepath.Join(data, "hard"))
-	os.Symlink("/outside/never-read", filepath.Join(data, "absolute"))
-	os.Symlink("private/value", filepath.Join(data, "relative"))
+	if err := os.Chtimes(filename, timestamp, timestamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filename, filepath.Join(data, "hard")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/outside/never-read", filepath.Join(data, "absolute")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("private/value", filepath.Join(data, "relative")); err != nil {
+		t.Fatal(err)
+	}
 	lease, err := s.Acquire(ctx, "source")
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +51,7 @@ func TestArchiveRoundTripAndExclusiveLease(t *testing.T) {
 	if err := s.Export(ctx, "source", &archive); !errors.Is(err, ErrInUse) {
 		t.Fatalf("live export: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	if err := s.Export(ctx, "source", &archive); err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +63,17 @@ func TestArchiveRoundTripAndExclusiveLease(t *testing.T) {
 	if err != nil || string(got) != "persistent\x00data" {
 		t.Fatalf("content: %q %v", got, err)
 	}
-	info, _ := os.Stat(filepath.Join(restored, "private", "value"))
+	info, err := os.Stat(filepath.Join(restored, "private", "value"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if info.Mode().Perm() != 0640 || !info.ModTime().Equal(timestamp) {
 		t.Fatalf("metadata: %v", info)
 	}
-	linked, _ := os.Stat(filepath.Join(restored, "hard"))
+	linked, err := os.Stat(filepath.Join(restored, "hard"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !os.SameFile(info, linked) {
 		t.Fatal("hardlink lost")
 	}
@@ -75,24 +95,6 @@ func TestArchiveRoundTripAndExclusiveLease(t *testing.T) {
 			t.Fatalf("published failed restore: %v", err)
 		}
 	}
-}
-
-func tarFixture(t *testing.T, headers ...*tar.Header) []byte {
-	t.Helper()
-	var b bytes.Buffer
-	writer := tar.NewWriter(&b)
-	for _, h := range headers {
-		h.Uid = os.Geteuid()
-		h.Gid = os.Getgid()
-		h.ModTime = time.Unix(1600000000, 0)
-		if err := writer.WriteHeader(h); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return b.Bytes()
 }
 
 func TestRestoreRejectsUnsafeArchiveAndCleansStaging(t *testing.T) {
@@ -126,8 +128,17 @@ func TestRestoreRejectsUnsafeArchiveAndCleansStaging(t *testing.T) {
 func TestLiveRestoreSurvivesRecoveryAndDoesNotBlockOtherVolumes(t *testing.T) {
 	s := testStore(t)
 	reader, writer := io.Pipe()
-	done := make(chan error, 1)
-	go func() { _, err := s.Restore(context.Background(), "copy", reader); done <- err }()
+	done := make(chan struct{})
+	var restoreErr error
+	go func() {
+		defer close(done)
+		_, restoreErr = s.Restore(context.Background(), "copy", reader)
+	}()
+	t.Cleanup(func() {
+		_ = writer.Close()
+		_ = reader.Close()
+		<-done
+	})
 	deadline := time.Now().Add(time.Second)
 	for {
 		entries, _ := os.ReadDir(s.root)
@@ -150,10 +161,15 @@ func TestLiveRestoreSurvivesRecoveryAndDoesNotBlockOtherVolumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	archive := tarFixture(t, &tar.Header{Name: "value", Typeflag: tar.TypeReg})
-	writer.Write(archive)
-	writer.Close()
-	if err := <-done; err != nil {
+	if _, err := writer.Write(archive); err != nil {
 		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if restoreErr != nil {
+		t.Fatal(restoreErr)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -164,9 +180,31 @@ func TestLiveRestoreSurvivesRecoveryAndDoesNotBlockOtherVolumes(t *testing.T) {
 
 func TestExportRejectsSpecialFiles(t *testing.T) {
 	s := testStore(t)
-	s.Create(context.Background(), "source")
-	syscall.Mkfifo(filepath.Join(s.root, "source", "data", "fifo"), 0600)
+	if _, err := s.Create(context.Background(), "source"); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(s.root, "source", "data", "fifo"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Export(context.Background(), "source", io.Discard); err == nil {
 		t.Fatal("exported FIFO")
 	}
+}
+
+func tarFixture(t *testing.T, headers ...*tar.Header) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	writer := tar.NewWriter(&b)
+	for _, h := range headers {
+		h.Uid = os.Geteuid()
+		h.Gid = os.Getgid()
+		h.ModTime = time.Unix(1600000000, 0)
+		if err := writer.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
 }

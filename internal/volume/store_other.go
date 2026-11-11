@@ -29,6 +29,7 @@ func (*Store) Restore(context.Context, string, io.Reader) (Record, error) {
 func (*Store) CreateExclusive(context.Context, string) (Record, error) {
 	return Record{}, errUnsupported
 }
+
 func (*Store) RemoveIfCreated(context.Context, string, time.Time, ReferenceCheck) error {
 	return errUnsupported
 }

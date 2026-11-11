@@ -13,11 +13,15 @@ import (
 	"github.com/mingo-liu/casklet/internal/template"
 )
 
-const Name = "casklet-runtime"
-const BuiltinRootFS = "builtin:busybox"
-const guestRootFS = template.BuiltinPath
-const guestEngine = "/usr/local/bin/casklet"
+// Host machine identity and source defaults.
+const (
+	Name          = "casklet-runtime"
+	BuiltinRootFS = "builtin:busybox"
+	_guestRootFS  = template.BuiltinPath
+	_guestEngine  = "/usr/local/bin/casklet"
+)
 
+// Options sets the initial VM resources and additional writable host shares.
 type Options struct {
 	CPUs   int
 	Memory int
@@ -25,6 +29,7 @@ type Options struct {
 	Mounts []string
 }
 
+// Instance is the Lima metadata used for host resource translation and SSH.
 type Instance struct {
 	Name          string `json:"name"`
 	Status        string `json:"status"`
@@ -43,6 +48,41 @@ type Instance struct {
 			Writable   bool   `json:"writable"`
 		} `json:"mounts"`
 	} `json:"config"`
+}
+
+func (instance Instance) hostPath(path string) (string, error) {
+	if path == BuiltinRootFS {
+		return _guestRootFS, nil
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	absolute, err = filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("host path must be a directory: %s", path)
+	}
+	for _, mount := range instance.Config.Mounts {
+		if within(mount.Location, absolute) && mount.Writable {
+			rel, _ := filepath.Rel(mount.Location, absolute)
+			point := mount.MountPoint
+			if point == "" {
+				point = mount.Location
+			}
+			return filepath.Join(point, rel), nil
+		}
+	}
+	if instance.Name == "" {
+		return "", fmt.Errorf("directory is not shared with the default machine: %s; create it with casklet machine init --mount %s before retrying", absolute, quote(absolute))
+	}
+	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with casklet machine stop, add it with casklet machine share %s, then casklet machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
 }
 
 func defaultOptions() Options { return Options{CPUs: 4, Memory: 4, Disk: 20} }
@@ -74,7 +114,12 @@ func configData(options Options) ([]byte, error) {
 		return nil, err
 	}
 	paths := append([]string{home}, options.Mounts...)
-	mounts := []map[string]any{}
+	type mountConfig struct {
+		Location   string `json:"location"`
+		MountPoint string `json:"mountPoint"`
+		Writable   bool   `json:"writable"`
+	}
+	mounts := make([]mountConfig, 0, len(paths))
 	for _, path := range paths {
 		absolute, err := filepath.Abs(path)
 		if err != nil {
@@ -90,7 +135,7 @@ func configData(options Options) ([]byte, error) {
 		}
 		overlap := false
 		for _, mount := range mounts {
-			previous := mount["location"].(string)
+			previous := mount.Location
 			if within(previous, absolute) {
 				overlap = true
 				break
@@ -100,68 +145,48 @@ func configData(options Options) ([]byte, error) {
 			}
 		}
 		if !overlap {
-			mounts = append(mounts, map[string]any{"location": absolute, "mountPoint": absolute, "writable": true})
+			mounts = append(mounts, mountConfig{
+				Location:   absolute,
+				MountPoint: absolute,
+				Writable:   true,
+			})
 		}
 	}
 	arch := map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH]
 	if arch == "" {
 		return nil, errors.New("macOS arm64 and amd64 are supported")
 	}
-	imageArch := runtime.GOARCH
-	data := map[string]any{
-		"minimumLimaVersion": "2.0.0", "vmType": "vz", "arch": arch,
-		"cpus": options.CPUs, "memory": fmt.Sprintf("%dGiB", options.Memory), "disk": fmt.Sprintf("%dGiB", options.Disk),
-		"images":    []map[string]string{{"location": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-" + imageArch + ".img", "arch": arch}},
-		"mountType": "virtiofs", "mounts": mounts, "containerd": map[string]bool{"system": false, "user": false},
-		"ssh": map[string]any{"forwardAgent": false, "loadDotSSHPubKeys": false, "overVsock": false},
-		// Dedicated guest loopback addresses expose only casklet's published
-		// sockets. Other guest services never match the forwarding rules.
-		"portForwards": []map[string]any{
-			{"guestIP": "127.0.0.2", "hostIP": "0.0.0.0", "proto": "any"},
-			{"guestIP": "127.0.0.3", "hostIP": "127.0.0.1", "proto": "any"},
-			{"guestIP": "0.0.0.0", "proto": "any", "ignore": true},
-		},
-		"provision": []map[string]string{{"mode": "system", "script": initialProvisionScript()}},
-	}
+	var (
+		imageArch = runtime.GOARCH
+		data      = map[string]any{
+			"minimumLimaVersion": "2.0.0",
+			"vmType":             "vz",
+			"arch":               arch,
+			"cpus":               options.CPUs,
+			"memory":             fmt.Sprintf("%dGiB", options.Memory),
+			"disk":               fmt.Sprintf("%dGiB", options.Disk),
+			"images": []map[string]string{{
+				"location": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-" + imageArch + ".img",
+				"arch":     arch,
+			}},
+			"mountType":  "virtiofs",
+			"mounts":     mounts,
+			"containerd": map[string]bool{"system": false, "user": false},
+			"ssh":        map[string]any{"forwardAgent": false, "loadDotSSHPubKeys": false, "overVsock": false},
+			// Dedicated guest loopback addresses expose only casklet's published
+			// sockets. Other guest services never match the forwarding rules.
+			"portForwards": []map[string]any{
+				{"guestIP": "127.0.0.2", "hostIP": "0.0.0.0", "proto": "any"},
+				{"guestIP": "127.0.0.3", "hostIP": "127.0.0.1", "proto": "any"},
+				{"guestIP": "0.0.0.0", "proto": "any", "ignore": true},
+			},
+			"provision": []map[string]string{{"mode": "system", "script": initialProvisionScript()}},
+		}
+	)
 	return json.MarshalIndent(data, "", "  ")
 }
 
 func within(parent, child string) bool {
 	rel, err := filepath.Rel(parent, child)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func (instance Instance) hostPath(path string) (string, error) {
-	if path == BuiltinRootFS {
-		return guestRootFS, nil
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	absolute, err = filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(absolute)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("host path must be a directory: %s", path)
-	}
-	for _, mount := range instance.Config.Mounts {
-		if within(mount.Location, absolute) && mount.Writable {
-			rel, _ := filepath.Rel(mount.Location, absolute)
-			point := mount.MountPoint
-			if point == "" {
-				point = mount.Location
-			}
-			return filepath.Join(point, rel), nil
-		}
-	}
-	if instance.Name == "" {
-		return "", fmt.Errorf("directory is not shared with the default machine: %s; create it with casklet machine init --mount %s before retrying", absolute, quote(absolute))
-	}
-	return "", fmt.Errorf("directory is not shared with the machine: %s; stop the machine with casklet machine stop, add it with casklet machine share %s, then casklet machine start (stopping terminates workloads and preserves their files)", absolute, quote(absolute))
 }

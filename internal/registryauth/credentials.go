@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -17,11 +18,16 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 )
 
-const MaxEnvelope = 32 * 1024
-const RequestMarker = "CASKLET_REGISTRY_CREDENTIAL_V1\n"
+// Credential exchange bounds and framing.
+const (
+	MaxEnvelope   = 32 * 1024
+	RequestMarker = "CASKLET_REGISTRY_CREDENTIAL_V1\n"
+)
 
+// ErrNotFound permits anonymous access when no scoped credential is stored.
 var ErrNotFound = errors.New("registry credentials not found")
 
+// Credential contains one registry authority and its optional login values.
 type Credential struct {
 	Registry string `json:"registry"`
 	Username string `json:"username"`
@@ -76,6 +82,7 @@ func NormalizeRegistry(value string) (string, error) {
 	return value, nil
 }
 
+// Registry returns the canonical registry authority for an image reference.
 func Registry(reference string) (string, error) {
 	ref, err := name.ParseReference(reference)
 	if err != nil {
@@ -84,6 +91,7 @@ func Registry(reference string) (string, error) {
 	return NormalizeRegistry(ref.Context().RegistryStr())
 }
 
+// Validate checks the credential bounds and its exact canonical registry scope.
 func (c Credential) Validate(registry string) error {
 	normalized, err := NormalizeRegistry(c.Registry)
 	if err != nil || c.Registry != normalized || normalized != registry {
@@ -99,6 +107,7 @@ func (c Credential) Validate(registry string) error {
 	return nil
 }
 
+// ReadPassword accepts one bounded line while preserving password whitespace.
 func ReadPassword(r io.Reader) (string, error) {
 	data, err := io.ReadAll(io.LimitReader(r, 16*1024+3))
 	if err != nil {
@@ -111,6 +120,7 @@ func ReadPassword(r io.Reader) (string, error) {
 	return password, nil
 }
 
+// Decode validates one bounded credential envelope for the requested registry.
 func Decode(r io.Reader, registry string) (Credential, error) {
 	data, err := io.ReadAll(io.LimitReader(r, MaxEnvelope+1))
 	if err != nil || len(data) > MaxEnvelope {
@@ -118,8 +128,11 @@ func Decode(r io.Reader, registry string) (Credential, error) {
 	}
 	d := json.NewDecoder(strings.NewReader(string(data)))
 	d.DisallowUnknownFields()
-	var credential Credential
-	if d.Decode(&credential) != nil || d.Decode(new(any)) != io.EOF {
+	var (
+		credential Credential
+		extra      any
+	)
+	if d.Decode(&credential) != nil || d.Decode(&extra) != io.EOF {
 		return Credential{}, errors.New("invalid registry credential envelope")
 	}
 	if err := credential.Validate(registry); err != nil {
@@ -130,19 +143,28 @@ func Decode(r io.Reader, registry string) (Credential, error) {
 
 // DecodeContext bounds a stalled host handshake and closes a pipe on caller
 // cancellation so the guest CLI can honor forwarded signals during preparation.
+// Other readers must finish their reads independently; Close need not interrupt Read.
 func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credential, error) {
 	type result struct {
 		credential Credential
 		err        error
 	}
 	done := make(chan result, 1)
-	go func() { c, err := Decode(r, registry); done <- result{c, err} }()
+	go func() {
+		c, err := Decode(r, registry)
+		done <- result{credential: c, err: err}
+	}()
 	select {
 	case decoded := <-done:
 		return decoded.credential, decoded.err
 	case <-ctx.Done():
 		if closer, ok := r.(io.Closer); ok {
 			_ = closer.Close()
+			switch r.(type) {
+			case net.Conn, *os.File, *io.PipeReader:
+				//lint:ignore S1005 Cancellation takes precedence over the completed decode error.
+				_ = <-done
+			}
 		}
 		return Credential{}, ctx.Err()
 	}
@@ -150,10 +172,12 @@ func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credentia
 
 type credentialKey struct{}
 
+// WithCredential attaches an immutable credential value to one operation.
 func WithCredential(ctx context.Context, c Credential) context.Context {
 	return context.WithValue(ctx, credentialKey{}, c)
 }
 
+// Authenticator returns credentials only for their matching registry scope.
 func Authenticator(ctx context.Context, registry string) authn.Authenticator {
 	c, ok := ctx.Value(credentialKey{}).(Credential)
 	if !ok || c.Validate(registry) != nil || c.Username == "" {
@@ -168,6 +192,7 @@ func PublicError(ctx context.Context, err error) error {
 	return publicError(ctx, err, "pull")
 }
 
+// PublicPushError sanitizes authenticated push failures while preserving cancellation.
 func PublicPushError(ctx context.Context, err error) error {
 	return publicError(ctx, err, "push")
 }

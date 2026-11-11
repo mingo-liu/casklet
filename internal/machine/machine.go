@@ -20,10 +20,104 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Machine coordinates Lima operations and the host installation lock.
 type Machine struct {
 	lima      string
 	directory string
 	stderr    io.Writer
+}
+
+// Engine caching and template health are independent. The guest checks and
+// repairs the template even when the installed engine matches this client.
+const _installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3" && test "$(sha256sum -- "$1")" = "$3  $1"`
+
+// HostCommand executes a validated machine or rootfs command.
+func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	options, err := parseHostCommand(args)
+	if errors.Is(err, flag.ErrHelp) {
+		text, helpErr := Help(hostCommandTopic(args))
+		if helpErr != nil {
+			return helpErr
+		}
+		_, err = fmt.Fprint(stdout, text)
+		return err
+	}
+	if err != nil {
+		//lint:ignore ST1005 Preserve the complete user-facing usage hint.
+		//revive:disable-next-line:error-strings Preserve the established usage hint.
+		return fmt.Errorf("%w\nHint: run casklet %s --help for usage and examples.", err, hostCommandTopic(args))
+	}
+	var parent string
+	if args[0] == "rootfs" {
+		parent, err = exportParent(args[1])
+		if err != nil {
+			return err
+		}
+	}
+	m, err := open(stderr)
+	if err != nil {
+		return err
+	}
+	if args[0] == "rootfs" {
+		// Validate the share using the parent, not the new template destination.
+		if err := m.preflightShares(ctx, []string{"run", "--rootfs", parent}); err != nil {
+			return err
+		}
+		instance, err := m.ensure(ctx, options, false)
+		if err != nil {
+			return err
+		}
+		return m.rootfs(ctx, *instance, args[1], stdout)
+	}
+	switch args[1] {
+	case "resize":
+		return m.resize(ctx, options, stdout)
+	case "share":
+		return m.share(ctx, options.Mounts[0], stdout)
+	case "init":
+		_, err = m.ensure(ctx, options, true)
+	case "start":
+		_, err = m.ensure(ctx, options, false)
+	case "stop":
+		lock, lockErr := m.lock(ctx)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer func() { _ = lock.Close() }()
+		instance, instanceErr := m.instance(ctx)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		if instance != nil && instance.Status == "Running" {
+			_, err = m.command(ctx, "stop", Name)
+		}
+	case "status":
+		instance, instanceErr := m.instance(ctx)
+		if instanceErr != nil {
+			return instanceErr
+		}
+		if instance == nil {
+			_, err = fmt.Fprintln(stdout, Name+"\tnot initialized")
+		} else {
+			_, err = writeStatus(stdout, *instance)
+		}
+		return err
+	default:
+		return fmt.Errorf("unknown machine command %q", args[1])
+	}
+	if err == nil {
+		_, err = fmt.Fprintln(stdout, Name)
+	}
+	return err
+}
+
+// BundledEngineSHA256 identifies the validated embedded engine without opening Lima.
+func BundledEngineSHA256() (string, error) {
+	payload, err := enginePayload()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
 }
 
 func open(stderr io.Writer) (*Machine, error) {
@@ -32,6 +126,7 @@ func open(stderr io.Writer) (*Machine, error) {
 	}
 	lima, err := exec.LookPath("limactl")
 	if err != nil {
+		//lint:ignore ST1005 Lima is the product name in the established CLI diagnostic.
 		return nil, errors.New("Lima is required; install it with brew install lima")
 	}
 	directory, err := stateDirectory()
@@ -44,6 +139,64 @@ func open(stderr io.Writer) (*Machine, error) {
 	return &Machine{lima: lima, directory: directory, stderr: stderr}, nil
 }
 
+func (m *Machine) ensure(ctx context.Context, options Options, initialize bool, requireRunning ...bool) (*Instance, error) {
+	lock, err := m.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Close() }()
+	instance, err := m.instance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(requireRunning) > 0 && requireRunning[0] && (instance == nil || instance.Status != "Running") {
+		return nil, errors.New("project preview requires a running runtime machine; run casklet machine start before retrying")
+	}
+	if initialize && instance != nil {
+		return nil, errors.New("runtime machine already exists; initialization options apply only when creating it; stop it and use casklet machine resize to change resources")
+	}
+	if instance == nil {
+		// Check the payload before creating a VM that cannot execute workloads.
+		if _, err := enginePayload(); err != nil {
+			return nil, err
+		}
+		data, err := configData(options)
+		if err != nil {
+			return nil, err
+		}
+		config := filepath.Join(m.directory, "machine.yaml")
+		if err := os.WriteFile(config, data, 0600); err != nil {
+			return nil, err
+		}
+		_, _ = fmt.Fprintln(m.stderr, "Creating the casklet runtime machine...")
+		if _, err := m.command(ctx, "start", "--name", Name, "--timeout", "10m", config); err != nil {
+			return nil, err
+		}
+	} else if instance.Status != "Running" {
+		_, _ = fmt.Fprintln(m.stderr, "Starting the casklet runtime machine...")
+		if _, err := m.command(ctx, "start", "--timeout", "10m", Name); err != nil {
+			return nil, err
+		}
+	}
+	instance, err = m.instance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if instance == nil || instance.Status != "Running" {
+		return nil, errors.New("runtime machine did not become ready")
+	}
+	if instance.Arch != map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH] {
+		return nil, errors.New("runtime machine architecture does not match the macOS client")
+	}
+	if err := m.ensureProvisioned(ctx, *instance, len(requireRunning) > 0 && requireRunning[0]); err != nil {
+		return nil, err
+	}
+	if err := m.install(ctx, *instance); err != nil {
+		return nil, err
+	}
+	return instance, nil
+}
+
 func (m *Machine) command(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, m.lima, append([]string{"--tty=false"}, args...)...)
 	cmd.Env = append(os.Environ(), "LIMA_SSH_PORT_FORWARDER=false")
@@ -53,6 +206,7 @@ func (m *Machine) command(ctx context.Context, args ...string) ([]byte, error) {
 		cmd.Stderr = io.MultiWriter(&diagnostic, m.stderr)
 	}
 	if err := cmd.Run(); err != nil {
+		//lint:ignore ST1005 Lima identifies the failed external product operation.
 		return nil, fmt.Errorf("Lima %s: %w: %s", args[0], err, strings.TrimSpace(diagnostic.String()))
 	}
 	return []byte(output.String()), nil
@@ -93,107 +247,23 @@ func (m *Machine) lock(ctx context.Context) (*os.File, error) {
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
 }
 
-func (m *Machine) ensure(ctx context.Context, options Options, initialize bool, requireRunning ...bool) (*Instance, error) {
-	lock, err := m.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Close()
-	instance, err := m.instance(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(requireRunning) > 0 && requireRunning[0] && (instance == nil || instance.Status != "Running") {
-		return nil, errors.New("project preview requires a running runtime machine; run casklet machine start before retrying")
-	}
-	if initialize && instance != nil {
-		return nil, errors.New("runtime machine already exists; initialization options apply only when creating it; stop it and use casklet machine resize to change resources")
-	}
-	if instance == nil {
-		// Check the payload before creating a VM that cannot execute workloads.
-		if _, err := enginePayload(); err != nil {
-			return nil, err
-		}
-		data, err := configData(options)
-		if err != nil {
-			return nil, err
-		}
-		config := filepath.Join(m.directory, "machine.yaml")
-		if err := os.WriteFile(config, data, 0600); err != nil {
-			return nil, err
-		}
-		fmt.Fprintln(m.stderr, "Creating the casklet runtime machine...")
-		if _, err := m.command(ctx, "start", "--name", Name, "--timeout", "10m", config); err != nil {
-			return nil, err
-		}
-	} else if instance.Status != "Running" {
-		fmt.Fprintln(m.stderr, "Starting the casklet runtime machine...")
-		if _, err := m.command(ctx, "start", "--timeout", "10m", Name); err != nil {
-			return nil, err
-		}
-	}
-	instance, err = m.instance(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if instance == nil || instance.Status != "Running" {
-		return nil, errors.New("runtime machine did not become ready")
-	}
-	if instance.Arch != map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH] {
-		return nil, errors.New("runtime machine architecture does not match the macOS client")
-	}
-	if err := m.ensureProvisioned(ctx, *instance, len(requireRunning) > 0 && requireRunning[0]); err != nil {
-		return nil, err
-	}
-	if err := m.install(ctx, *instance); err != nil {
-		return nil, err
-	}
-	return instance, nil
-}
-
-func quote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
-func remoteCommand(args []string) string {
-	parts := make([]string, len(args))
-	for i, value := range args {
-		parts[i] = quote(value)
-	}
-	return "exec " + strings.Join(parts, " ")
-}
-
-func sshCommand(ctx context.Context, instance Instance, tty bool, args ...string) *exec.Cmd {
-	return sshSessionCommand(ctx, instance, tty, false, args...)
-}
-
-func sshSessionCommand(ctx context.Context, instance Instance, tty, independent bool, args ...string) *exec.Cmd {
-	terminal := "-T"
-	if tty {
-		terminal = "-tt"
-	}
-	options := []string{"-F", instance.SSHConfigFile, "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
-	if independent {
-		// A mux master can block on a session's full stdout pipe, preventing
-		// other sessions from receiving control messages or closing that pipe.
-		options = append(options, "-S", "none")
-	}
-	options = append(options, terminal, "--", "lima-"+instance.Name, remoteCommand(args))
-	return exec.CommandContext(ctx, "/usr/bin/ssh", options...)
-}
-
 func (m *Machine) sendSignal(ctx context.Context, instance Instance, rootless bool, token, value string) error {
-	cmd := sshSessionCommand(ctx, instance, false, true, engineCommand(rootless, "__signal", token, value)...)
-	data, err := cmd.CombinedOutput()
+	var (
+		cmd       = sshSessionCommand(ctx, instance, false, true, engineCommand(rootless, "__signal", token, value)...)
+		data, err = cmd.CombinedOutput()
+	)
 	if err != nil {
 		return fmt.Errorf("guest operation: %w: %s", err, strings.TrimSpace(string(data)))
 	}
@@ -201,42 +271,15 @@ func (m *Machine) sendSignal(ctx context.Context, instance Instance, rootless bo
 }
 
 func (m *Machine) output(ctx context.Context, instance Instance, args ...string) ([]byte, error) {
-	cmd := sshCommand(ctx, instance, false, args...)
-	data, err := cmd.CombinedOutput()
+	var (
+		cmd       = sshCommand(ctx, instance, false, args...)
+		data, err = cmd.CombinedOutput()
+	)
 	if err != nil {
 		return nil, fmt.Errorf("guest operation: %w: %s", err, strings.TrimSpace(string(data)))
 	}
 	return data, nil
 }
-
-func enginePayload() ([]byte, error) {
-	payload, err := bundledEngine()
-	if err != nil {
-		return nil, errors.New("this client has no bundled engine; build it with make build")
-	}
-	binary, err := elf.NewFile(bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("invalid bundled Linux engine: %w", err)
-	}
-	defer binary.Close()
-	if binary.Machine != map[string]elf.Machine{"arm64": elf.EM_AARCH64, "amd64": elf.EM_X86_64}[runtime.GOARCH] {
-		return nil, errors.New("bundled engine architecture does not match the client; rebuild with make build")
-	}
-	return payload, nil
-}
-
-// BundledEngineSHA256 identifies the validated embedded engine without opening Lima.
-func BundledEngineSHA256() (string, error) {
-	payload, err := enginePayload()
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(payload)), nil
-}
-
-// Engine caching and template health are independent. The guest checks and
-// repairs the template even when the installed engine matches this client.
-const installationCheckScript = `test -f "$1" && test -x "$1" && test "$(cat "$2")" = "$3" && test "$(sha256sum -- "$1")" = "$3  $1"`
 
 func (m *Machine) install(ctx context.Context, instance Instance) error {
 	payload, err := enginePayload()
@@ -244,19 +287,19 @@ func (m *Machine) install(ctx context.Context, instance Instance) error {
 		return err
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(payload))
-	if _, err := m.output(ctx, instance, "/bin/sh", "-c", installationCheckScript, "check-install", guestEngine, "/usr/local/lib/casklet/engine.sha256", hash); err == nil {
-		_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-template")
+	if _, err := m.output(ctx, instance, "/bin/sh", "-c", _installationCheckScript, "check-install", _guestEngine, "/usr/local/lib/casklet/engine.sha256", hash); err == nil {
+		_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", _guestEngine, "__ensure-template")
 		if err == nil {
-			_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", guestEngine, "__ensure-restarts")
+			_, err = m.output(ctx, instance, "/usr/bin/sudo", "-n", "--", _guestEngine, "__ensure-restarts")
 		}
 		return err
 	}
-	fmt.Fprintln(m.stderr, "Installing the bundled container engine...")
+	_, _ = fmt.Fprintln(m.stderr, "Installing the bundled container engine...")
 	stage, err := os.MkdirTemp(m.directory, "install-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }()
 	guestStage, err := instance.hostPath(stage)
 	if err != nil {
 		return err
@@ -275,6 +318,39 @@ mv /usr/local/bin/casklet.new /usr/local/bin/casklet
 printf '%s\n' "$2" > /usr/local/lib/casklet/engine.sha256
 `
 	_, err = m.output(ctx, instance, "sudo", "-n", "--", "/bin/sh", "-c", script, "install", guestStage, hash)
+	return err
+}
+
+func (m *Machine) rootfs(ctx context.Context, instance Instance, destination string, stdout io.Writer) error {
+	absolute, err := filepath.Abs(destination)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(absolute); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("rootfs destination already exists or is unavailable: %s", absolute)
+	}
+	if err := os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(absolute), ".casklet-rootfs-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stage) }()
+	guestStage, err := instance.hostPath(stage)
+	if err != nil {
+		return err
+	}
+	if _, err := m.output(ctx, instance, "sudo", "-n", "--", "cp", "-R", "--no-preserve=ownership", _guestRootFS+"/.", guestStage); err != nil {
+		return err
+	}
+	if err := os.Chmod(stage, 0755); err != nil {
+		return err
+	}
+	if err := os.Rename(stage, absolute); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout, "Prepared "+absolute)
 	return err
 }
 
@@ -336,112 +412,47 @@ func parseHostCommand(args []string) (Options, error) {
 	}
 }
 
-func HostCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	options, err := parseHostCommand(args)
-	if errors.Is(err, flag.ErrHelp) {
-		text, helpErr := Help(hostCommandTopic(args))
-		if helpErr != nil {
-			return helpErr
-		}
-		_, err = fmt.Fprint(stdout, text)
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("%w\nHint: run casklet %s --help for usage and examples.", err, hostCommandTopic(args))
-	}
-	var parent string
-	if args[0] == "rootfs" {
-		parent, err = exportParent(args[1])
-		if err != nil {
-			return err
-		}
-	}
-	m, err := open(stderr)
-	if err != nil {
-		return err
-	}
-	if args[0] == "rootfs" {
-		// Validate the share using the parent, not the new template destination.
-		if err := m.preflightShares(ctx, []string{"run", "--rootfs", parent}); err != nil {
-			return err
-		}
-		instance, err := m.ensure(ctx, options, false)
-		if err != nil {
-			return err
-		}
-		return m.rootfs(ctx, *instance, args[1], stdout)
-	}
-	switch args[1] {
-	case "resize":
-		return m.resize(ctx, options, stdout)
-	case "share":
-		return m.share(ctx, options.Mounts[0], stdout)
-	case "init":
-		_, err = m.ensure(ctx, options, true)
-	case "start":
-		_, err = m.ensure(ctx, options, false)
-	case "stop":
-		lock, lockErr := m.lock(ctx)
-		if lockErr != nil {
-			return lockErr
-		}
-		defer lock.Close()
-		instance, instanceErr := m.instance(ctx)
-		if instanceErr != nil {
-			return instanceErr
-		}
-		if instance != nil && instance.Status == "Running" {
-			_, err = m.command(ctx, "stop", Name)
-		}
-	case "status":
-		instance, instanceErr := m.instance(ctx)
-		if instanceErr != nil {
-			return instanceErr
-		}
-		if instance == nil {
-			_, err = fmt.Fprintln(stdout, Name+"\tnot initialized")
-		} else {
-			_, err = writeStatus(stdout, *instance)
-		}
-		return err
-	default:
-		return fmt.Errorf("unknown machine command %q", args[1])
-	}
-	if err == nil {
-		_, err = fmt.Fprintln(stdout, Name)
-	}
-	return err
+func sshCommand(ctx context.Context, instance Instance, tty bool, args ...string) *exec.Cmd {
+	return sshSessionCommand(ctx, instance, tty, false, args...)
 }
 
-func (m *Machine) rootfs(ctx context.Context, instance Instance, destination string, stdout io.Writer) error {
-	absolute, err := filepath.Abs(destination)
+func sshSessionCommand(ctx context.Context, instance Instance, tty, independent bool, args ...string) *exec.Cmd {
+	terminal := "-T"
+	if tty {
+		terminal = "-tt"
+	}
+	options := []string{"-F", instance.SSHConfigFile, "-o", "BatchMode=yes", "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3"}
+	if independent {
+		// A mux master can block on a session's full stdout pipe, preventing
+		// other sessions from receiving control messages or closing that pipe.
+		options = append(options, "-S", "none")
+	}
+	options = append(options, terminal, "--", "lima-"+instance.Name, remoteCommand(args))
+	return exec.CommandContext(ctx, "/usr/bin/ssh", options...)
+}
+
+func remoteCommand(args []string) string {
+	parts := make([]string, len(args))
+	for i, value := range args {
+		parts[i] = quote(value)
+	}
+	return "exec " + strings.Join(parts, " ")
+}
+
+func quote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
+
+func enginePayload() ([]byte, error) {
+	payload, err := bundledEngine()
 	if err != nil {
-		return err
+		return nil, errors.New("this client has no bundled engine; build it with make build")
 	}
-	if _, err := os.Lstat(absolute); !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("rootfs destination already exists or is unavailable: %s", absolute)
-	}
-	if err := os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
-		return err
-	}
-	stage, err := os.MkdirTemp(filepath.Dir(absolute), ".casklet-rootfs-")
+	binary, err := elf.NewFile(bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("invalid bundled Linux engine: %w", err)
 	}
-	defer os.RemoveAll(stage)
-	guestStage, err := instance.hostPath(stage)
-	if err != nil {
-		return err
+	defer func() { _ = binary.Close() }()
+	if binary.Machine != map[string]elf.Machine{"arm64": elf.EM_AARCH64, "amd64": elf.EM_X86_64}[runtime.GOARCH] {
+		return nil, errors.New("bundled engine architecture does not match the client; rebuild with make build")
 	}
-	if _, err := m.output(ctx, instance, "sudo", "-n", "--", "cp", "-R", "--no-preserve=ownership", guestRootFS+"/.", guestStage); err != nil {
-		return err
-	}
-	if err := os.Chmod(stage, 0755); err != nil {
-		return err
-	}
-	if err := os.Rename(stage, absolute); err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(stdout, "Prepared "+absolute)
-	return err
+	return payload, nil
 }

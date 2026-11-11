@@ -27,172 +27,6 @@ type fakeProject struct {
 	nextID       int
 }
 
-func newFakeProject() *fakeProject {
-	return &fakeProject{resources: map[string]Resource{}, reservations: map[string]Reservation{}}
-}
-func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	encode := func(value any) ([]byte, error) { return json.Marshal(value) }
-	switch args[0] {
-	case "__project-reservations":
-		skip := map[string]bool{}
-		for _, id := range args[2:] {
-			skip[id] = true
-		}
-		after := args[1]
-		if after == "-" {
-			after = ""
-		}
-		records := slices.Clone(fake.records)
-		sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-		page := ReservationPage{Records: []Reservation{}}
-		for _, record := range records {
-			if record.ID <= after || skip[record.ID] {
-				continue
-			}
-			if len(page.Records) == ReservationPageSize {
-				page.Next = page.Records[len(page.Records)-1].ID
-				break
-			}
-			saved := fake.reservations[record.ID]
-			saved.ID, saved.Name, saved.State, saved.Generation = record.ID, record.Name, record.State, record.Generation
-			page.Records = append(page.Records, saved)
-		}
-		return encode(page)
-	case "__project-status":
-		values := []ServiceStatus{}
-		for _, record := range Managed(fake.records, args[1]) {
-			if len(args) > 2 && !slices.Contains(args[2:], record.ID) {
-				continue
-			}
-			health := ""
-			if record.Health != nil {
-				health = record.Health.Status
-			}
-			values = append(values, ServiceStatus{ID: record.ID, Project: record.Labels[LabelName], Service: record.Labels[LabelService], Generation: record.Generation, State: record.State, Health: health})
-		}
-		return encode(values)
-	case "ps":
-		return encode(fake.records)
-	case "network", "volume":
-		var values []Resource
-		for _, value := range fake.resources {
-			if value.Kind == args[0] {
-				values = append(values, value)
-			}
-		}
-		return encode(values)
-	case "__project-resource":
-		key := args[2] + ":" + args[3]
-		fake.mutations = append(fake.mutations, strings.Join(args[:4], " "))
-		if args[1] == "create" {
-			if _, exists := fake.resources[key]; exists {
-				return nil, errors.New("already exists")
-			}
-			receipt := Resource{Kind: args[2], Name: args[3], CreatedAt: time.Unix(int64(100+len(fake.mutations)), 0).UTC()}
-			fake.resources[key] = receipt
-			return encode(receipt)
-		}
-		resource, ok := fake.resources[key]
-		if ok && resource.CreatedAt.Format(time.RFC3339Nano) != args[4] {
-			return nil, errors.New("identity changed")
-		}
-		delete(fake.resources, key)
-		return nil, nil
-	case "__project-preflight", "__project-start-preflight":
-		return nil, nil
-	case "__project-replace":
-		for i, record := range fake.records {
-			if record.ID == args[1] {
-				if fmt.Sprint(record.Generation) != args[2] || record.Labels[LabelName] != args[3] || record.Labels[LabelService] != args[4] || record.Labels[LabelSpec] != args[5] {
-					return nil, errors.New("replacement identity changed")
-				}
-				fake.mutations = append(fake.mutations, "replace "+record.ID)
-				fake.records = append(fake.records[:i], fake.records[i+1:]...)
-				return nil, nil
-			}
-		}
-		return nil, errors.New("missing")
-	case "run":
-		labels := map[string]string{}
-		name := ""
-		for i := 1; i < len(args); i++ {
-			if args[i] == "--" {
-				break
-			}
-			if args[i] == "--name" {
-				i++
-				name = args[i]
-			}
-			if args[i] == "--label" {
-				i++
-				key, value, _ := strings.Cut(args[i], "=")
-				labels[key] = value
-			}
-		}
-		fake.nextID++
-		id := fmt.Sprintf("%032x", fake.nextID)
-		fake.records = append(fake.records, container.Record{ID: id, Name: name, State: container.StateRunning, Generation: 1, Labels: labels})
-		fake.mutations = append(fake.mutations, "run "+name)
-		if fake.failRun == name {
-			fake.records[len(fake.records)-1].State = container.StateFailed
-			return nil, errors.New("startup failed after publishing record")
-		}
-		return []byte(id + "\n"), nil
-	case "wait":
-		fake.waits = append(fake.waits, args[len(args)-1])
-		if fake.failWait {
-			return nil, errors.New("readiness deadline")
-		}
-		return []byte("0\n"), nil
-	case "inspect":
-		for _, record := range fake.records {
-			if record.ID == args[1] {
-				return encode(container.Inspection{ID: record.ID, State: record.State, Generation: record.Generation, Health: record.Health})
-			}
-		}
-		return nil, errors.New("missing")
-	case "start", "stop", "rm":
-		id := args[len(args)-1]
-		fake.mutations = append(fake.mutations, args[0]+" "+id)
-		for i, record := range fake.records {
-			if record.ID == id {
-				switch args[0] {
-				case "start":
-					fake.records[i].State = container.StateRunning
-				case "stop":
-					fake.records[i].State = container.StateExited
-				case "rm":
-					fake.records = append(fake.records[:i], fake.records[i+1:]...)
-				}
-				return []byte(id), nil
-			}
-		}
-		return nil, errors.New("missing")
-	}
-	return nil, fmt.Errorf("unexpected call %v", args)
-}
-
-func fakePlan() Plan {
-	makeService := func(key string) Service {
-		name := "cp-demo-" + key
-		fingerprint := "spec-" + key
-		return Service{Key: key, Name: name, Fingerprint: fingerprint, Args: []string{"run", "--name", name, "--label", LabelName + "=demo", "--label", LabelService + "=" + key, "--label", LabelSpec + "=" + fingerprint, "--", "/bin/sleep", "30"}}
-	}
-	db := makeService("db")
-	api := makeService("api")
-	api.DependsOn = map[string]string{"db": "healthy"}
-	return Plan{Name: "demo", Networks: []string{"cp-demo-default"}, Volumes: []string{"cp-demo-data"}, Services: []Service{db, api}}
-}
-func fakeRunner(fake *fakeProject) *Runner {
-	runner := runnerWithCall(fake.call)
-	runner.State = State{Version: 1, Name: "demo", Resources: map[string]Resource{}}
-	runner.Save = func(State) error { fake.saves++; return nil }
-	return runner
-}
-
 func TestProjectRepeatableUpAndDownPreserveDataVolumes(t *testing.T) {
 	fake := newFakeProject()
 	runner := fakeRunner(fake)
@@ -382,7 +216,7 @@ func TestExternalVolumeRestoreReuseAndOwnershipRelease(t *testing.T) {
 			}
 			var saved State
 			runner.Save = func(state State) error {
-				saved = State{Version: state.Version, Name: state.Name, Resources: map[string]Resource{}}
+				saved = State{Version: state.Version, Name: state.Name, Resources: make(map[string]Resource)}
 				for key, resource := range state.Resources {
 					saved.Resources[key] = resource
 				}
@@ -485,6 +319,174 @@ func TestManagedVolumeConversionToExternalPreservesRunningServices(t *testing.T)
 	if err := runner.Down(context.Background(), "demo", true); err != nil || len(fake.resources) != 1 || !sameResource(fake.resources["volume:"+external.Name], external) {
 		t.Fatalf("converted volume removed: %v %v", err, fake.resources)
 	}
+}
+
+func newFakeProject() *fakeProject {
+	return &fakeProject{resources: make(map[string]Resource), reservations: make(map[string]Reservation)}
+}
+
+func (fake *fakeProject) call(ctx context.Context, args ...string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	encode := func(value any) ([]byte, error) { return json.Marshal(value) }
+	switch args[0] {
+	case "__project-reservations":
+		skip := make(map[string]bool)
+		for _, id := range args[2:] {
+			skip[id] = true
+		}
+		after := args[1]
+		if after == "-" {
+			after = ""
+		}
+		records := slices.Clone(fake.records)
+		sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+		page := ReservationPage{Records: []Reservation{}}
+		for _, record := range records {
+			if record.ID <= after || skip[record.ID] {
+				continue
+			}
+			if len(page.Records) == ReservationPageSize {
+				page.Next = page.Records[len(page.Records)-1].ID
+				break
+			}
+			saved := fake.reservations[record.ID]
+			saved.ID, saved.Name, saved.State, saved.Generation = record.ID, record.Name, record.State, record.Generation
+			page.Records = append(page.Records, saved)
+		}
+		return encode(page)
+	case "__project-status":
+		values := []ServiceStatus{}
+		for _, record := range Managed(fake.records, args[1]) {
+			if len(args) > 2 && !slices.Contains(args[2:], record.ID) {
+				continue
+			}
+			health := ""
+			if record.Health != nil {
+				health = record.Health.Status
+			}
+			values = append(values, ServiceStatus{ID: record.ID, Project: record.Labels[LabelName], Service: record.Labels[LabelService], Generation: record.Generation, State: record.State, Health: health})
+		}
+		return encode(values)
+	case "ps":
+		return encode(fake.records)
+	case "network", "volume":
+		var values []Resource
+		for _, value := range fake.resources {
+			if value.Kind == args[0] {
+				values = append(values, value)
+			}
+		}
+		return encode(values)
+	case "__project-resource":
+		key := args[2] + ":" + args[3]
+		fake.mutations = append(fake.mutations, strings.Join(args[:4], " "))
+		if args[1] == "create" {
+			if _, exists := fake.resources[key]; exists {
+				return nil, errors.New("already exists")
+			}
+			receipt := Resource{Kind: args[2], Name: args[3], CreatedAt: time.Unix(int64(100+len(fake.mutations)), 0).UTC()}
+			fake.resources[key] = receipt
+			return encode(receipt)
+		}
+		resource, ok := fake.resources[key]
+		if ok && resource.CreatedAt.Format(time.RFC3339Nano) != args[4] {
+			return nil, errors.New("identity changed")
+		}
+		delete(fake.resources, key)
+		return nil, nil
+	case "__project-preflight", "__project-start-preflight":
+		return nil, nil
+	case "__project-replace":
+		for i, record := range fake.records {
+			if record.ID == args[1] {
+				if fmt.Sprint(record.Generation) != args[2] || record.Labels[LabelName] != args[3] || record.Labels[LabelService] != args[4] || record.Labels[LabelSpec] != args[5] {
+					return nil, errors.New("replacement identity changed")
+				}
+				fake.mutations = append(fake.mutations, "replace "+record.ID)
+				fake.records = append(fake.records[:i], fake.records[i+1:]...)
+				return nil, nil
+			}
+		}
+		return nil, errors.New("missing")
+	case "run":
+		labels := make(map[string]string)
+		name := ""
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--" {
+				break
+			}
+			if args[i] == "--name" {
+				i++
+				name = args[i]
+			}
+			if args[i] == "--label" {
+				i++
+				key, value, _ := strings.Cut(args[i], "=")
+				labels[key] = value
+			}
+		}
+		fake.nextID++
+		id := fmt.Sprintf("%032x", fake.nextID)
+		fake.records = append(fake.records, container.Record{ID: id, Name: name, State: container.StateRunning, Generation: 1, Labels: labels})
+		fake.mutations = append(fake.mutations, "run "+name)
+		if fake.failRun == name {
+			fake.records[len(fake.records)-1].State = container.StateFailed
+			return nil, errors.New("startup failed after publishing record")
+		}
+		return []byte(id + "\n"), nil
+	case "wait":
+		fake.waits = append(fake.waits, args[len(args)-1])
+		if fake.failWait {
+			return nil, errors.New("readiness deadline")
+		}
+		return []byte("0\n"), nil
+	case "inspect":
+		for _, record := range fake.records {
+			if record.ID == args[1] {
+				return encode(container.Inspection{ID: record.ID, State: record.State, Generation: record.Generation, Health: record.Health})
+			}
+		}
+		return nil, errors.New("missing")
+	case "start", "stop", "rm":
+		id := args[len(args)-1]
+		fake.mutations = append(fake.mutations, args[0]+" "+id)
+		for i, record := range fake.records {
+			if record.ID == id {
+				switch args[0] {
+				case "start":
+					fake.records[i].State = container.StateRunning
+				case "stop":
+					fake.records[i].State = container.StateExited
+				case "rm":
+					fake.records = append(fake.records[:i], fake.records[i+1:]...)
+				}
+				return []byte(id), nil
+			}
+		}
+		return nil, errors.New("missing")
+	}
+	return nil, fmt.Errorf("unexpected call %v", args)
+}
+
+func fakePlan() Plan {
+	makeService := func(key string) Service {
+		name := "cp-demo-" + key
+		fingerprint := "spec-" + key
+		return Service{Key: key, Name: name, Fingerprint: fingerprint, Args: []string{"run", "--name", name, "--label", LabelName + "=demo", "--label", LabelService + "=" + key, "--label", LabelSpec + "=" + fingerprint, "--", "/bin/sleep", "30"}}
+	}
+	db := makeService("db")
+	api := makeService("api")
+	api.DependsOn = map[string]string{"db": "healthy"}
+	return Plan{Name: "demo", Networks: []string{"cp-demo-default"}, Volumes: []string{"cp-demo-data"}, Services: []Service{db, api}}
+}
+
+func fakeRunner(fake *fakeProject) *Runner {
+	runner := runnerWithCall(fake.call)
+	runner.State = State{Version: 1, Name: "demo", Resources: make(map[string]Resource)}
+	runner.Save = func(State) error { fake.saves++; return nil }
+	return runner
 }
 
 func runnerWithCall(call Call) *Runner {

@@ -80,7 +80,7 @@ func TestCredentialEnvelopeScopeBoundsAndSanitizedErrors(t *testing.T) {
 func TestCredentialHandshakeCancellationAndDeadline(t *testing.T) {
 	for _, deadline := range []bool{false, true} {
 		reader, writer := io.Pipe()
-		defer writer.Close()
+		defer func() { _ = writer.Close() }()
 		ctx, cancel := context.WithCancel(context.Background())
 		if deadline {
 			ctx, cancel = context.WithTimeout(context.Background(), 10*time.Millisecond)
