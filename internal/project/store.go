@@ -51,14 +51,6 @@ func DefaultRoot() (string, error) {
 	return filepath.Join(root, "casklet", "projects"), nil
 }
 
-func safeFile(info os.FileInfo, directory bool) error {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0077 != 0 || (directory && !info.IsDir()) || (!directory && (!info.Mode().IsRegular() || stat.Nlink != 1)) {
-		return errors.New("unsafe project state ownership, permissions, or type")
-	}
-	return nil
-}
-
 func Open(ctx context.Context, root, name string) (*Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -73,7 +65,7 @@ func Open(ctx context.Context, root, name string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := safeFile(info, true); err != nil {
+	if err := safeFile(info, true /* directory */); err != nil {
 		return nil, err
 	}
 	file, err := os.OpenFile(filepath.Join(root, "."+name+".lock"), os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
@@ -82,10 +74,10 @@ func Open(ctx context.Context, root, name string) (*Store, error) {
 	}
 	info, err = file.Stat()
 	if err == nil {
-		err = safeFile(info, false)
+		err = safeFile(info, false /* directory */)
 	}
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -96,21 +88,24 @@ func Open(ctx context.Context, root, name string) (*Store, error) {
 			return &Store{root: root, name: name, lock: file}, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 	}
 }
 
-func (store *Store) Close() error { return store.lock.Close() }
+func (store *Store) Close() error {
+	return store.lock.Close()
+}
+
 func (store *Store) Load() (State, error) {
-	state := State{Version: 1, Name: store.name, Resources: map[string]Resource{}}
+	state := State{Version: 1, Name: store.name, Resources: make(map[string]Resource)}
 	file, err := os.OpenFile(filepath.Join(store.root, store.name+".json"), os.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return state, nil
@@ -118,12 +113,12 @@ func (store *Store) Load() (State, error) {
 	if err != nil {
 		return state, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return state, err
 	}
-	if err := safeFile(info, false); err != nil {
+	if err := safeFile(info, false /* directory */); err != nil {
 		return state, err
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 1<<20+1))
@@ -166,7 +161,7 @@ func (store *Store) Save(state State) error {
 		return err
 	}
 	name := file.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	_, err = file.Write(data)
 	if err == nil {
 		err = file.Sync()
@@ -182,9 +177,17 @@ func (store *Store) Save(state State) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	if err := dir.Sync(); err != nil {
 		return fmt.Errorf("sync project state: %w", err)
+	}
+	return nil
+}
+
+func safeFile(info os.FileInfo, directory bool) error {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || int(stat.Uid) != os.Geteuid() || info.Mode().Perm()&0077 != 0 || (directory && !info.IsDir()) || (!directory && (!info.Mode().IsRegular() || stat.Nlink != 1)) {
+		return errors.New("unsafe project state ownership, permissions, or type")
 	}
 	return nil
 }

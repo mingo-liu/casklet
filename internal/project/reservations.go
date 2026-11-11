@@ -55,14 +55,14 @@ func (runner *Runner) reservations(ctx context.Context, all []container.Record, 
 		}
 	}
 	if len(expected) == 0 {
-		return []Reservation{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 	skip := make([]string, 0, len(removed))
 	for id := range removed {
 		skip = append(skip, id)
 	}
 	sort.Strings(skip)
-	result := []Reservation{}
+	var result []Reservation
 	cursor := ""
 	for {
 		if err := ctx.Err(); err != nil {

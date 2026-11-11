@@ -22,7 +22,11 @@ func TestProjectStorePreservesReceiptsAndCancelsLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	state, err := store.Load()
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +44,9 @@ func TestProjectStorePreservesReceiptsAndCancelsLockWait(t *testing.T) {
 	defer cancel()
 	if other, err := Open(ctx, root, "demo"); !errors.Is(err, context.DeadlineExceeded) {
 		if other != nil {
-			other.Close()
+			if err := other.Close(); err != nil {
+				t.Fatal(err)
+			}
 		}
 		t.Fatalf("lock wait %v", err)
 	}
@@ -67,19 +73,33 @@ func TestProjectStoreRejectsUnsafeOrMismatchedArtifacts(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "state-symlink":
-				os.Symlink(target, filepath.Join(root, "demo.json"))
+				if err := os.Symlink(target, filepath.Join(root, "demo.json")); err != nil {
+					t.Fatal(err)
+				}
 			case "lock-symlink":
-				os.Symlink(target, filepath.Join(root, ".demo.lock"))
+				if err := os.Symlink(target, filepath.Join(root, ".demo.lock")); err != nil {
+					t.Fatal(err)
+				}
 			case "world-readable":
-				os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{}`), 0644)
+				if err := os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{}`), 0644); err != nil {
+					t.Fatal(err)
+				}
 			case "wrong-project":
-				os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{"version":1,"name":"other","resources":{}}`), 0600)
+				if err := os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{"version":1,"name":"other","resources":{}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
 			case "wrong-resource":
-				os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{"version":1,"name":"demo","resources":{"volume:bad":{"kind":"network","name":"bad"}}}`), 0600)
+				if err := os.WriteFile(filepath.Join(root, "demo.json"), []byte(`{"version":1,"name":"demo","resources":{"volume:bad":{"kind":"network","name":"bad"}}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			store, err := Open(context.Background(), root, "demo")
 			if err == nil {
-				defer store.Close()
+				t.Cleanup(func() {
+					if err := store.Close(); err != nil {
+						t.Error(err)
+					}
+				})
 				_, err = store.Load()
 			}
 			if err == nil {
@@ -102,7 +122,11 @@ func TestServiceComparisonReceiptsRoundTripAndRejectInvalidMetadata(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	state, err := store.Load()
 	if err != nil {
 		t.Fatal(err)

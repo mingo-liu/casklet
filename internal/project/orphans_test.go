@@ -21,7 +21,7 @@ func TestRemoveOrphansRequiresExplicitSelectionAndPreservesPreview(t *testing.T)
 	orphan, kept := fake.records[1], fake.records[0]
 	plan.Services = plan.Services[:1]
 	before := slices.Clone(fake.records)
-	resources, saves := cloneResources(runner.State.Resources), fake.saves
+	resources, saves := maps.Clone(runner.State.Resources), fake.saves
 	for _, dryRun := range []bool{false, true} {
 		if _, err := runner.Up(context.Background(), plan, UpOptions{DryRun: dryRun}); err == nil || !strings.Contains(err.Error(), "--remove-orphans") {
 			t.Fatalf("implicit orphan removal: %v", err)
@@ -51,17 +51,6 @@ func TestRemoveOrphansRequiresExplicitSelectionAndPreservesPreview(t *testing.T)
 	if _, err := runner.Up(context.Background(), plan, UpOptions{RemoveOrphans: true}); err != nil || len(fake.mutations) != 0 {
 		t.Fatalf("retry: %v %v", err, fake.mutations)
 	}
-}
-
-func orphanReplacementPlan(plan Plan) Plan {
-	service := plan.Services[1]
-	service.Key, service.Name, service.Fingerprint = "worker", "cp-demo-worker", "spec-worker"
-	service.Args = slices.Clone(service.Args)
-	for i, value := range service.Args {
-		service.Args[i] = strings.ReplaceAll(value, "api", "worker")
-	}
-	plan.Services = []Service{plan.Services[0], service}
-	return plan
 }
 
 func TestRemoveOrphansPreflightsSourcesAndFencesConcurrentChanges(t *testing.T) {
@@ -140,7 +129,7 @@ func TestRemoveOrphansFailureKeepsRemovedServicesAbsentAndAllowsRetry(t *testing
 	kept, orphan := fake.records[0], fake.records[1]
 	plan = orphanReplacementPlan(plan)
 	fake.failRun = "cp-demo-worker"
-	resources := cloneResources(fake.resources)
+	resources := maps.Clone(fake.resources)
 	if _, err := runner.Up(context.Background(), plan, UpOptions{RemoveOrphans: true, Timeout: time.Second}); err == nil {
 		t.Fatal("expected startup failure")
 	}
@@ -198,4 +187,15 @@ func TestRemoveOrphansBoundsTheExistingRemovalSelection(t *testing.T) {
 	if _, err := runner.Up(context.Background(), plan, UpOptions{RemoveOrphans: true}); err == nil || !strings.Contains(err.Error(), "exceeds 64") || len(fake.mutations) != 0 {
 		t.Fatalf("unbounded selection: %v %v", err, fake.mutations)
 	}
+}
+
+func orphanReplacementPlan(plan Plan) Plan {
+	service := plan.Services[1]
+	service.Key, service.Name, service.Fingerprint = "worker", "cp-demo-worker", "spec-worker"
+	service.Args = slices.Clone(service.Args)
+	for i, value := range service.Args {
+		service.Args[i] = strings.ReplaceAll(value, "api", "worker")
+	}
+	plan.Services = []Service{plan.Services[0], service}
+	return plan
 }

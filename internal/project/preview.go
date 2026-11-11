@@ -22,23 +22,17 @@ type ServiceReceipt struct {
 	Fields map[string]string `json:"fields"`
 }
 
-func fieldName(name string) string {
-	switch name {
-	case "network_aliases":
-		return "network-alias"
-	case "restart_policy":
-		return "restart"
-	case "cpu_quota":
-		return "cpus"
-	case "labels":
-		return "label"
-	case "secrets":
-		return "secret"
-	case "mounts":
-		return "mount"
+var _previewFields = func() map[string]bool {
+	var (
+		fields = map[string]bool{"entrypoint": true}
+		typeOf = reflect.TypeFor[config.Config]()
+	)
+	for i := 0; i < typeOf.NumField(); i++ {
+		name, _, _ := strings.Cut(typeOf.Field(i).Tag.Get("json"), ",")
+		fields[fieldName(name)] = true
 	}
-	return strings.ReplaceAll(name, "_", "-")
-}
+	return fields
+}()
 
 // FieldDigests uses the same parsed configuration as the service fingerprint.
 // Callers canonicalize environment and alias order before hashing.
@@ -53,38 +47,6 @@ func FieldDigests(cfg config.Config, entrypoint *string) map[string]string {
 		result[fieldName(name)] = hex.EncodeToString(digest[:])
 	}
 	return result
-}
-
-var previewFields = func() map[string]bool {
-	fields := map[string]bool{"entrypoint": true}
-	typeOf := reflect.TypeFor[config.Config]()
-	for i := 0; i < typeOf.NumField(); i++ {
-		name, _, _ := strings.Cut(typeOf.Field(i).Tag.Get("json"), ",")
-		fields[fieldName(name)] = true
-	}
-	return fields
-}()
-
-func validDigest(value string, length int) bool {
-	decoded, err := hex.DecodeString(value)
-	return err == nil && len(value) == length && len(decoded)*2 == length && strings.ToLower(value) == value
-}
-
-func validateServiceReceipts(services map[string]ServiceReceipt) error {
-	if len(services) > 64 {
-		return errors.New("project service history exceeds 64 services")
-	}
-	for key, receipt := range services {
-		if ValidateName(key) != nil || !validDigest(receipt.ID, 32) || !validDigest(receipt.Spec, 64) || len(receipt.Fields) == 0 || len(receipt.Fields) > len(previewFields) {
-			return errors.New("invalid project service comparison identity")
-		}
-		for name, value := range receipt.Fields {
-			if !previewFields[name] || !validDigest(value, 64) {
-				return errors.New("invalid project service comparison fields")
-			}
-		}
-	}
-	return nil
 }
 
 func (runner *Runner) serviceChange(service Service, record container.Record, found, matches, selected bool) Change {
@@ -121,7 +83,7 @@ func (runner *Runner) serviceChange(service Service, record container.Record, fo
 		change.DetailsUnavailable = true
 		return change
 	}
-	keys := map[string]bool{}
+	keys := make(map[string]bool, len(receipt.Fields)+len(service.Fields))
 	for name := range receipt.Fields {
 		keys[name] = true
 	}
@@ -141,7 +103,7 @@ func (runner *Runner) serviceChange(service Service, record container.Record, fo
 }
 
 func (runner *Runner) rememberServices(plan Plan, records []container.Record) error {
-	services := map[string]ServiceReceipt{}
+	services := make(map[string]ServiceReceipt, len(plan.Services))
 	for _, record := range records {
 		for _, service := range plan.Services {
 			if record.Labels[LabelService] == service.Key && len(service.Fields) > 0 {
@@ -175,5 +137,45 @@ func (runner *Runner) forgetService(record container.Record) error {
 		return err
 	}
 	runner.State = state
+	return nil
+}
+
+func fieldName(name string) string {
+	switch name {
+	case "network_aliases":
+		return "network-alias"
+	case "restart_policy":
+		return "restart"
+	case "cpu_quota":
+		return "cpus"
+	case "labels":
+		return "label"
+	case "secrets":
+		return "secret"
+	case "mounts":
+		return "mount"
+	}
+	return strings.ReplaceAll(name, "_", "-")
+}
+
+func validDigest(value string, length int) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(value) == length && len(decoded)*2 == length && strings.ToLower(value) == value
+}
+
+func validateServiceReceipts(services map[string]ServiceReceipt) error {
+	if len(services) > 64 {
+		return errors.New("project service history exceeds 64 services")
+	}
+	for key, receipt := range services {
+		if ValidateName(key) != nil || !validDigest(receipt.ID, 32) || !validDigest(receipt.Spec, 64) || len(receipt.Fields) == 0 || len(receipt.Fields) > len(_previewFields) {
+			return errors.New("invalid project service comparison identity")
+		}
+		for name, value := range receipt.Fields {
+			if !_previewFields[name] || !validDigest(value, 64) {
+				return errors.New("invalid project service comparison fields")
+			}
+		}
+	}
 	return nil
 }
