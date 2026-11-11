@@ -14,33 +14,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func socketPair(t *testing.T) (int, int) {
-	t.Helper()
-	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { unix.Close(pair[0]); unix.Close(pair[1]) })
-	return pair[0], pair[1]
-}
-
-func unixConnection(t *testing.T, fd int) *net.UnixConn {
-	t.Helper()
-	duplicate, err := unix.Dup(fd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := os.NewFile(uintptr(duplicate), "ipc-socket")
-	conn, err := net.FileConn(file)
-	file.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := conn.(*net.UnixConn)
-	t.Cleanup(func() { result.Close() })
-	return result
-}
-
 func TestPacketTransfersPipeWithCloseOnExec(t *testing.T) {
 	left, right := socketPair(t)
 	sender, receiver := unixConnection(t, left), unixConnection(t, right)
@@ -48,11 +21,11 @@ func TestPacketTransfersPipeWithCloseOnExec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer read.Close()
-	defer write.Close()
+	defer func() { _ = read.Close() }()
+	defer func() { _ = write.Close() }()
 	want := struct {
 		Command []string `json:"command"`
-	}{[]string{"echo", "unchanged argument"}}
+	}{Command: []string{"echo", "unchanged argument"}}
 	if err := Send(sender, want, []*os.File{write}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +47,11 @@ func TestPacketTransfersPipeWithCloseOnExec(t *testing.T) {
 	if err := Decode(data, &got); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("received value = %+v, %v; want %+v", got, err, want)
 	}
-	write.Close()
+	_ = write.Close()
 	if _, err := files[0].Write([]byte("pipe output")); err != nil {
 		t.Fatal(err)
 	}
-	files[0].Close()
+	_ = files[0].Close()
 	output, err := io.ReadAll(read)
 	if err != nil || string(output) != "pipe output" {
 		t.Fatalf("descriptor did not retain its pipe: %q, %v", output, err)
@@ -105,42 +78,34 @@ func TestDecodeRejectsUnknownAndTrailingData(t *testing.T) {
 	}
 }
 
-func openDescriptorCount(t *testing.T) int {
-	t.Helper()
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return len(entries)
-}
-
 func TestReceiveRejectsOversizedPacketsWithoutDescriptorLeaks(t *testing.T) {
 	left, right := socketPair(t)
 	pipeRead, pipeWrite, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pipeRead.Close()
-	defer pipeWrite.Close()
+	defer func() { _ = pipeRead.Close() }()
+	defer func() { _ = pipeWrite.Close() }()
 	fd := FD(pipeWrite)
 	baseline := openDescriptorCount(t)
-	for _, test := range []struct {
+	tests := []struct {
 		name     string
 		data     []byte
 		fds      []int
 		maxFiles int
 	}{
-		{"excess descriptors", []byte("{}"), []int{fd, fd}, 1},
-		{"unexpected descriptors", []byte("{}"), []int{fd}, 0},
-		{"truncated data", []byte(strings.Repeat("x", MaxPacket+1)), []int{fd}, 1},
-		{"truncated rights", []byte("{}"), []int{fd, fd, fd, fd, fd, fd, fd, fd, fd}, 8},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+		{name: "excess descriptors", data: []byte("{}"), fds: []int{fd, fd}, maxFiles: 1},
+		{name: "unexpected descriptors", data: []byte("{}"), fds: []int{fd}, maxFiles: 0},
+		{name: "truncated data", data: []byte(strings.Repeat("x", MaxPacket+1)), fds: []int{fd}, maxFiles: 1},
+		{name: "truncated rights", data: []byte("{}"), fds: []int{fd, fd, fd, fd, fd, fd, fd, fd, fd}, maxFiles: 8},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			for attempt := 0; attempt < 8; attempt++ {
-				if err := unix.Sendmsg(left, test.data, unix.UnixRights(test.fds...), nil, 0); err != nil {
+				if err := unix.Sendmsg(left, tt.data, unix.UnixRights(tt.fds...), nil, 0); err != nil {
 					t.Fatal(err)
 				}
-				data, files, err := ReceiveFD(right, test.maxFiles)
+				data, files, err := ReceiveFD(right, tt.maxFiles)
 				CloseFiles(files)
 				if err == nil || data != nil || len(files) != 0 {
 					t.Fatalf("invalid packet accepted: bytes=%d descriptors=%d error=%v", len(data), len(files), err)
@@ -186,7 +151,7 @@ func TestReceiveUnexpectedAncillaryClosesDescriptors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	baseline := openDescriptorCount(t)
 	if err := unix.Sendmsg(left, []byte("{}"), unix.UnixRights(FD(file)), nil, 0); err != nil {
 		t.Fatal(err)
@@ -211,7 +176,7 @@ func TestSendRejectsProtocolLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if err := Send(conn, struct{}{}, []*os.File{file, file, file, file, file, file, file, file, file}); err == nil {
 		t.Fatal("accepted more than eight descriptors")
 	}
@@ -231,4 +196,44 @@ func TestPeerReturnsActualProcessCredentials(t *testing.T) {
 			t.Fatalf("unexpected peer credentials: %+v", peer)
 		}
 	}
+}
+
+func socketPair(t *testing.T) (int, int) {
+	t.Helper()
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Close(pair[0]); _ = unix.Close(pair[1]) })
+	return pair[0], pair[1]
+}
+
+func unixConnection(t *testing.T, fd int) *net.UnixConn {
+	t.Helper()
+	duplicate, err := unix.Dup(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := os.NewFile(uintptr(duplicate), "ipc-socket")
+	conn, err := net.FileConn(file)
+	_ = file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := conn.(*net.UnixConn)
+	if !ok {
+		_ = conn.Close()
+		t.Fatal("socket connection is not Unix")
+	}
+	t.Cleanup(func() { _ = result.Close() })
+	return result
+}
+
+func openDescriptorCount(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
 }

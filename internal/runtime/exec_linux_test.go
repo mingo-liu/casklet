@@ -21,7 +21,7 @@ func TestExecConfigurationIsImmutableAndOffsetIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString("changed"); !errors.Is(err, syscall.EPERM) {
 		t.Fatalf("write sealed configuration: %v", err)
 	}
@@ -43,14 +43,14 @@ func TestExecConfigurationIsImmutableAndOffsetIndependent(t *testing.T) {
 }
 
 func TestExecConfigurationRejectsOversizedPayload(t *testing.T) {
-	_, err := sealExecConfig(config.Config{Command: []string{"/bin/echo", strings.Repeat("x", execConfigLimit)}})
+	_, err := sealExecConfig(config.Config{Command: []string{"/bin/echo", strings.Repeat("x", _execConfigLimit)}})
 	if err == nil {
 		t.Fatal("oversized configuration was accepted")
 	}
 }
 
 func TestExecConfigurationRejectsUnsealedAndMalformedPayloads(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		name, data string
 		sealed     bool
 	}{
@@ -60,19 +60,20 @@ func TestExecConfigurationRejectsUnsealedAndMalformedPayloads(t *testing.T) {
 		{"missing command", `{}`, true},
 		{"negative timeout", `{"command":["/bin/true"],"timeout":-1}`, true},
 		{"malformed", `{`, true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			fd, err := unix.MemfdCreate("exec-test", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 			if err != nil {
 				t.Fatal(err)
 			}
 			file := os.NewFile(uintptr(fd), "exec-test")
-			defer file.Close()
-			if _, err := file.WriteString(test.data); err != nil {
+			defer func() { _ = file.Close() }()
+			if _, err := file.WriteString(tt.data); err != nil {
 				t.Fatal(err)
 			}
-			if test.sealed {
-				if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, execConfigSeals); err != nil {
+			if tt.sealed {
+				if _, err := unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, _execConfigSeals); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -95,17 +96,6 @@ func TestExecuteTTYRequiresTerminalClient(t *testing.T) {
 	if code != 125 || err == nil || !strings.Contains(err.Error(), "terminal client") {
 		t.Fatalf("missing TTY client: code=%d, error=%v", code, err)
 	}
-}
-
-func execTerminalTestPair(t *testing.T) (*os.File, *os.File) {
-	t.Helper()
-	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	left, right := os.NewFile(uintptr(pair[0]), "terminal-test-left"), os.NewFile(uintptr(pair[1]), "terminal-test-right")
-	t.Cleanup(func() { left.Close(); right.Close() })
-	return left, right
 }
 
 func TestExecTerminalWaitsForConfiguredClient(t *testing.T) {
@@ -201,7 +191,7 @@ func TestExecTerminalClientFailureDoesNotAuthorizeCommand(t *testing.T) {
 	signals <- syscall.SIGTERM
 	select {
 	case err := <-result:
-		var stopped execTerminalStopped
+		var stopped execTerminalStoppedError
 		if !errors.As(err, &stopped) || stopped.signal != syscall.SIGTERM {
 			t.Fatalf("terminal setup ignored stop signal: %v", err)
 		}
@@ -218,14 +208,15 @@ func TestExecTerminalInterruptTargetsForegroundGroup(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer command.Process.Kill()
+	defer func() { _ = command.Process.Kill() }()
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
 	// A working TIOCSIG targets the terminal's actual group; it needs no
 	// numeric PID lookup or cgroup descriptor from this unprivileged test.
 	forwardExecTerminalSignal(master, -1, command.Process.Pid, syscall.SIGINT)
 	select {
-	case <-done:
+	//lint:ignore S1005 The expected signal exit status is checked below instead of its Wait error.
+	case _ = <-done:
 		if code := execStatus(command.ProcessState); code != 130 {
 			t.Fatalf("foreground interrupt exit=%d; want 130", code)
 		}
@@ -235,20 +226,21 @@ func TestExecTerminalInterruptTargetsForegroundGroup(t *testing.T) {
 }
 
 func TestExecExitStatus(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		command string
 		code    int
 	}{
 		{"exit 0", 0},
 		{"exit 7", 7},
 		{"kill -TERM $$", 143},
-	} {
+	}
+	for _, tt := range tests {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		command := exec.CommandContext(ctx, "/bin/sh", "-c", test.command)
+		command := exec.CommandContext(ctx, "/bin/sh", "-c", tt.command)
 		_ = command.Run()
 		cancel()
-		if command.ProcessState == nil || execStatus(command.ProcessState) != test.code {
-			t.Fatalf("%q: expected %d, got %v", test.command, test.code, command.ProcessState)
+		if command.ProcessState == nil || execStatus(command.ProcessState) != tt.code {
+			t.Fatalf("%q: expected %d, got %v", tt.command, tt.code, command.ProcessState)
 		}
 	}
 }
@@ -263,7 +255,7 @@ func TestExecConfigurationPreservesLargeInheritedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if os.Geteuid() != 0 {
 		return
 	}
@@ -271,4 +263,15 @@ func TestExecConfigurationPreservesLargeInheritedEnvironment(t *testing.T) {
 	if err != nil || len(decoded.Env) != 2 || decoded.Env[0] != cfg.Env[0] || decoded.Env[1] != cfg.Env[1] {
 		t.Fatalf("large inherited configuration did not round trip: %v", err)
 	}
+}
+
+func execTerminalTestPair(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, right := os.NewFile(uintptr(pair[0]), "terminal-test-left"), os.NewFile(uintptr(pair[1]), "terminal-test-right")
+	t.Cleanup(func() { _ = left.Close(); _ = right.Close() })
+	return left, right
 }
