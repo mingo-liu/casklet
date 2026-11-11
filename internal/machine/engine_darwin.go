@@ -8,6 +8,6 @@ import "embed"
 // generates the payload. Only Darwin clients bundle the Linux engine.
 //
 //go:embed assets/*
-var engineAssets embed.FS
+var _engineAssets embed.FS
 
-func bundledEngine() ([]byte, error) { return engineAssets.ReadFile("assets/casklet-engine") }
+func bundledEngine() ([]byte, error) { return _engineAssets.ReadFile("assets/casklet-engine") }

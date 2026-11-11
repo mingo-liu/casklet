@@ -12,10 +12,12 @@ import (
 
 func TestScopedHostHelpDoesNotOpenLimaOrLocalState(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	for topic, want := range hostHelp {
+	for topic, want := range _hostHelp {
 		for _, option := range []string{"-h", "--help"} {
-			args := append(strings.Fields(topic), option)
-			var output bytes.Buffer
+			var (
+				args   = append(strings.Fields(topic), option)
+				output bytes.Buffer
+			)
 			if err := HostCommand(context.Background(), args, &output, io.Discard); err != nil || output.String() != want {
 				t.Errorf("%q: %q %v", args, output.String(), err)
 			}
@@ -26,12 +28,12 @@ func TestScopedHostHelpDoesNotOpenLimaOrLocalState(t *testing.T) {
 		{"machine", "init", "--mount", "--help", "--memory=2", "-h"},
 	} {
 		var output bytes.Buffer
-		if err := HostCommand(context.Background(), args, &output, io.Discard); err != nil || output.String() != hostHelp["machine init"] {
+		if err := HostCommand(context.Background(), args, &output, io.Discard); err != nil || output.String() != _hostHelp["machine init"] {
 			t.Errorf("help after options %q: %q %v", args, output.String(), err)
 		}
 	}
 	var resize bytes.Buffer
-	if err := HostCommand(context.Background(), []string{"machine", "resize", "--memory=8", "--help"}, &resize, io.Discard); err != nil || resize.String() != hostHelp["machine resize"] {
+	if err := HostCommand(context.Background(), []string{"machine", "resize", "--memory=8", "--help"}, &resize, io.Discard); err != nil || resize.String() != _hostHelp["machine resize"] {
 		t.Fatalf("resize help after options: %s %v", &resize, err)
 	}
 }
@@ -44,8 +46,10 @@ func TestHostHelpRejectsUnknownAndExtraTopicsWithoutLima(t *testing.T) {
 		{"machine", "init", "--cpus", "2", "--help", "extra"},
 		{"machine", "resize", "--cpus", "2", "--help", "extra"},
 	} {
-		var output bytes.Buffer
-		err := HostCommand(context.Background(), args, &output, io.Discard)
+		var (
+			output bytes.Buffer
+			err    = HostCommand(context.Background(), args, &output, io.Discard)
+		)
 		if err == nil || output.Len() != 0 || !strings.Contains(err.Error(), "Hint:") || strings.Contains(err.Error(), "Lima is required") {
 			t.Errorf("invalid help %q: %q %v", args, output.String(), err)
 		}

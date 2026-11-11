@@ -38,8 +38,10 @@ func validateMacPort(mapping config.PortMapping) error {
 }
 
 func localPreflight(args []string) error {
-	var canonicalRoot string
-	var mounts []config.BindMount
+	var (
+		canonicalRoot string
+		mounts        []config.BindMount
+	)
 	if err := visitHostResources(args, func(name, value string) error {
 		switch name {
 		case "rootfs":

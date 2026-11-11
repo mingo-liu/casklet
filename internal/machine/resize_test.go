@@ -14,35 +14,6 @@ import (
 	"time"
 )
 
-func resizeMachine(t *testing.T, record any, failEdit bool) (*Machine, string) {
-	t.Helper()
-	data, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if record == nil {
-		data = nil
-	}
-	directory := t.TempDir()
-	log := filepath.Join(directory, "calls")
-	stub := filepath.Join(directory, "limactl")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\nif [ \"$2\" = list ]; then printf '%s' " + quote(string(data)) + "; fi\n"
-	if failEdit {
-		script += "if [ \"$2\" = edit ]; then echo 'edit rejected' >&2; exit 1; fi\n"
-	}
-	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	return &Machine{lima: stub, directory: directory, stderr: io.Discard}, log
-}
-
-func resizeRecord() map[string]any {
-	return map[string]any{
-		"name": Name, "status": "Stopped", "vmType": "vz", "arch": map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH],
-		"cpus": 4, "memory": 4 * gib, "disk": 20 * gib, "config": map[string]any{"os": "Linux", "plain": false},
-	}
-}
-
 func TestParseResizeRequiresBoundedExplicitResources(t *testing.T) {
 	for _, args := range [][]string{
 		{}, {"--cpus", "0"}, {"--memory", "0"}, {"--disk", "0"}, {"--cpus", "-1"}, {"--cpus", "65"}, {"--memory", "129"},
@@ -52,7 +23,7 @@ func TestParseResizeRequiresBoundedExplicitResources(t *testing.T) {
 			t.Fatalf("accepted %q", args)
 		}
 	}
-	for _, tc := range []struct {
+	tests := []struct {
 		args []string
 		want Options
 	}{
@@ -60,16 +31,17 @@ func TestParseResizeRequiresBoundedExplicitResources(t *testing.T) {
 		{[]string{"--memory", "128"}, Options{Memory: 128}},
 		{[]string{"--disk", "1024"}, Options{Disk: 1024}},
 		{[]string{"--cpus", "64", "--memory", "1", "--disk", "4"}, Options{CPUs: 64, Memory: 1, Disk: 4}},
-	} {
-		options, err := parseHostCommand(append([]string{"machine", "resize"}, tc.args...))
-		if err != nil || options.CPUs != tc.want.CPUs || options.Memory != tc.want.Memory || options.Disk != tc.want.Disk {
-			t.Fatalf("%q: %+v %v", tc.args, options, err)
+	}
+	for _, tt := range tests {
+		options, err := parseHostCommand(append([]string{"machine", "resize"}, tt.args...))
+		if err != nil || options.CPUs != tt.want.CPUs || options.Memory != tt.want.Memory || options.Disk != tt.want.Disk {
+			t.Fatalf("%q: %+v %v", tt.args, options, err)
 		}
 	}
 }
 
 func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name    string
 		options Options
 		flags   string
@@ -80,8 +52,9 @@ func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
 		{"disk only", Options{Disk: 40}, "--disk\n40\n"},
 		{"unchanged omitted", Options{CPUs: 4, Memory: 8, Disk: 20}, "--memory\n8\n"},
 		{"idempotent", Options{CPUs: 4, Memory: 4, Disk: 20}, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			m, log := resizeMachine(t, resizeRecord(), false)
 			// Sentinel payloads stand for existing VM/engine data. The editor must
 			// receive only resource flags, never replacement templates or storage commands.
@@ -92,7 +65,7 @@ func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
 				}
 			}
 			var out bytes.Buffer
-			if err := m.resize(context.Background(), tc.options, &out); err != nil {
+			if err := m.resize(context.Background(), tt.options, &out); err != nil {
 				t.Fatal(err)
 			}
 			calls, err := os.ReadFile(log)
@@ -100,8 +73,8 @@ func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := "--tty=false\nlist\n--json\n"
-			if tc.flags != "" {
-				want += "--tty=false\nedit\n" + tc.flags + Name + "\n"
+			if tt.flags != "" {
+				want += "--tty=false\nedit\n" + tt.flags + Name + "\n"
 			}
 			if string(calls) != want {
 				t.Fatalf("calls:\n%s\nwant:\n%s", calls, want)
@@ -112,7 +85,7 @@ func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
 					t.Fatalf("changed %s: %s %v", name, got, err)
 				}
 			}
-			if tc.flags != "" && !strings.Contains(out.String(), "next start") {
+			if tt.flags != "" && !strings.Contains(out.String(), "next start") {
 				t.Fatalf("missing apply instructions: %s", &out)
 			}
 		})
@@ -122,9 +95,15 @@ func TestResizeEditsOnlyRequestedChangedResources(t *testing.T) {
 func TestResizeRejectsMissingRunningAndUnsafeMachinesBeforeEdit(t *testing.T) {
 	for _, scenario := range []string{"missing", "other machine", "malformed", "Running", "Starting", "Broken", "plain", "wrong arch", "wrong VM", "wrong OS", "missing resources", "shrink", "fractional shrink"} {
 		t.Run(scenario, func(t *testing.T) {
-			record := resizeRecord()
-			var input any = record
-			options := Options{CPUs: 6}
+			var (
+				record      = resizeRecord()
+				input   any = record
+				options     = Options{CPUs: 6}
+			)
+			cfg, ok := record["config"].(map[string]any)
+			if !ok {
+				t.Fatalf("unexpected machine configuration: %T", record["config"])
+			}
 			switch scenario {
 			case "missing":
 				input = nil
@@ -135,23 +114,25 @@ func TestResizeRejectsMissingRunningAndUnsafeMachinesBeforeEdit(t *testing.T) {
 			case "Running", "Starting", "Broken":
 				record["status"] = scenario
 			case "plain":
-				record["config"].(map[string]any)["plain"] = true
+				cfg["plain"] = true
 			case "wrong arch":
 				record["arch"] = "other"
 			case "wrong VM":
 				record["vmType"] = "qemu"
 			case "wrong OS":
-				record["config"].(map[string]any)["os"] = "Darwin"
+				cfg["os"] = "Darwin"
 			case "missing resources":
 				record["disk"] = 0
 			case "shrink":
 				options.Disk = 19
 			case "fractional shrink":
-				record["disk"] = 20*gib + 1
+				record["disk"] = 20*_gib + 1
 				options.Disk = 20
 			}
-			m, log := resizeMachine(t, input, false)
-			var out bytes.Buffer
+			var (
+				m, log = resizeMachine(t, input, false)
+				out    bytes.Buffer
+			)
 			if err := m.resize(context.Background(), options, &out); err == nil {
 				t.Fatal("accepted unsafe resize")
 			}
@@ -164,9 +145,11 @@ func TestResizeRejectsMissingRunningAndUnsafeMachinesBeforeEdit(t *testing.T) {
 }
 
 func TestResizeReportsEditFailureWithoutSuccess(t *testing.T) {
-	m, log := resizeMachine(t, resizeRecord(), true)
-	var out bytes.Buffer
-	err := m.resize(context.Background(), Options{Disk: 40}, &out)
+	var (
+		m, log = resizeMachine(t, resizeRecord(), true)
+		out    bytes.Buffer
+		err    = m.resize(context.Background(), Options{Disk: 40}, &out)
+	)
 	if err == nil || !strings.Contains(err.Error(), "edit rejected") || out.Len() != 0 {
 		t.Fatalf("error/output: %v %s", err, &out)
 	}
@@ -177,12 +160,14 @@ func TestResizeReportsEditFailureWithoutSuccess(t *testing.T) {
 }
 
 func TestResizeLockHonorsCancellation(t *testing.T) {
-	m, log := resizeMachine(t, resizeRecord(), false)
-	lock, err := m.lock(context.Background())
+	var (
+		m, log    = resizeMachine(t, resizeRecord(), false)
+		lock, err = m.lock(context.Background())
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := m.resize(ctx, Options{CPUs: 2}, io.Discard); !errors.Is(err, context.DeadlineExceeded) {
@@ -195,7 +180,7 @@ func TestResizeLockHonorsCancellation(t *testing.T) {
 
 func TestStatusReportsConfiguredResources(t *testing.T) {
 	var out bytes.Buffer
-	_, err := writeStatus(&out, Instance{Name: Name, Status: "Stopped", Arch: "aarch64", CPUs: 6, Memory: 8 * gib, Disk: 40 * gib})
+	_, err := writeStatus(&out, Instance{Name: Name, Status: "Stopped", Arch: "aarch64", CPUs: 6, Memory: 8 * _gib, Disk: 40 * _gib})
 	if err != nil || out.String() != Name+"\tStopped\taarch64\tcpus=6\tmemory=8GiB\tdisk=40GiB (configured)\n" {
 		t.Fatalf("status: %s %v", &out, err)
 	}
@@ -214,5 +199,36 @@ func TestRequireRunningPreviewNeverStartsOrCreatesMachine(t *testing.T) {
 		if strings.Contains(string(data), "start") || strings.Contains(string(data), "shell") || strings.Contains(string(data), "copy") {
 			t.Fatalf("preview mutated machine: %s", data)
 		}
+	}
+}
+
+func resizeMachine(t *testing.T, record any, failEdit bool) (*Machine, string) {
+	t.Helper()
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record == nil {
+		data = nil
+	}
+	var (
+		directory = t.TempDir()
+		log       = filepath.Join(directory, "calls")
+		stub      = filepath.Join(directory, "limactl")
+		script    = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\nif [ \"$2\" = list ]; then printf '%s' " + quote(string(data)) + "; fi\n"
+	)
+	if failEdit {
+		script += "if [ \"$2\" = edit ]; then echo 'edit rejected' >&2; exit 1; fi\n"
+	}
+	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return &Machine{lima: stub, directory: directory, stderr: io.Discard}, log
+}
+
+func resizeRecord() map[string]any {
+	return map[string]any{
+		"name": Name, "status": "Stopped", "vmType": "vz", "arch": map[string]string{"arm64": "aarch64", "amd64": "x86_64"}[runtime.GOARCH],
+		"cpus": 4, "memory": 4 * _gib, "disk": 20 * _gib, "config": map[string]any{"os": "Linux", "plain": false},
 	}
 }
