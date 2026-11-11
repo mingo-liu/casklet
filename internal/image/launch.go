@@ -26,23 +26,6 @@ type LaunchConfig struct {
 	User        string               `json:"user,omitempty"`
 }
 
-func validateLaunch(defaults *LaunchConfig) error {
-	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir, StopSignal: defaults.StopSignal, Healthcheck: defaults.Healthcheck}
-	if cfg.Healthcheck.Enabled() {
-		cfg.Healthcheck = config.MergeHealth(nil, cfg.Healthcheck)
-		if len(cfg.Healthcheck.Shell) == 0 {
-			cfg.Healthcheck.Shell = defaults.Shell
-		}
-	}
-	if len(cfg.Command) == 0 {
-		cfg.Command = []string{"/no-image-default"}
-	}
-	if strings.ContainsRune(defaults.User, 0) {
-		return errors.New("image user cannot contain NUL")
-	}
-	return cfg.ValidateExecution()
-}
-
 // Apply merges defaults and resolves image account names inside the pinned tree.
 // User arguments replace Cmd and are appended to Entrypoint. An explicit
 // entrypoint replaces the image entrypoint and clears its default Cmd.
@@ -61,8 +44,10 @@ func (defaults LaunchConfig) Apply(cfg config.Config, tree string, entrypoint *s
 	if cfg.Healthcheck != nil && len(cfg.Healthcheck.Test) == 0 {
 		return cfg, errors.New("healthcheck options require an image test or --health-cmd")
 	}
-	args := cfg.Command
-	entry := defaults.Entrypoint
+	var (
+		args  = cfg.Command
+		entry = defaults.Entrypoint
+	)
 	if entrypoint != nil {
 		entry = nil
 		if *entrypoint != "" {
@@ -86,6 +71,23 @@ func (defaults LaunchConfig) Apply(cfg config.Config, tree string, entrypoint *s
 	return cfg, cfg.ValidateExecution()
 }
 
+func validateLaunch(defaults *LaunchConfig) error {
+	cfg := config.Config{Command: append(append([]string(nil), defaults.Entrypoint...), defaults.Cmd...), Env: defaults.Env, Workdir: defaults.Workdir, StopSignal: defaults.StopSignal, Healthcheck: defaults.Healthcheck}
+	if cfg.Healthcheck.Enabled() {
+		cfg.Healthcheck = config.MergeHealth(nil, cfg.Healthcheck)
+		if len(cfg.Healthcheck.Shell) == 0 {
+			cfg.Healthcheck.Shell = defaults.Shell
+		}
+	}
+	if len(cfg.Command) == 0 {
+		cfg.Command = []string{"/no-image-default"}
+	}
+	if strings.ContainsRune(defaults.User, 0) {
+		return errors.New("image user cannot contain NUL")
+	}
+	return cfg.ValidateExecution()
+}
+
 func numericID(value string) (uint32, error) {
 	id, err := strconv.ParseUint(value, 10, 32)
 	if err != nil || id == uint64(^uint32(0)) {
@@ -106,7 +108,7 @@ func accountRows(root *os.Root, filename string) ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -114,8 +116,10 @@ func accountRows(root *os.Root, filename string) ([][]string, error) {
 	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
 		return nil, errors.New("image account file must be a regular file no larger than 1 MiB")
 	}
-	scanner := bufio.NewScanner(io.LimitReader(f, (1<<20)+1))
-	var rows [][]string
+	var (
+		scanner = bufio.NewScanner(io.LimitReader(f, (1<<20)+1))
+		rows    [][]string
+	)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != "" && !strings.HasPrefix(line, "#") {
@@ -130,13 +134,15 @@ func resolveUser(tree, value string) (*config.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	user, group, hasGroup := strings.Cut(value, ":")
 	if user == "" || (hasGroup && group == "") || strings.Contains(group, ":") {
 		return nil, errors.New("image user must be USER[:GROUP]")
 	}
-	uid, uidErr := numericID(user)
-	identity := &config.User{UID: uid}
+	var (
+		uid, uidErr = numericID(user)
+		identity    = &config.User{UID: uid}
+	)
 	rows, err := accountRows(root, "etc/passwd")
 	if err != nil {
 		return nil, err

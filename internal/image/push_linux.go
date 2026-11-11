@@ -32,17 +32,17 @@ func (store *Store) Tag(ctx context.Context, source, target string) error {
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	refLock, err := store.lockReference(ctx, target)
 	if err != nil {
 		return err
 	}
-	defer refLock.Close()
+	defer func() { _ = refLock.Close() }()
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	return store.publishReferenceLocked(ctx, target, record.ID)
 }
 
@@ -69,13 +69,13 @@ func (store *Store) Push(ctx context.Context, source, target string) (digest str
 	if err != nil {
 		return "", err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	defer store.cleanupImport(stage, transaction)
 	archive, err := os.CreateTemp(stage, ".push-")
 	if err != nil {
 		return "", err
 	}
-	defer archive.Close()
+	defer func() { _ = archive.Close() }()
 	if err := store.save(ctx, record.ID, archive, true); err != nil {
 		return "", err
 	}
@@ -109,7 +109,7 @@ func (store *Store) Push(ctx context.Context, source, target string) (digest str
 	if err != nil {
 		return "", err
 	}
-	options, err := registryOptions(ctx, parsed)
+	options, err := store.registryOptions(ctx, parsed)
 	if err != nil {
 		return "", err
 	}
@@ -119,13 +119,19 @@ func (store *Store) Push(ctx context.Context, source, target string) (digest str
 	return manifest.Manifests[0].Digest.String(), nil
 }
 
-func registryOptions(ctx context.Context, parsed name.Reference) ([]remote.Option, error) {
+func (store *Store) registryOptions(ctx context.Context, parsed name.Reference) ([]remote.Option, error) {
 	scope, err := registryauth.Registry(parsed.Name())
 	if err != nil {
 		return nil, err
 	}
-	auth := registryauth.Authenticator(ctx, scope)
-	options := []remote.Option{remote.WithContext(ctx), remote.WithAuth(auth)}
+	var (
+		auth = registryauth.Authenticator(ctx, scope)
+		base = store.transport
+	)
+	if base == nil {
+		base = remote.DefaultTransport
+	}
+	options := []remote.Option{remote.WithContext(ctx), remote.WithAuth(auth), remote.WithTransport(base)}
 	credential, _ := auth.Authorization()
 	if credential.Username != "" {
 		registry := parsed.Context().Registry
@@ -133,7 +139,7 @@ func registryOptions(ctx context.Context, parsed name.Reference) ([]remote.Optio
 		if err := registryauth.ValidateRegistryEndpoint(endpoint); err != nil {
 			return nil, err
 		}
-		challenge, err := transport.Ping(ctx, registry, remote.DefaultTransport)
+		challenge, err := transport.Ping(ctx, registry, base)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +150,7 @@ func registryOptions(ctx context.Context, parsed name.Reference) ([]remote.Optio
 				return nil, err
 			}
 		}
-		options = append(options, remote.WithTransport(registryauth.ScopedTransport{Base: remote.DefaultTransport, Registry: endpoint, Realm: realm}))
+		options = append(options, remote.WithTransport(registryauth.ScopedTransport{Base: base, Registry: endpoint, Realm: realm}))
 	}
 	return options, nil
 }

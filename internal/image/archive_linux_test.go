@@ -18,10 +18,19 @@ import (
 	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
+type pausedArchiveWriter struct {
+	ready  chan struct{}
+	resume chan struct{}
+	ctx    context.Context
+	first  bool
+}
+
 func TestOCILoadSavePreservesIdentityOwnershipDefaultsAndReferences(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	record, err := store.Load(ctx, bytes.NewReader(archiveFixture(t)))
+	var (
+		store       = testStore(t)
+		ctx         = context.Background()
+		record, err = store.Load(ctx, bytes.NewReader(archiveFixture(t)))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +47,11 @@ func TestOCILoadSavePreservesIdentityOwnershipDefaultsAndReferences(t *testing.T
 	if _, err := os.Lstat(filepath.Join(tree, "obsolete")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("whiteout: %v", err)
 	}
-	originalUID, originalGID := rootOwnership(t, tree, "value")
-	symUID, symGID := rootOwnership(t, tree, "sym")
-	lease.Close()
+	var (
+		originalUID, originalGID = rootOwnership(t, tree, "value")
+		symUID, symGID           = rootOwnership(t, tree, "sym")
+	)
+	_ = lease.Close()
 	var buf bytes.Buffer
 	if err := store.Save(ctx, record.ID, &buf); err != nil {
 		t.Fatal(err)
@@ -91,35 +102,23 @@ func TestOCILoadSavePreservesIdentityOwnershipDefaultsAndReferences(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
-	uid, gid := rootOwnership(t, tree, "value")
-	suid, sgid := rootOwnership(t, tree, "sym")
+	defer func() { _ = lease.Close() }()
+	var (
+		uid, gid   = rootOwnership(t, tree, "value")
+		suid, sgid = rootOwnership(t, tree, "sym")
+	)
 	if uid != originalUID || gid != originalGID || suid != symUID || sgid != symGID {
 		t.Fatal("numeric ownership changed")
 	}
 }
-func rootOwnership(t *testing.T, tree, name string) (uint32, uint32) {
-	t.Helper()
-	r, err := os.OpenRoot(tree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	info, err := r.Lstat(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	uid, gid, err := rootfs.Ownership(info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return uid, gid
-}
+
 func TestOCILoadFailuresRollBackWithoutChangingPublishedImageOrCache(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	fixture := archiveFixture(t)
-	record, err := store.Load(ctx, bytes.NewReader(fixture))
+	var (
+		store       = testStore(t)
+		ctx         = context.Background()
+		fixture     = archiveFixture(t)
+		record, err = store.Load(ctx, bytes.NewReader(fixture))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,35 +150,20 @@ func TestOCILoadFailuresRollBackWithoutChangingPublishedImageOrCache(t *testing.
 	}
 }
 
-type pausedArchiveWriter struct {
-	ready  chan struct{}
-	resume chan struct{}
-	ctx    context.Context
-	first  bool
-}
-
-func (w *pausedArchiveWriter) Write(p []byte) (int, error) {
-	if !w.first {
-		w.first = true
-		close(w.ready)
-		select {
-		case <-w.resume:
-		case <-w.ctx.Done():
-			return 0, w.ctx.Err()
-		}
-	}
-	return len(p), nil
-}
 func TestOCISaveLeaseDoesNotBlockMetadataAndReleasesOnCancel(t *testing.T) {
-	store := testStore(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	var (
+		store       = testStore(t)
+		ctx, cancel = context.WithCancel(context.Background())
+	)
 	defer cancel()
 	record, err := store.Load(ctx, bytes.NewReader(archiveFixture(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := &pausedArchiveWriter{ready: make(chan struct{}), resume: make(chan struct{}), ctx: ctx}
-	done := make(chan error, 1)
+	var (
+		writer = &pausedArchiveWriter{ready: make(chan struct{}), resume: make(chan struct{}), ctx: ctx}
+		done   = make(chan error, 1)
+	)
 	go func() { done <- store.Save(ctx, record.ID, writer) }()
 	select {
 	case <-writer.ready:
@@ -200,13 +184,47 @@ func TestOCISaveLeaseDoesNotBlockMetadataAndReleasesOnCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestOCISaveRejectsDirectoryImport(t *testing.T) {
-	store := testStore(t)
-	record, err := store.Import(context.Background(), testTemplate(t))
+	var (
+		store       = testStore(t)
+		record, err = store.Import(context.Background(), testTemplate(t))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Save(context.Background(), record.ID, io.Discard); err == nil {
 		t.Fatal("export silently changed directory policy")
 	}
+}
+
+func (w *pausedArchiveWriter) Write(p []byte) (int, error) {
+	if !w.first {
+		w.first = true
+		close(w.ready)
+		select {
+		case <-w.resume:
+		case <-w.ctx.Done():
+			return 0, w.ctx.Err()
+		}
+	}
+	return len(p), nil
+}
+
+func rootOwnership(t *testing.T, tree, name string) (uint32, uint32) {
+	t.Helper()
+	r, err := os.OpenRoot(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	info, err := r.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, gid, err := rootfs.Ownership(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uid, gid
 }

@@ -21,7 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const builtinStagePrefix = ".busybox-stage-"
+const _builtinStagePrefix = ".busybox-stage-"
 
 type builtinMetadata struct {
 	Architecture string   `json:"architecture"`
@@ -29,6 +29,27 @@ type builtinMetadata struct {
 	Version      string   `json:"version"`
 	SHA256       string   `json:"sha256"`
 	Applets      []string `json:"applets"`
+}
+
+// EnsureBuiltin validates or repairs the product's fixed builtin template.
+// Preparation runs in a private sibling tree. Failure preserves the old source;
+// publication and removal wait until every active source copy releases its lease.
+func EnsureBuiltin(ctx context.Context, prepare func(context.Context, string) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if os.Geteuid() != 0 {
+		return errors.New("builtin template repair requires guest root privileges")
+	}
+	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", filepath.Dir(BuiltinPath)} {
+		if err := os.Mkdir(dir, 0755); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := checkBuiltinDirectory(dir, 0); err != nil {
+			return err
+		}
+	}
+	return ensureBuiltinAt(ctx, BuiltinPath, 0, prepare)
 }
 
 func checkBuiltinDirectory(path string, owner uint32) error {
@@ -59,8 +80,10 @@ func lockBuiltinAt(ctx context.Context, parent string, owner uint32, exclusive b
 	if err := checkBuiltinDirectory(parent, owner); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(parent, ".busybox.lock")
-	flags, operation := unix.O_RDONLY, unix.LOCK_SH
+	var (
+		path             = filepath.Join(parent, ".busybox.lock")
+		flags, operation = unix.O_RDONLY, unix.LOCK_SH
+	)
 	if exclusive {
 		flags, operation = unix.O_RDWR, unix.LOCK_EX
 		fd, err := unix.Open(path, flags|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0644)
@@ -78,21 +101,23 @@ func lockBuiltinAt(ctx context.Context, parent string, owner uint32, exclusive b
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
-	var stat unix.Stat_t
+	var (
+		file = os.NewFile(uintptr(fd), path)
+		stat unix.Stat_t
+	)
 	if err := unix.Fstat(fd, &stat); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != owner || stat.Mode&0777 != 0644 || stat.Nlink != 1 {
-		file.Close()
+		_ = file.Close()
 		return nil, errors.New("unsafe builtin template lease")
 	}
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(fd, operation|unix.LOCK_NB)
@@ -100,52 +125,33 @@ func lockBuiltinAt(ctx context.Context, parent string, owner uint32, exclusive b
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 	}
 }
 
-// EnsureBuiltin validates or repairs the product's fixed builtin template.
-// Preparation runs in a private sibling tree. Failure preserves the old source;
-// publication and removal wait until every active source copy releases its lease.
-func EnsureBuiltin(ctx context.Context, prepare func(context.Context, string) error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if os.Geteuid() != 0 {
-		return errors.New("builtin template repair requires guest root privileges")
-	}
-	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", filepath.Dir(BuiltinPath)} {
-		if err := os.Mkdir(dir, 0755); err != nil && !errors.Is(err, os.ErrExist) {
-			return err
-		}
-		if err := checkBuiltinDirectory(dir, 0); err != nil {
-			return err
-		}
-	}
-	return ensureBuiltinAt(ctx, BuiltinPath, 0, prepare)
-}
-
 func ensureBuiltinAt(ctx context.Context, path string, owner uint32, prepare func(context.Context, string) error) (result error) {
-	parent := filepath.Dir(path)
-	lease, err := lockBuiltinAt(ctx, parent, owner, true)
+	var (
+		parent     = filepath.Dir(path)
+		lease, err = lockBuiltinAt(ctx, parent, owner, true)
+	)
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	entries, err := os.ReadDir(parent)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), builtinStagePrefix) {
+		if strings.HasPrefix(entry.Name(), _builtinStagePrefix) {
 			if err := removeBuiltinStage(filepath.Join(parent, entry.Name()), owner); err != nil {
 				return err
 			}
@@ -164,7 +170,7 @@ func ensureBuiltinAt(ctx context.Context, path string, owner uint32, prepare fun
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(parent, builtinStagePrefix)
+	stage, err := os.MkdirTemp(parent, _builtinStagePrefix)
 	if err != nil {
 		return err
 	}
@@ -203,7 +209,7 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	metadata, err := root.OpenFile(".casklet-rootfs.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return err
@@ -248,9 +254,11 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 		if err != nil {
 			return err
 		}
-		mode, exists := expected[name]
-		stat := info.Sys().(*syscall.Stat_t)
-		if !exists || info.Mode() != mode || stat.Uid != owner || (mode.IsRegular() && stat.Nlink != 1) {
+		var (
+			mode, exists = expected[name]
+			stat, ok     = info.Sys().(*syscall.Stat_t)
+		)
+		if !ok || !exists || info.Mode() != mode || stat.Uid != owner || (mode.IsRegular() && stat.Nlink != 1) {
 			return fmt.Errorf("invalid builtin template entry: %s", name)
 		}
 		if mode&os.ModeSymlink != 0 {
@@ -271,7 +279,7 @@ func validateBuiltin(ctx context.Context, path string, owner uint32) error {
 	if err != nil {
 		return err
 	}
-	defer busybox.Close()
+	defer func() { _ = busybox.Close() }()
 	info, err := busybox.Stat()
 	if err != nil {
 		return err

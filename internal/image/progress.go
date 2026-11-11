@@ -7,8 +7,10 @@ import (
 	"time"
 )
 
+// ProgressStage identifies an observable phase of image preparation.
 type ProgressStage string
 
+// Image preparation stages retain their wire-independent string labels.
 const (
 	ProgressResolving      ProgressStage = "resolving"
 	ProgressWaiting        ProgressStage = "waiting"
@@ -42,6 +44,22 @@ type Progress struct {
 
 type progressKey struct{}
 
+// streamProgress bounds update frequency independently of stream chunk sizes.
+// Completion and phase changes bypass throttling, including very small layers.
+type streamProgress struct {
+	ctx   context.Context
+	event Progress
+	last  time.Time
+	now   func() time.Time
+}
+
+type countingReader struct {
+	reader io.Reader
+	read   func(int)
+}
+
+var _ io.Reader = countingReader{}
+
 // WithProgress installs a synchronous observer for this operation only. The
 // observer should return promptly; presentation belongs to the caller. Calls
 // from concurrent layer workers serialize through the same observer mutex.
@@ -55,21 +73,6 @@ func WithProgress(ctx context.Context, observe func(Progress)) context.Context {
 		}
 	}
 	return context.WithValue(ctx, progressKey{}, serialized)
-}
-
-func reportProgress(ctx context.Context, event Progress) {
-	if observe, ok := ctx.Value(progressKey{}).(func(Progress)); ok && observe != nil {
-		observe(event)
-	}
-}
-
-// streamProgress bounds update frequency independently of stream chunk sizes.
-// Completion and phase changes bypass throttling, including very small layers.
-type streamProgress struct {
-	ctx   context.Context
-	event Progress
-	last  time.Time
-	now   func() time.Time
 }
 
 func (p *streamProgress) add(n int) {
@@ -86,15 +89,16 @@ func (p *streamProgress) finish(stage ProgressStage) {
 	reportProgress(p.ctx, p.event)
 }
 
-type countingReader struct {
-	reader io.Reader
-	read   func(int)
-}
-
 func (r countingReader) Read(buf []byte) (int, error) {
 	n, err := r.reader.Read(buf)
 	if n > 0 {
 		r.read(n)
 	}
 	return n, err
+}
+
+func reportProgress(ctx context.Context, event Progress) {
+	if observe, ok := ctx.Value(progressKey{}).(func(Progress)); ok && observe != nil {
+		observe(event)
+	}
 }

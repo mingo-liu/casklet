@@ -26,38 +26,18 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
-func fixtureImage(t *testing.T, arch string, layers ...[]byte) v1.Image {
-	t.Helper()
-	img := empty.Image
-	for _, data := range layers {
-		layer, err := tarball.LayerFromReader(bytes.NewReader(data))
-		if err != nil {
-			t.Fatal(err)
-		}
-		img, err = mutate.AppendLayers(img, layer)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	cf, err := img.ConfigFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cf.OS = "linux"
-	cf.Architecture = arch
-	cf.Config.Cmd = []string{"/app"}
-	cf.Config.Env = []string{"COLOR=blue"}
-	cf.Config.WorkingDir = "/work"
-	img, err = mutate.ConfigFile(img, cf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return img
+// Model the previous engine's decoded view of the same registry manifest.
+type legacyHealthImage struct {
+	v1.Image
+
+	cf *v1.ConfigFile
 }
 
 func TestRegistryPullSelectsPlatformCachesAndRefreshes(t *testing.T) {
-	ctx := context.Background()
-	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
+	var (
+		ctx        = context.Background()
+		store, err = newStoreAt(filepath.Join(t.TempDir(), "images"))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +47,11 @@ func TestRegistryPullSelectsPlatformCachesAndRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "native"}, tarEntry{name: "remove", body: "old"}), layerBytes(t, tarEntry{name: ".wh.remove"}, tarEntry{name: "keep", body: "new"}))
-	other := fixtureImage(t, map[string]string{"arm64": "amd64", "amd64": "arm64"}[runtime.GOARCH], layerBytes(t, tarEntry{name: "app", body: "other"}))
-	index := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{Add: other, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: map[string]string{"arm64": "amd64", "amd64": "arm64"}[runtime.GOARCH]}}}, mutate.IndexAddendum{Add: native, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH}}})
+	var (
+		native = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "native"}, tarEntry{name: "remove", body: "old"}), layerBytes(t, tarEntry{name: ".wh.remove"}, tarEntry{name: "keep", body: "new"}))
+		other  = fixtureImage(t, map[string]string{"arm64": "amd64", "amd64": "arm64"}[runtime.GOARCH], layerBytes(t, tarEntry{name: "app", body: "other"}))
+		index  = mutate.AppendManifests(empty.Index, mutate.IndexAddendum{Add: other, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: map[string]string{"arm64": "amd64", "amd64": "arm64"}[runtime.GOARCH]}}}, mutate.IndexAddendum{Add: native, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH}}})
+	)
 	if err := remote.WriteIndex(ref, index); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +76,7 @@ func TestRegistryPullSelectsPlatformCachesAndRefreshes(t *testing.T) {
 	if err := store.Remove(ctx, first.ID, func(context.Context, string) (bool, error) { return false, nil }); !errors.Is(err, ErrInUse) {
 		t.Fatalf("leased deletion: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	duplicate, err := store.Pull(ctx, ref.Name())
 	if err != nil || duplicate.ID != first.ID {
 		t.Fatalf("duplicate pull: %+v %v", duplicate, err)
@@ -130,13 +112,17 @@ func TestRegistryPullSelectsPlatformCachesAndRefreshes(t *testing.T) {
 }
 
 func TestPullRollbackAndConfigIntegrity(t *testing.T) {
-	ctx := context.Background()
-	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
+	var (
+		ctx        = context.Background()
+		store, err = newStoreAt(filepath.Join(t.TempDir(), "images"))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := "index.docker.io/library/test:latest"
-	good := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "app"}))
+	var (
+		ref  = "index.docker.io/library/test:latest"
+		good = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "app"}))
+	)
 	record, err := store.pullImage(ctx, ref, good)
 	if err != nil {
 		t.Fatal(err)
@@ -178,14 +164,16 @@ func TestPullRollbackAndConfigIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, lease, err := store.Acquire(ctx, record.ID); err == nil {
-		lease.Close()
+		_ = lease.Close()
 		t.Fatal("tampered defaults accepted")
 	}
 }
 
 func TestLayerDiffIDMismatchAndBoundedDownload(t *testing.T) {
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "app"}))
-	layers, err := img.Layers()
+	var (
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "app"}))
+		layers, err = img.Layers()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,13 +181,13 @@ func TestLayerDiffIDMismatchAndBoundedDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	archive, err := os.CreateTemp(t.TempDir(), "layer-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer archive.Close()
-	if _, err := unpackLayer(context.Background(), root, archive, layers[0], v1.Hash{Algorithm: "sha256", Hex: strings.Repeat("0", 64)}, maxImageBytes); err == nil {
+	defer func() { _ = archive.Close() }()
+	if _, err := unpackLayer(context.Background(), root, archive, layers[0], v1.Hash{Algorithm: "sha256", Hex: strings.Repeat("0", 64)}, _maxImageBytes); err == nil {
 		t.Fatal("wrong DiffID accepted")
 	}
 	diff, err := layers[0].DiffID()
@@ -212,8 +200,10 @@ func TestLayerDiffIDMismatchAndBoundedDownload(t *testing.T) {
 }
 
 func TestLayerProgressReportsCompressedBytesExtractionAndFailure(t *testing.T) {
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: strings.Repeat("application", 10000)}))
-	manifest, err := img.Manifest()
+	var (
+		img           = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: strings.Repeat("application", 10000)}))
+		manifest, err = img.Manifest()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,15 +221,15 @@ func TestLayerProgressReportsCompressedBytesExtractionAndFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer root.Close()
+			defer func() { _ = root.Close() }()
 			archive, err := os.CreateTemp(t.TempDir(), "layer-")
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer archive.Close()
+			defer func() { _ = archive.Close() }()
 			var events []Progress
 			ctx := WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
-			expected, remaining := diff, maxImageBytes
+			expected, remaining := diff, _maxImageBytes
 			switch fail {
 			case "digest":
 				expected.Hex = strings.Repeat("0", 64)
@@ -295,8 +285,10 @@ func TestPullCanceledByProgressPreservesCacheAndCleansStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := "index.docker.io/library/test:latest"
-	good := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "old"}))
+	var (
+		ref  = "index.docker.io/library/test:latest"
+		good = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "old"}))
+	)
 	cached, err := store.pullImage(context.Background(), ref, good)
 	if err != nil {
 		t.Fatal(err)
@@ -366,15 +358,6 @@ func TestPullPreservesHealthcheckDefaults(t *testing.T) {
 	}
 }
 
-// Model the previous engine's decoded view of the same registry manifest.
-type legacyHealthImage struct {
-	v1.Image
-	cf *v1.ConfigFile
-}
-
-func (i legacyHealthImage) ConfigFile() (*v1.ConfigFile, error) { return i.cf, nil }
-func (i legacyHealthImage) RawConfigFile() ([]byte, error)      { return json.Marshal(i.cf) }
-
 func TestPullRefreshesLegacyHealthMetadataWithoutManifestChange(t *testing.T) {
 	store, err := newStoreAt(filepath.Join(t.TempDir(), "images"))
 	if err != nil {
@@ -415,4 +398,37 @@ func TestPullRefreshesLegacyHealthMetadataWithoutManifestChange(t *testing.T) {
 	if err != nil || again.ID != current.ID || !again.CreatedAt.Equal(current.CreatedAt) {
 		t.Fatalf("unchanged image republished: %+v %v", again, err)
 	}
+}
+
+func (i legacyHealthImage) ConfigFile() (*v1.ConfigFile, error) { return i.cf, nil }
+
+func (i legacyHealthImage) RawConfigFile() ([]byte, error) { return json.Marshal(i.cf) }
+
+func fixtureImage(t *testing.T, arch string, layers ...[]byte) v1.Image {
+	t.Helper()
+	img := empty.Image
+	for _, data := range layers {
+		layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(data)), nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err = mutate.AppendLayers(img, layer)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	cf, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf.OS = "linux"
+	cf.Architecture = arch
+	cf.Config.Cmd = []string{"/app"}
+	cf.Config.Env = []string{"COLOR=blue"}
+	cf.Config.WorkingDir = "/work"
+	img, err = mutate.ConfigFile(img, cf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
 }
