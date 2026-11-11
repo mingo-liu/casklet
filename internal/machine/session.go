@@ -15,10 +15,12 @@ func waitGuest(ctx context.Context, cmd *exec.Cmd, signals <-chan os.Signal, gra
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	cancellation := ctx.Done()
-	var canceled error
-	var interrupted syscall.Signal
-	var timer *time.Timer
-	var shutdown <-chan time.Time
+	var (
+		canceled    error
+		interrupted syscall.Signal
+		timer       *time.Timer
+		shutdown    <-chan time.Time
+	)
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -47,10 +49,14 @@ func waitGuest(ctx context.Context, cmd *exec.Cmd, signals <-chan os.Signal, gra
 				_ = cmd.Process.Signal(sig)
 				continue
 			}
-			if interrupted == 0 {
-				interrupted = sig.(syscall.Signal)
+			number, ok := sig.(syscall.Signal)
+			if !ok {
+				continue
 			}
-			stop(sig.(syscall.Signal))
+			if interrupted == 0 {
+				interrupted = number
+			}
+			stop(number)
 		case <-cancellation:
 			cancellation = nil
 			canceled = ctx.Err()
@@ -59,7 +65,8 @@ func waitGuest(ctx context.Context, cmd *exec.Cmd, signals <-chan os.Signal, gra
 			}
 		case <-shutdown:
 			_ = cmd.Process.Kill()
-			<-done
+			//lint:ignore S1005 The shutdown error below takes precedence over the reaped result.
+			_ = <-done
 			if canceled != nil {
 				return 0, canceled
 			}

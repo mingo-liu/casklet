@@ -26,6 +26,8 @@ type credentialOutput struct {
 	err       error
 }
 
+var _ io.Writer = (*credentialOutput)(nil)
+
 func (w *credentialOutput) Write(data []byte) (int, error) {
 	size := len(data)
 	if w.err != nil {
@@ -41,8 +43,10 @@ func (w *credentialOutput) Write(data []byte) (int, error) {
 	if index < 0 {
 		return size, nil
 	}
-	line := string(w.buffer[:index+1])
-	remaining := append([]byte(nil), w.buffer[index+1:]...)
+	var (
+		line      = string(w.buffer[:index+1])
+		remaining = append([]byte(nil), w.buffer[index+1:]...)
+	)
 	w.buffer = nil
 	if !w.started && line == registryauth.RequestMarker {
 		w.started = true
@@ -69,7 +73,7 @@ func (w *credentialOutput) Write(data []byte) (int, error) {
 }
 
 func (w *credentialOutput) sendCredential() error {
-	defer w.response.Close()
+	defer func() { _ = w.response.Close() }()
 	if pipe, ok := w.response.(interface{ SetWriteDeadline(time.Time) error }); ok {
 		if err := pipe.SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
 			return errors.New("set credential transport deadline failed")
@@ -112,8 +116,10 @@ func (w *credentialOutput) sendCredential() error {
 // immutable ID. A concurrent cache removal fails explicitly rather than causing
 // a second anonymous download; workload arguments remain byte-for-byte intact.
 func preparedImageArguments(args []string, id string) []string {
-	result := append([]string(nil), args...)
-	imageIndex, imageEnd, end := -1, -1, 1
+	var (
+		result                    = append([]string(nil), args...)
+		imageIndex, imageEnd, end = -1, -1, 1
+	)
 	_ = runargs.Walk(result, func(name, _ string, index, last int) error {
 		end = last + 1
 		if name == "image" {

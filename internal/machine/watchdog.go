@@ -14,41 +14,6 @@ import (
 	"time"
 )
 
-// A separate process owns the read end of the client's lifeline. Unlike an
-// in-process goroutine, it can notify the guest after the client receives SIGKILL.
-func startWatchdog(instance Instance, token string, rootless bool) (func(), error) {
-	read, write, err := os.Pipe()
-	if err != nil {
-		return nil, err
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		read.Close()
-		write.Close()
-		return nil, err
-	}
-	data, err := json.Marshal(instance)
-	if err != nil {
-		read.Close()
-		write.Close()
-		return nil, err
-	}
-	cmd := exec.Command(executable, "__watchdog", string(data), token, strconv.FormatBool(rootless))
-	cmd.ExtraFiles = []*os.File{read}
-	if err := cmd.Start(); err != nil {
-		read.Close()
-		write.Close()
-		return nil, err
-	}
-	read.Close()
-	return func() {
-		// A marker distinguishes a completed command from abrupt parent death.
-		_, _ = write.Write([]byte{1})
-		write.Close()
-		_ = cmd.Wait()
-	}, nil
-}
-
 // Watchdog is a private macOS entry point. FD 3 is its only parent lifeline.
 func Watchdog(encoded, token, rootlessValue string) error {
 	signal.Ignore(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
@@ -65,7 +30,7 @@ func Watchdog(encoded, token, rootlessValue string) error {
 		return err
 	}
 	lifeline := os.NewFile(3, "client-lifeline")
-	defer lifeline.Close()
+	defer func() { _ = lifeline.Close() }()
 	var marker [1]byte
 	n, err := lifeline.Read(marker[:])
 	if n > 0 {
@@ -78,4 +43,39 @@ func Watchdog(encoded, token, rootlessValue string) error {
 	defer cancel()
 	m := &Machine{}
 	return m.sendSignal(ctx, instance, rootless, token, strconv.Itoa(int(syscall.SIGHUP)))
+}
+
+// A separate process owns the read end of the client's lifeline. Unlike an
+// in-process goroutine, it can notify the guest after the client receives SIGKILL.
+func startWatchdog(instance Instance, token string, rootless bool) (func(), error) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		_ = read.Close()
+		_ = write.Close()
+		return nil, err
+	}
+	data, err := json.Marshal(instance)
+	if err != nil {
+		_ = read.Close()
+		_ = write.Close()
+		return nil, err
+	}
+	cmd := exec.Command(executable, "__watchdog", string(data), token, strconv.FormatBool(rootless))
+	cmd.ExtraFiles = []*os.File{read}
+	if err := cmd.Start(); err != nil {
+		_ = read.Close()
+		_ = write.Close()
+		return nil, err
+	}
+	_ = read.Close()
+	return func() {
+		// A marker distinguishes a completed command from abrupt parent death.
+		_, _ = write.Write([]byte{1})
+		_ = write.Close()
+		_ = cmd.Wait()
+	}, nil
 }

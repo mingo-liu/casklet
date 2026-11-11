@@ -30,7 +30,11 @@ type keychainAPI struct {
 	constants        map[string]uintptr
 }
 
-var loadKeychain = sync.OnceValues(func() (*keychainAPI, error) {
+type keychainStore struct{ api *keychainAPI }
+
+var _ Store = (*keychainStore)(nil)
+
+var _loadKeychain = sync.OnceValues(func() (*keychainAPI, error) {
 	cf, err := purego.Dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", purego.RTLD_NOW|purego.RTLD_LOCAL)
 	if err != nil {
 		return nil, errors.New("load macOS CoreFoundation failed")
@@ -39,16 +43,23 @@ var loadKeychain = sync.OnceValues(func() (*keychainAPI, error) {
 	if err != nil {
 		return nil, errors.New("load macOS Security framework failed")
 	}
-	a := &keychainAPI{constants: map[string]uintptr{}}
+	a := &keychainAPI{constants: make(map[string]uintptr)}
 	for _, binding := range []struct {
 		target  any
 		library uintptr
 		name    string
 	}{
-		{&a.stringCreate, cf, "CFStringCreateWithCString"}, {&a.dataCreate, cf, "CFDataCreate"},
-		{&a.dataLength, cf, "CFDataGetLength"}, {&a.dataBytes, cf, "CFDataGetBytePtr"},
-		{&a.dictionaryCreate, cf, "CFDictionaryCreateMutable"}, {&a.dictionarySet, cf, "CFDictionarySetValue"}, {&a.release, cf, "CFRelease"},
-		{&a.copyMatching, security, "SecItemCopyMatching"}, {&a.add, security, "SecItemAdd"}, {&a.update, security, "SecItemUpdate"}, {&a.delete, security, "SecItemDelete"},
+		{target: &a.stringCreate, library: cf, name: "CFStringCreateWithCString"},
+		{target: &a.dataCreate, library: cf, name: "CFDataCreate"},
+		{target: &a.dataLength, library: cf, name: "CFDataGetLength"},
+		{target: &a.dataBytes, library: cf, name: "CFDataGetBytePtr"},
+		{target: &a.dictionaryCreate, library: cf, name: "CFDictionaryCreateMutable"},
+		{target: &a.dictionarySet, library: cf, name: "CFDictionarySetValue"},
+		{target: &a.release, library: cf, name: "CFRelease"},
+		{target: &a.copyMatching, library: security, name: "SecItemCopyMatching"},
+		{target: &a.add, library: security, name: "SecItemAdd"},
+		{target: &a.update, library: security, name: "SecItemUpdate"},
+		{target: &a.delete, library: security, name: "SecItemDelete"},
 	} {
 		symbol, err := purego.Dlsym(binding.library, binding.name)
 		if err != nil {
@@ -56,7 +67,18 @@ var loadKeychain = sync.OnceValues(func() (*keychainAPI, error) {
 		}
 		purego.RegisterFunc(binding.target, symbol)
 	}
-	for _, symbol := range []string{"kSecClass", "kSecClassGenericPassword", "kSecAttrService", "kSecAttrAccount", "kSecValueData", "kSecReturnData", "kSecMatchLimit", "kSecMatchLimitOne", "kSecUseAuthenticationUI", "kSecUseAuthenticationUIFail"} {
+	for _, symbol := range []string{
+		"kSecClass",
+		"kSecClassGenericPassword",
+		"kSecAttrService",
+		"kSecAttrAccount",
+		"kSecValueData",
+		"kSecReturnData",
+		"kSecMatchLimit",
+		"kSecMatchLimitOne",
+		"kSecUseAuthenticationUI",
+		"kSecUseAuthenticationUIFail",
+	} {
 		address, err := purego.Dlsym(security, symbol)
 		if err != nil {
 			return nil, fmt.Errorf("load Keychain constant %s failed", symbol)
@@ -71,50 +93,13 @@ var loadKeychain = sync.OnceValues(func() (*keychainAPI, error) {
 	return a, nil
 })
 
-// dlsym returns a native data-symbol address as an ABI word. Reinterpret that
-// word as a C pointer and read the exported CFTypeRef; no Go heap pointer is
-// converted into an integer or retained by the framework.
-func cfConstant(address uintptr) uintptr {
-	pointer := *(*unsafe.Pointer)(unsafe.Pointer(&address))
-	return *(*uintptr)(pointer)
-}
-
-type keychainStore struct{ api *keychainAPI }
-
+// OpenStore opens the native macOS Keychain credential store.
 func OpenStore() (Store, error) {
-	api, err := loadKeychain()
+	api, err := _loadKeychain()
 	if err != nil {
 		return nil, err
 	}
 	return &keychainStore{api: api}, nil
-}
-
-func (s *keychainStore) query(registry string) (uintptr, func(), error) {
-	if canonical, err := NormalizeRegistry(registry); err != nil || canonical != registry {
-		return 0, nil, errors.New("invalid canonical registry")
-	}
-	a := s.api
-	dictionary := a.dictionaryCreate(0, 0, 0, 0)
-	service := a.stringCreate(0, "com.mingo-liu.casklet.registry", 0x08000100)
-	account := a.stringCreate(0, registry, 0x08000100)
-	cleanup := func() { a.release(dictionary); a.release(service); a.release(account) }
-	a.dictionarySet(dictionary, a.constants["kSecClass"], a.constants["kSecClassGenericPassword"])
-	a.dictionarySet(dictionary, a.constants["kSecAttrService"], service)
-	a.dictionarySet(dictionary, a.constants["kSecAttrAccount"], account)
-	// Never open a UI prompt during headless/CI pulls. Locked or denied entries
-	// are explicit errors; only missing entries fall back to anonymous access.
-	a.dictionarySet(dictionary, a.constants["kSecUseAuthenticationUI"], a.constants["kSecUseAuthenticationUIFail"])
-	return dictionary, cleanup, nil
-}
-
-func keychainStatus(operation string, status int32) error {
-	if status == 0 {
-		return nil
-	}
-	if status == -25300 {
-		return ErrNotFound
-	}
-	return fmt.Errorf("macOS Keychain %s failed (status %d); unlock your login Keychain and allow casklet access", operation, status)
 }
 
 func (s *keychainStore) Get(registry string) (Credential, error) {
@@ -135,8 +120,10 @@ func (s *keychainStore) Get(registry string) (Credential, error) {
 	if size < 1 || size > MaxEnvelope {
 		return Credential{}, errors.New("invalid registry Keychain entry")
 	}
-	data := unsafe.Slice((*byte)(a.dataBytes(result)), int(size))
-	var credential Credential
+	var (
+		data       = unsafe.Slice((*byte)(a.dataBytes(result)), int(size))
+		credential Credential
+	)
 	if json.Unmarshal(data, &credential) != nil || credential.Validate(registry) != nil {
 		return Credential{}, errors.New("invalid registry Keychain entry")
 	}
@@ -183,4 +170,42 @@ func (s *keychainStore) Delete(registry string) error {
 		return nil
 	}
 	return err
+}
+
+func (s *keychainStore) query(registry string) (uintptr, func(), error) {
+	if canonical, err := NormalizeRegistry(registry); err != nil || canonical != registry {
+		return 0, nil, errors.New("invalid canonical registry")
+	}
+	var (
+		a          = s.api
+		dictionary = a.dictionaryCreate(0, 0, 0, 0)
+		service    = a.stringCreate(0, "com.mingo-liu.casklet.registry", 0x08000100)
+		account    = a.stringCreate(0, registry, 0x08000100)
+	)
+	cleanup := func() { a.release(dictionary); a.release(service); a.release(account) }
+	a.dictionarySet(dictionary, a.constants["kSecClass"], a.constants["kSecClassGenericPassword"])
+	a.dictionarySet(dictionary, a.constants["kSecAttrService"], service)
+	a.dictionarySet(dictionary, a.constants["kSecAttrAccount"], account)
+	// Never open a UI prompt during headless/CI pulls. Locked or denied entries
+	// are explicit errors; only missing entries fall back to anonymous access.
+	a.dictionarySet(dictionary, a.constants["kSecUseAuthenticationUI"], a.constants["kSecUseAuthenticationUIFail"])
+	return dictionary, cleanup, nil
+}
+
+func keychainStatus(operation string, status int32) error {
+	if status == 0 {
+		return nil
+	}
+	if status == -25300 {
+		return ErrNotFound
+	}
+	return fmt.Errorf("macOS Keychain %s failed (status %d); unlock your login Keychain and allow casklet access", operation, status)
+}
+
+// dlsym returns a native data-symbol address as an ABI word. Reinterpret that
+// word as a C pointer and read the exported CFTypeRef; no Go heap pointer is
+// converted into an integer or retained by the framework.
+func cfConstant(address uintptr) uintptr {
+	pointer := *(*unsafe.Pointer)(unsafe.Pointer(&address))
+	return *(*uintptr)(pointer)
 }

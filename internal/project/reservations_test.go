@@ -42,7 +42,7 @@ func TestReservationPagesRejectChangedMissingAndMalformedRecords(t *testing.T) {
 	for _, scenario := range []string{"missing", "duplicate", "generation", "name", "identity", "state", "ports", "cursor", "oversized", "selected", "json"} {
 		t.Run(scenario, func(t *testing.T) {
 			page := ReservationPage{Records: []Reservation{valid}}
-			removed := map[string]bool{}
+			removed := make(map[string]bool)
 			all := []container.Record{record}
 			switch scenario {
 			case "missing":

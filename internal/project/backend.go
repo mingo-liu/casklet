@@ -26,6 +26,8 @@ type Backend interface {
 // The host overrides Records to use its bounded private inventory pages.
 type CommandBackend struct{ Call Call }
 
+var _ Backend = CommandBackend{}
+
 func (backend CommandBackend) Records(ctx context.Context, name string) ([]container.Record, error) {
 	args := []string{"ps", "-a", "--json"}
 	if name != "" {

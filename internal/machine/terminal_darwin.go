@@ -4,8 +4,9 @@ package machine
 
 import (
 	"fmt"
-	"golang.org/x/sys/unix"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 func checkTerminal(file *os.File) error {

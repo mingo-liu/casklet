@@ -12,6 +12,8 @@ type Diagnostics struct {
 	LimaVersion string        `json:"lima_version,omitempty"`
 	VM          *DiagnosticVM `json:"vm,omitempty"`
 }
+
+// DiagnosticVM contains the public subset of Lima instance metadata.
 type DiagnosticVM struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -23,9 +25,12 @@ type DiagnosticVM struct {
 
 // Diagnose reads current Lima metadata without creating state or starting a VM.
 func Diagnose(ctx context.Context) (Diagnostics, error) {
-	var result Diagnostics
-	lima, err := exec.LookPath("limactl")
+	var (
+		result    Diagnostics
+		lima, err = exec.LookPath("limactl")
+	)
 	if err != nil {
+		//lint:ignore ST1005 Lima is the product name in the established CLI diagnostic.
 		return result, errors.New("Lima is required; install it with brew install lima")
 	}
 	m := &Machine{lima: lima}
@@ -39,7 +44,14 @@ func Diagnose(ctx context.Context) (Diagnostics, error) {
 		return result, err
 	}
 	if instance != nil {
-		result.VM = &DiagnosticVM{Name: instance.Name, Status: instance.Status, Arch: instance.Arch, CPUs: instance.CPUs, Memory: instance.Memory, Disk: instance.Disk}
+		result.VM = &DiagnosticVM{
+			Name:   instance.Name,
+			Status: instance.Status,
+			Arch:   instance.Arch,
+			CPUs:   instance.CPUs,
+			Memory: instance.Memory,
+			Disk:   instance.Disk,
+		}
 	}
 	return result, nil
 }

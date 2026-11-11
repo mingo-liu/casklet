@@ -20,6 +20,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
+// Invocation describes a guest operation and its host preparation requirements.
 type Invocation struct {
 	PreflightPorts []config.PortMapping
 	RequireRunning bool
@@ -31,6 +32,228 @@ type Invocation struct {
 	PushSource     string
 	RefreshImage   bool
 	Progress       string
+}
+
+// Execute prepares the guest, forwards host signals, and waits for its result.
+func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *os.File) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
+	// One signal source covers preparation and both credential/workload sessions.
+	// Keep caller cancellation distinct from signals so guest traps retain their
+	// original signal and command exit status.
+	preparationCtx, cancelPreparation := context.WithCancel(ctx)
+	defer cancelPreparation()
+	var (
+		incoming = make(chan os.Signal, 8)
+		signals  = make(chan os.Signal, 8)
+	)
+	signal.Notify(incoming, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
+	defer signal.Stop(incoming)
+	var (
+		finished = make(chan struct{})
+		joined   = make(chan struct{})
+	)
+	defer func() {
+		close(finished)
+		<-joined
+	}()
+	go func() {
+		defer close(joined)
+		for {
+			select {
+			case sig := <-incoming:
+				select {
+				case signals <- sig:
+					if sig != syscall.SIGWINCH {
+						cancelPreparation()
+					}
+				case <-finished:
+					return
+				}
+			case <-finished:
+				return
+			}
+		}
+	}()
+	if invocation.TTY && invocation.Interactive {
+		if err := checkTerminal(stdin); err != nil {
+			return 125, err
+		}
+	}
+	if len(invocation.PreflightPorts) > 0 {
+		if err := waitHostPorts(preparationCtx, invocation.PreflightPorts, 3*time.Second); err != nil {
+			return 125, err
+		}
+	}
+	if len(invocation.Args) > 0 && invocation.Args[0] == "__project-preflight" {
+		var ports []config.PortMapping
+		if err := visitHostResources(invocation.Args, func(name, value string) error {
+			if name != "p" && name != "publish" {
+				return nil
+			}
+			port, err := config.ParsePortMapping(value)
+			if err == nil {
+				ports = append(ports, port)
+			}
+			return err
+		}); err != nil {
+			return 125, err
+		}
+		if err := waitHostPorts(preparationCtx, ports, 3*time.Second); err != nil {
+			return 125, err
+		}
+	}
+	if err := localPreflight(invocation.Args); err != nil {
+		return 125, err
+	}
+	m, err := open(stderr)
+	if err != nil {
+		return 125, err
+	}
+	if err := m.preflightShares(preparationCtx, invocation.Args); err != nil {
+		return 125, err
+	}
+	instance, err := m.ensure(preparationCtx, defaultOptions(), false, invocation.RequireRunning)
+	if err != nil {
+		return 125, err
+	}
+	args, err := guestArguments(*instance, invocation.Args)
+	if err != nil {
+		return 125, err
+	}
+	if err := checkPorts(invocation.Args); err != nil {
+		return 125, err
+	}
+	if invocation.ImageReference != "" {
+		mode := "resolve"
+		if invocation.RefreshImage {
+			mode = "pull"
+		}
+		if invocation.PushSource != "" {
+			mode = "push"
+		}
+		input, response, err := os.Pipe()
+		if err != nil {
+			return 125, err
+		}
+		defer func() { _ = input.Close() }()
+		defer func() { _ = response.Close() }()
+		var (
+			resolved bytes.Buffer
+			output   = io.Writer(&resolved)
+		)
+		if invocation.RefreshImage || invocation.PushSource != "" {
+			output = stdout
+		}
+		var (
+			auth        = &credentialOutput{reference: invocation.ImageReference, response: response, output: output}
+			preparation = Invocation{
+				Args:     []string{"__credential-prepare", mode, invocation.Progress, invocation.ImageReference},
+				Rootless: invocation.Rootless,
+			}
+		)
+		if invocation.PushSource != "" {
+			preparation.Args = append(preparation.Args, invocation.PushSource)
+		}
+		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth, signals)
+		if err != nil || code != 0 || invocation.RefreshImage || invocation.PushSource != "" {
+			return code, err
+		}
+		id := strings.TrimSpace(resolved.String())
+		if !strings.HasPrefix(id, "sha256:") || len(id) != 71 {
+			return 125, errors.New("invalid prepared image identity")
+		}
+		args = preparedImageArguments(args, id)
+	}
+	return m.executeGuest(ctx, invocation, *instance, args, stdin, stdout, stderr, nil, signals)
+}
+
+func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, instance Instance, args []string, stdin, stdout, stderr *os.File, authentication *credentialOutput, signals <-chan os.Signal) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return 125, err
+	}
+	var (
+		token               = hex.EncodeToString(random[:])
+		finishWatchdog, err = startWatchdog(instance, token, invocation.Rootless)
+	)
+	if err != nil {
+		return 125, err
+	}
+	defer finishWatchdog()
+	lifecycle := len(args) > 0 && (args[0] == "start" || args[0] == "restart")
+	if lifecycle {
+		args = append([]string{"__host-lifecycle"}, args...)
+	}
+	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
+	// SSH owns terminal raw mode and resizing. Explicit control messages also
+	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
+	var (
+		archiveOutput = len(args) > 0 && (args[0] == "__copy-out" || args[0] == "events") || len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
+		cmd           = sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
+	)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	checksCtx, cancelChecks := context.WithCancel(ctx)
+	defer cancelChecks()
+	if authentication != nil {
+		cmd.Stdout = authentication
+	}
+	if lifecycle {
+		input, response, err := os.Pipe()
+		if err != nil {
+			return 125, err
+		}
+		defer func() { _ = input.Close() }()
+		defer func() { _ = response.Close() }()
+		cmd.Stdin = input
+		cmd.Stdout = &portCheckOutput{ctx: checksCtx, response: response, stdout: stdout}
+	}
+	var inspection *inspectionOutput
+	if len(invocation.Args) > 0 && invocation.Args[0] == "inspect" {
+		inspection = &inspectionOutput{}
+		cmd.Stdout = inspection
+	}
+	if err := ctx.Err(); err != nil {
+		return 125, err
+	}
+	if err := cmd.Start(); err != nil {
+		return 125, err
+	}
+	if authentication != nil {
+		// SSH inherited its own descriptor. Keeping this read end in the host
+		// would prevent EPIPE if SSH exits before consuming the credentials.
+		_ = stdin.Close()
+	}
+	grace := 75 * time.Second
+	if archiveOutput {
+		// Bound SSH draining when a host archive pipe is full.
+		grace = 2 * time.Second
+	}
+	interrupted, err := waitGuest(ctx, cmd, signals, grace, func(sig syscall.Signal) {
+		cancelChecks()
+		controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(sig))); err != nil {
+			_, _ = fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", err)
+		}
+	})
+	if archiveOutput && interrupted != 0 {
+		return 128 + int(interrupted), nil
+	}
+	if ctx.Err() != nil {
+		return 125, ctx.Err()
+	}
+	if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
+		authentication.err = errors.New("incomplete registry preparation response")
+	}
+	if authentication != nil && authentication.err != nil {
+		return 125, authentication.err
+	}
+	return guestResult(instance, inspection, stdout, err)
 }
 
 // guestArguments maps host resources before the guest parser runs. Workload
@@ -137,211 +360,9 @@ func checkPorts(args []string) error {
 }
 
 func engineCommand(rootless bool, args ...string) []string {
-	command := []string{guestEngine}
+	command := []string{_guestEngine}
 	if !rootless {
-		command = []string{"/usr/bin/sudo", "-n", "--", guestEngine}
+		command = []string{"/usr/bin/sudo", "-n", "--", _guestEngine}
 	}
 	return append(command, args...)
-}
-
-func Execute(ctx context.Context, invocation Invocation, stdin, stdout, stderr *os.File) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 125, err
-	}
-	// One signal source covers preparation and both credential/workload sessions.
-	// Keep caller cancellation distinct from signals so guest traps retain their
-	// original signal and command exit status.
-	preparationCtx, cancelPreparation := context.WithCancel(ctx)
-	defer cancelPreparation()
-	incoming := make(chan os.Signal, 8)
-	signals := make(chan os.Signal, 8)
-	signal.Notify(incoming, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGWINCH)
-	defer signal.Stop(incoming)
-	finished, joined := make(chan struct{}), make(chan struct{})
-	defer func() { close(finished); <-joined }()
-	go func() {
-		defer close(joined)
-		for {
-			select {
-			case sig := <-incoming:
-				select {
-				case signals <- sig:
-					if sig != syscall.SIGWINCH {
-						cancelPreparation()
-					}
-				case <-finished:
-					return
-				}
-			case <-finished:
-				return
-			}
-		}
-	}()
-	if invocation.TTY && invocation.Interactive {
-		if err := checkTerminal(stdin); err != nil {
-			return 125, err
-		}
-	}
-	if len(invocation.PreflightPorts) > 0 {
-		if err := waitHostPorts(preparationCtx, invocation.PreflightPorts, 3*time.Second); err != nil {
-			return 125, err
-		}
-	}
-	if len(invocation.Args) > 0 && invocation.Args[0] == "__project-preflight" {
-		var ports []config.PortMapping
-		if err := visitHostResources(invocation.Args, func(name, value string) error {
-			if name != "p" && name != "publish" {
-				return nil
-			}
-			port, err := config.ParsePortMapping(value)
-			if err == nil {
-				ports = append(ports, port)
-			}
-			return err
-		}); err != nil {
-			return 125, err
-		}
-		if err := waitHostPorts(preparationCtx, ports, 3*time.Second); err != nil {
-			return 125, err
-		}
-	}
-	if err := localPreflight(invocation.Args); err != nil {
-		return 125, err
-	}
-	m, err := open(stderr)
-	if err != nil {
-		return 125, err
-	}
-	if err := m.preflightShares(preparationCtx, invocation.Args); err != nil {
-		return 125, err
-	}
-	instance, err := m.ensure(preparationCtx, defaultOptions(), false, invocation.RequireRunning)
-	if err != nil {
-		return 125, err
-	}
-	args, err := guestArguments(*instance, invocation.Args)
-	if err != nil {
-		return 125, err
-	}
-	if err := checkPorts(invocation.Args); err != nil {
-		return 125, err
-	}
-	if invocation.ImageReference != "" {
-		mode := "resolve"
-		if invocation.RefreshImage {
-			mode = "pull"
-		}
-		if invocation.PushSource != "" {
-			mode = "push"
-		}
-		input, response, err := os.Pipe()
-		if err != nil {
-			return 125, err
-		}
-		defer input.Close()
-		defer response.Close()
-		var resolved bytes.Buffer
-		output := io.Writer(&resolved)
-		if invocation.RefreshImage || invocation.PushSource != "" {
-			output = stdout
-		}
-		auth := &credentialOutput{reference: invocation.ImageReference, response: response, output: output}
-		preparation := Invocation{Args: []string{"__credential-prepare", mode, invocation.Progress, invocation.ImageReference}, Rootless: invocation.Rootless}
-		if invocation.PushSource != "" {
-			preparation.Args = append(preparation.Args, invocation.PushSource)
-		}
-		code, err := m.executeGuest(ctx, preparation, *instance, preparation.Args, input, stdout, stderr, auth, signals)
-		if err != nil || code != 0 || invocation.RefreshImage || invocation.PushSource != "" {
-			return code, err
-		}
-		id := strings.TrimSpace(resolved.String())
-		if !strings.HasPrefix(id, "sha256:") || len(id) != 71 {
-			return 125, errors.New("invalid prepared image identity")
-		}
-		args = preparedImageArguments(args, id)
-	}
-	return m.executeGuest(ctx, invocation, *instance, args, stdin, stdout, stderr, nil, signals)
-}
-
-func (m *Machine) executeGuest(ctx context.Context, invocation Invocation, instance Instance, args []string, stdin, stdout, stderr *os.File, authentication *credentialOutput, signals <-chan os.Signal) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 125, err
-	}
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return 125, err
-	}
-	token := hex.EncodeToString(random[:])
-	finishWatchdog, err := startWatchdog(instance, token, invocation.Rootless)
-	if err != nil {
-		return 125, err
-	}
-	defer finishWatchdog()
-	lifecycle := len(args) > 0 && (args[0] == "start" || args[0] == "restart")
-	if lifecycle {
-		args = append([]string{"__host-lifecycle"}, args...)
-	}
-	command := engineCommand(invocation.Rootless, append([]string{"__remote", token}, args...)...)
-	// SSH owns terminal raw mode and resizing. Explicit control messages also
-	// deliver signals for non-PTY runs, where SSH cannot forward them itself.
-	archiveOutput := len(args) > 0 && (args[0] == "__copy-out" || args[0] == "events") || len(args) >= 2 && ((args[0] == "image" && args[1] == "save") || (args[0] == "volume" && args[1] == "export"))
-	cmd := sshSessionCommand(context.Background(), instance, invocation.TTY, archiveOutput, command...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	checksCtx, cancelChecks := context.WithCancel(ctx)
-	defer cancelChecks()
-	if authentication != nil {
-		cmd.Stdout = authentication
-	}
-	if lifecycle {
-		input, response, err := os.Pipe()
-		if err != nil {
-			return 125, err
-		}
-		defer input.Close()
-		defer response.Close()
-		cmd.Stdin = input
-		cmd.Stdout = &portCheckOutput{ctx: checksCtx, response: response, stdout: stdout}
-	}
-	var inspection *inspectionOutput
-	if len(invocation.Args) > 0 && invocation.Args[0] == "inspect" {
-		inspection = &inspectionOutput{}
-		cmd.Stdout = inspection
-	}
-	if err := ctx.Err(); err != nil {
-		return 125, err
-	}
-	if err := cmd.Start(); err != nil {
-		return 125, err
-	}
-	if authentication != nil {
-		// SSH inherited its own descriptor. Keeping this read end in the host
-		// would prevent EPIPE if SSH exits before consuming the credentials.
-		_ = stdin.Close()
-	}
-	grace := 75 * time.Second
-	if archiveOutput {
-		// Bound SSH draining when a host archive pipe is full.
-		grace = 2 * time.Second
-	}
-	interrupted, err := waitGuest(ctx, cmd, signals, grace, func(sig syscall.Signal) {
-		cancelChecks()
-		controlCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := m.sendSignal(controlCtx, instance, invocation.Rootless, token, strconv.Itoa(int(sig))); err != nil {
-			fmt.Fprintf(stderr, "casklet: signal forwarding: %v\n", err)
-		}
-	})
-	if archiveOutput && interrupted != 0 {
-		return 128 + int(interrupted), nil
-	}
-	if ctx.Err() != nil {
-		return 125, ctx.Err()
-	}
-	if authentication != nil && err == nil && !authentication.completed && authentication.err == nil {
-		authentication.err = errors.New("incomplete registry preparation response")
-	}
-	if authentication != nil && authentication.err != nil {
-		return 125, authentication.err
-	}
-	return guestResult(instance, inspection, stdout, err)
 }

@@ -10,9 +10,11 @@ import (
 )
 
 func TestDiagnoseReadsMetadataWithoutLocalStateOrMutations(t *testing.T) {
-	dir := t.TempDir()
-	log := filepath.Join(dir, "calls")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\ncase \"$2\" in\n--version) echo 'limactl version 2.2.1';;\nlist) echo '{\"name\":\"casklet-runtime\",\"status\":\"Stopped\",\"arch\":\"aarch64\",\"cpus\":4,\"memory\":4294967296,\"disk\":21474836480,\"sshConfigFile\":\"private-ssh-path\",\"config\":{\"mounts\":[{\"location\":\"private-share\"}]}}';;\n*) exit 1;;\nesac\n"
+	var (
+		dir    = t.TempDir()
+		log    = filepath.Join(dir, "calls")
+		script = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\ncase \"$2\" in\n--version) echo 'limactl version 2.2.1';;\nlist) echo '{\"name\":\"casklet-runtime\",\"status\":\"Stopped\",\"arch\":\"aarch64\",\"cpus\":4,\"memory\":4294967296,\"disk\":21474836480,\"sshConfigFile\":\"private-ssh-path\",\"config\":{\"mounts\":[{\"location\":\"private-share\"}]}}';;\n*) exit 1;;\nesac\n"
+	)
 	if err := os.WriteFile(filepath.Join(dir, "limactl"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

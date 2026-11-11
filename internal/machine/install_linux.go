@@ -19,7 +19,7 @@ func EnsureBuiltinTemplate(ctx context.Context) error {
 		return errors.New("builtin template installation requires guest root privileges")
 	}
 	return template.EnsureBuiltin(ctx, func(ctx context.Context, destination string) error {
-		data, err := assets.ReadFile("assets/prepare-rootfs.sh")
+		data, err := _assets.ReadFile("assets/prepare-rootfs.sh")
 		if err != nil {
 			return err
 		}

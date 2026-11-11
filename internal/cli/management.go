@@ -53,7 +53,7 @@ func manageOperation(r Request, stderr io.Writer, operation func(context.Context
 		if (r.Action == "project-rollback" || r.Action == "project-up" && (r.Wait || r.Project.HasTasks())) && errors.Is(err, project.ErrWaitTimeout) {
 			return 124
 		}
-		var task *project.TaskFailure
+		var task *project.TaskFailureError
 		if errors.As(err, &task) {
 			return task.Code
 		}

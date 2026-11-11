@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var hostHelp = map[string]string{
+var _hostHelp = map[string]string{
 	"machine": `Usage: casklet machine COMMAND
 
 Commands:
@@ -142,9 +142,11 @@ Examples:
 
 // Help returns scoped host-command help without opening Lima or local state.
 func Help(topic string) (string, error) {
-	if text, exists := hostHelp[topic]; exists {
+	if text, exists := _hostHelp[topic]; exists {
 		return text, nil
 	}
+	//lint:ignore ST1005 Preserve the complete user-facing help hint.
+	//revive:disable-next-line:error-strings Preserve the established help hint.
 	return "", fmt.Errorf("unknown help topic %q\nHint: run casklet machine --help for available host commands.", topic)
 }
 
@@ -192,7 +194,7 @@ func hostCommandTopic(args []string) string {
 		return "rootfs"
 	}
 	if len(args) > 1 && args[0] == "machine" {
-		if _, exists := hostHelp["machine "+args[1]]; exists {
+		if _, exists := _hostHelp["machine "+args[1]]; exists {
 			return "machine " + args[1]
 		}
 	}

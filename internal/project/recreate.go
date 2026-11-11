@@ -12,11 +12,11 @@ import (
 
 // Select validates logical keys before inventory or lifecycle operations.
 func Select(plan Plan, names []string) (map[string]bool, error) {
-	desired := map[string]bool{}
+	desired := make(map[string]bool, len(plan.Services))
 	for _, service := range plan.Services {
 		desired[service.Key] = true
 	}
-	selected := map[string]bool{}
+	selected := make(map[string]bool, len(names))
 	for _, name := range names {
 		if !desired[name] {
 			return nil, fmt.Errorf("unknown project service %q for --recreate", name)
@@ -32,7 +32,7 @@ func Select(plan Plan, names []string) (map[string]bool, error) {
 // Saved configurations, rather than desired hashes, reserve ports and aliases.
 // Selected old records are removed together before any replacement starts.
 func (runner *Runner) checkConflicts(ctx context.Context, plan Plan, all []container.Record, existing map[string]container.Record, selected map[string]bool) error {
-	removed := map[string]bool{}
+	removed := make(map[string]bool, len(selected))
 	for key, record := range existing {
 		if selected[key] {
 			removed[record.ID] = true
@@ -90,12 +90,30 @@ func (runner *Runner) selectedPorts(ctx context.Context, existing map[string]con
 	return ports, nil
 }
 
+func (runner *Runner) retainedPreflightArguments(ctx context.Context, record container.Record, name, key string) ([]string, error) {
+	data, err := runner.Call(ctx, "inspect", record.ID)
+	if err != nil {
+		return nil, err
+	}
+	var saved container.Inspection
+	if json.Unmarshal(data, &saved) != nil || saved.ID != record.ID || saved.Generation != record.Generation {
+		return nil, fmt.Errorf("service %q changed during retained-source preflight", key)
+	}
+	args := []string{"__project-start-preflight", record.ID, fmt.Sprint(record.Generation), name, key, record.Labels[LabelSpec]}
+	for _, port := range saved.Config.Publish {
+		args = append(args, fmt.Sprintf("%s:%d:%d/%s", port.HostIP, port.HostPort, port.ContainerPort, port.Protocol))
+	}
+	return args, nil
+}
+
 // The first source check excludes identical host endpoints held by selected
 // running records. Changed scopes are checked conservatively before removal.
 // Every desired endpoint is checked in full after removal, before startup.
 func preflightArguments(args []string, oldPorts []config.PortMapping) []string {
-	result := []string{"__project-preflight"}
-	consumed := 1
+	var (
+		result   = []string{"__project-preflight"}
+		consumed = 1
+	)
 	_ = runargs.Walk(args, func(name, value string, index, end int) error {
 		consumed = end + 1
 		exempt := false
@@ -116,20 +134,4 @@ func preflightArguments(args []string, oldPorts []config.PortMapping) []string {
 	})
 	result = append(result, args[consumed:]...)
 	return result
-}
-
-func (runner *Runner) retainedPreflightArguments(ctx context.Context, record container.Record, name, key string) ([]string, error) {
-	data, err := runner.Call(ctx, "inspect", record.ID)
-	if err != nil {
-		return nil, err
-	}
-	var saved container.Inspection
-	if json.Unmarshal(data, &saved) != nil || saved.ID != record.ID || saved.Generation != record.Generation {
-		return nil, fmt.Errorf("service %q changed during retained-source preflight", key)
-	}
-	args := []string{"__project-start-preflight", record.ID, fmt.Sprint(record.Generation), name, key, record.Labels[LabelSpec]}
-	for _, port := range saved.Config.Publish {
-		args = append(args, fmt.Sprintf("%s:%d:%d/%s", port.HostIP, port.HostPort, port.ContainerPort, port.Protocol))
-	}
-	return args, nil
 }

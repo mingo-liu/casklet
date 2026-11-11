@@ -13,9 +13,12 @@ import (
 	"testing"
 )
 
+type failedInspectionWriter struct{ err error }
+
 func TestInspectionPresentsHostResourcesAndPreservesGuestAndUnknownFields(t *testing.T) {
-	instance, directory := sharedInstance(t)
-	data := []byte(`{
+	var (
+		instance, directory = sharedInstance(t)
+		data                = []byte(`{
 		"id":"id", "future_record":{"enabled":true},
 		"config":{
 			"rootfs":"/mnt/host/template", "future_config":[1,2],
@@ -27,7 +30,8 @@ func TestInspectionPresentsHostResourcesAndPreservesGuestAndUnknownFields(t *tes
 			]
 		}
 	}`)
-	var output bytes.Buffer
+		output bytes.Buffer
+	)
 	if err := presentInspection(instance, data, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +63,10 @@ func TestInspectionPresentsHostResourcesAndPreservesGuestAndUnknownFields(t *tes
 	if rootfs != filepath.Join(directory, "template") {
 		t.Fatalf("host rootfs = %q", rootfs)
 	}
-	var mounts []map[string]any
-	var ports []map[string]any
+	var (
+		mounts []map[string]any
+		ports  []map[string]any
+	)
 	_ = json.Unmarshal(hostConfig["mounts"], &mounts)
 	_ = json.Unmarshal(hostConfig["publish"], &ports)
 	if mounts[0]["source"] != filepath.Join(directory, "data") || mounts[0]["target"] != "/data" || mounts[0]["read_only"] != true || mounts[0]["future_mount"] != "keep" {
@@ -71,8 +77,10 @@ func TestInspectionPresentsHostResourcesAndPreservesGuestAndUnknownFields(t *tes
 			t.Fatalf("host port %d = %+v", i, ports[i])
 		}
 	}
-	var futureRecord map[string]bool
-	var futureConfig []int
+	var (
+		futureRecord map[string]bool
+		futureConfig []int
+	)
 	_ = json.Unmarshal(got["future_record"], &futureRecord)
 	_ = json.Unmarshal(hostConfig["future_config"], &futureConfig)
 	if ports[0]["future_port"] != float64(4) || ports[1]["protocol"] != "udp" || !futureRecord["enabled"] || !reflect.DeepEqual(futureConfig, []int{1, 2}) {
@@ -81,8 +89,10 @@ func TestInspectionPresentsHostResourcesAndPreservesGuestAndUnknownFields(t *tes
 }
 
 func TestMacPathUsesBoundariesAndMostSpecificShareWithoutFilesystemAccess(t *testing.T) {
-	instance, directory := sharedInstance(t)
-	var nested Instance
+	var (
+		instance, directory = sharedInstance(t)
+		nested              Instance
+	)
 	if err := json.Unmarshal([]byte(`{"config":{"mounts":[
 		{"location":"/missing/mac","mountPoint":"/mnt/host/nested"},
 		{"location":`+quoteJSON(directory)+`,"mountPoint":"/mnt/host"},
@@ -93,8 +103,8 @@ func TestMacPathUsesBoundariesAndMostSpecificShareWithoutFilesystemAccess(t *tes
 	if err := os.Remove(directory); err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ guest, host string }{
-		{guestRootFS, BuiltinRootFS},
+	for _, tt := range []struct{ guest, host string }{
+		{_guestRootFS, BuiltinRootFS},
 		{"", ""},
 		{"/mnt/host/template", filepath.Join(directory, "template")},
 		{"/mnt/host/nested/data", "/missing/mac/data"},
@@ -102,8 +112,8 @@ func TestMacPathUsesBoundariesAndMostSpecificShareWithoutFilesystemAccess(t *tes
 		{"/missing/same/data", "/missing/same/data"},
 		{"/unknown/template", "/unknown/template"},
 	} {
-		if got := nested.macPath(test.guest); got != test.host {
-			t.Errorf("macPath(%q) = %q; want %q", test.guest, got, test.host)
+		if got := nested.macPath(tt.guest); got != tt.host {
+			t.Errorf("macPath(%q) = %q; want %q", tt.guest, got, tt.host)
 		}
 	}
 	// Inspection never requires the original rootfs or bind source to still exist.
@@ -114,18 +124,23 @@ func TestMacPathUsesBoundariesAndMostSpecificShareWithoutFilesystemAccess(t *tes
 }
 
 func TestInspectionBuiltinAndImageSources(t *testing.T) {
-	for _, rootfs := range []string{guestRootFS, ""} {
-		var output bytes.Buffer
-		data := []byte(`{"config":{"rootfs":` + quoteJSON(rootfs) + `,"image":"sha256:identity","mounts":[],"publish":[]}}`)
+	for _, rootfs := range []string{_guestRootFS, ""} {
+		var (
+			output bytes.Buffer
+			data   = []byte(`{"config":{"rootfs":` + quoteJSON(rootfs) + `,"image":"sha256:identity","mounts":[],"publish":[]}}`)
+		)
 		if err := presentInspection(Instance{}, data, &output); err != nil {
 			t.Fatal(err)
 		}
 		want := rootfs
-		if rootfs == guestRootFS {
+		if rootfs == _guestRootFS {
 			want = BuiltinRootFS
 		}
 		var decoded struct {
-			Config struct{ RootFS, Image string }
+			Config struct {
+				RootFS string `json:"rootfs"`
+				Image  string `json:"image"`
+			} `json:"config"`
 		}
 		if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
 			t.Fatal(err)
@@ -146,8 +161,10 @@ func TestInspectionRejectsMalformedSuccessfulResponsesWithoutPartialOutput(t *te
 		`{"config":{"rootfs":"/rootfs","mounts":[],"publish":[{"host_ip":5}]}}`,
 		`{"config":{"rootfs":"/rootfs","mounts":[],"publish":[]}} {}`,
 	} {
-		var out bytes.Buffer
-		inspection := &inspectionOutput{}
+		var (
+			out        bytes.Buffer
+			inspection = &inspectionOutput{}
+		)
 		_, _ = inspection.Write([]byte(data))
 		code, err := guestResult(Instance{}, inspection, &out, nil)
 		if code != 125 || err == nil || !strings.Contains(err.Error(), "invalid guest inspection") || out.Len() != 0 {
@@ -157,12 +174,14 @@ func TestInspectionRejectsMalformedSuccessfulResponsesWithoutPartialOutput(t *te
 }
 
 func TestInspectionBoundAndGuestExitStatus(t *testing.T) {
-	inspection := &inspectionOutput{}
-	data := bytes.Repeat([]byte{'x'}, maxInspectionBytes+1)
+	var (
+		inspection = &inspectionOutput{}
+		data       = bytes.Repeat([]byte{'x'}, _maxInspectionBytes+1)
+	)
 	if n, err := inspection.Write(data); n != len(data) || err != nil {
 		t.Fatalf("bounded writer did not consume data: %d, %v", n, err)
 	}
-	if n, err := inspection.Write([]byte("more")); n != 4 || err != nil || inspection.data.Len() != maxInspectionBytes {
+	if n, err := inspection.Write([]byte("more")); n != 4 || err != nil || inspection.data.Len() != _maxInspectionBytes {
 		t.Fatalf("bounded writer grew: %d, %v, size=%d", n, err, inspection.data.Len())
 	}
 	var output bytes.Buffer
@@ -182,10 +201,6 @@ func TestInspectionBoundAndGuestExitStatus(t *testing.T) {
 	}
 }
 
-type failedInspectionWriter struct{ err error }
-
-func (writer failedInspectionWriter) Write([]byte) (int, error) { return 0, writer.err }
-
 func TestInspectionReportsOutputFailure(t *testing.T) {
 	inspection := &inspectionOutput{}
 	_, _ = inspection.Write([]byte(`{"config":{"rootfs":"","mounts":[],"publish":[]}}`))
@@ -194,9 +209,11 @@ func TestInspectionReportsOutputFailure(t *testing.T) {
 		if want == nil {
 			want = io.ErrShortWrite
 		}
-		code, err := guestResult(Instance{}, inspection, failedInspectionWriter{failure}, nil)
+		code, err := guestResult(Instance{}, inspection, failedInspectionWriter{err: failure}, nil)
 		if code != 125 || !errors.Is(err, want) {
 			t.Fatalf("output failure lost: %d, %v", code, err)
 		}
 	}
 }
+
+func (writer failedInspectionWriter) Write([]byte) (int, error) { return 0, writer.err }

@@ -9,33 +9,16 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-// TaskFailure preserves a failed task's command status through deployment cleanup.
-type TaskFailure struct {
+// TaskFailureError preserves a failed task's command status through deployment cleanup.
+type TaskFailureError struct {
 	Service string
 	Code    int
 }
 
-func (e *TaskFailure) Error() string {
-	return fmt.Sprintf("task %q exited with status %d", e.Service, e.Code)
-}
+var _ error = (*TaskFailureError)(nil)
 
-func taskResult(key, state string, code *int, reason string, cleanup []string) (bool, error) {
-	if state == container.StateStopping {
-		return false, fmt.Errorf("task %q is stopping", key)
-	}
-	if state != container.StateExited && state != container.StateFailed {
-		return false, nil
-	}
-	if code == nil || *code < 0 || *code > 255 || state != container.StateExited || len(cleanup) > 0 {
-		return false, fmt.Errorf("task %q did not complete successfully", key)
-	}
-	if *code != 0 {
-		return false, &TaskFailure{key, *code}
-	}
-	if reason != "exited" {
-		return false, fmt.Errorf("task %q did not finish normally", key)
-	}
-	return true, nil
+func (e *TaskFailureError) Error() string {
+	return fmt.Sprintf("task %q exited with status %d", e.Service, e.Code)
 }
 
 func (runner *Runner) waitTask(ctx context.Context, name, key string, execution serviceExecution) error {
@@ -72,4 +55,23 @@ func (runner *Runner) waitTask(ctx context.Context, name, key string, execution 
 		case <-ticker.C:
 		}
 	}
+}
+
+func taskResult(key, state string, code *int, reason string, cleanup []string) (bool, error) {
+	if state == container.StateStopping {
+		return false, fmt.Errorf("task %q is stopping", key)
+	}
+	if state != container.StateExited && state != container.StateFailed {
+		return false, nil
+	}
+	if code == nil || *code < 0 || *code > 255 || state != container.StateExited || len(cleanup) > 0 {
+		return false, fmt.Errorf("task %q did not complete successfully", key)
+	}
+	if *code != 0 {
+		return false, &TaskFailureError{Service: key, Code: *code}
+	}
+	if reason != "exited" {
+		return false, fmt.Errorf("task %q did not finish normally", key)
+	}
+	return true, nil
 }

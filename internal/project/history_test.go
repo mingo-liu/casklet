@@ -13,12 +13,18 @@ import (
 
 func TestDeploymentHistoryRetentionPrivacyAndRecovery(t *testing.T) {
 	root := t.TempDir()
-	os.Chmod(root, 0700)
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
 	store, err := Open(context.Background(), root, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	history, err := store.LoadHistory()
 	if err != nil || len(history.Deployments) != 0 {
 		t.Fatal(err)
@@ -68,13 +74,69 @@ func TestDeploymentHistoryRetentionPrivacyAndRecovery(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("history not private")
 	}
-	os.Chmod(file, 0644)
+	if err := os.Chmod(file, 0644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.LoadHistory(); err == nil {
 		t.Fatal("unsafe history accepted")
 	}
-	os.Chmod(file, 0600)
-	os.WriteFile(file, []byte(`{"version":1,"name":"other","deployments":[]}`), 0600)
+	if err := os.Chmod(file, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(`{"version":1,"name":"other","deployments":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.LoadHistory(); err == nil {
 		t.Fatal("wrong identity accepted")
+	}
+}
+
+func TestDeploymentSummariesOwnImageMaps(t *testing.T) {
+	const imageID = "sha256:original"
+	history := History{Deployments: []Deployment{{Images: map[string]string{"app": imageID}}}}
+	summaries := history.Summaries()
+	summaries[0].Images["app"] = "sha256:replacement"
+	if got := history.Deployments[0].Images["app"]; got != imageID {
+		t.Fatalf("summary mutation changed retained image: %q", got)
+	}
+	if got := history.Summaries()[0].Images["app"]; got != imageID {
+		t.Fatalf("summary mutation changed subsequent history: %q", got)
+	}
+}
+
+func TestDeploymentPlanPreservesSerializedFieldNames(t *testing.T) {
+	plan := Plan{Services: []Service{{MatchLegacyFingerprint: func(string, []string) bool { return true }}}}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	wantPlan := []string{"Name", "Networks", "Volumes", "ExternalVolumes", "Services"}
+	if len(fields) != len(wantPlan) {
+		t.Fatalf("deployment plan fields changed: %s", data)
+	}
+	for _, name := range wantPlan {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("deployment plan lost field %q", name)
+		}
+	}
+	if string(fields["Networks"]) != "null" || string(fields["Volumes"]) != "null" {
+		t.Fatalf("deployment plan changed absent collection encoding: %s", data)
+	}
+	var services []map[string]json.RawMessage
+	if err := json.Unmarshal(fields["Services"], &services); err != nil {
+		t.Fatal(err)
+	}
+	wantService := []string{"Task", "Config", "Fields", "Key", "Name", "Fingerprint", "Args", "DependsOn"}
+	if len(services) != 1 || len(services[0]) != len(wantService) {
+		t.Fatalf("deployment service fields changed: %s", fields["Services"])
+	}
+	for _, name := range wantService {
+		if _, ok := services[0][name]; !ok {
+			t.Errorf("deployment service lost field %q", name)
+		}
 	}
 }

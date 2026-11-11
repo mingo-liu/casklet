@@ -27,45 +27,6 @@ type Runner struct {
 	Preview []Change
 }
 
-func (runner *Runner) Records(ctx context.Context, names ...string) ([]container.Record, error) {
-	name := ""
-	if len(names) > 0 {
-		name = names[0]
-	}
-	return runner.Backend.Records(ctx, name)
-}
-
-func Managed(records []container.Record, name string) []container.Record {
-	result := []container.Record{}
-	for _, record := range records {
-		if record.Labels[LabelName] == name && record.Labels[LabelService] != "" && record.Labels[LabelSpec] != "" {
-			result = append(result, record)
-		}
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
-	return result
-}
-
-func (runner *Runner) resources(ctx context.Context, kind string) (map[string]Resource, error) {
-	values, err := runner.Backend.Resources(ctx, kind)
-	if err != nil {
-		return nil, err
-	}
-	result := map[string]Resource{}
-	for _, value := range values {
-		value.Kind = kind
-		if value.Name == "" || value.CreatedAt.IsZero() {
-			return nil, errors.New("invalid resource identity")
-		}
-		result[value.Name] = value
-	}
-	return result, nil
-}
-
-func sameResource(a, b Resource) bool {
-	return a.Kind == b.Kind && a.Name == b.Name && a.CreatedAt.Equal(b.CreatedAt)
-}
-
 type Change struct {
 	Reason             string   `json:"reason"`
 	ChangedFields      []string `json:"changed_fields,omitempty"`
@@ -88,14 +49,35 @@ type UpOptions struct {
 	Deadline time.Time
 }
 
+func Managed(records []container.Record, name string) []container.Record {
+	result := []container.Record{}
+	for _, record := range records {
+		if record.Labels[LabelName] == name && record.Labels[LabelService] != "" && record.Labels[LabelSpec] != "" {
+			result = append(result, record)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
+}
+
+func (runner *Runner) Records(ctx context.Context, names ...string) ([]container.Record, error) {
+	name := ""
+	if len(names) > 0 {
+		name = names[0]
+	}
+	return runner.Backend.Records(ctx, name)
+}
+
 func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (records []container.Record, err error) {
 	runner.Preview = nil
 	selected, selectionErr := Select(plan, options.Recreate)
 	if selectionErr != nil {
 		return nil, selectionErr
 	}
-	parent := ctx
-	failureCaptured, deadlineFailure := false, false
+	var (
+		parent                           = ctx
+		failureCaptured, deadlineFailure bool
+	)
 	if options.Wait || plan.HasTasks() {
 		var cancel context.CancelFunc
 		if options.Deadline.IsZero() {
@@ -117,42 +99,45 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	if err != nil {
 		return nil, err
 	}
-	existing := map[string]container.Record{}
-	matching := map[string]bool{}
-	desired := map[string]bool{}
+	var (
+		existing = make(map[string]container.Record, len(plan.Services))
+		matching = make(map[string]bool, len(plan.Services))
+		desired  = make(map[string]bool, len(plan.Services))
+	)
 	for _, service := range plan.Services {
 		desired[service.Key] = true
 		for _, record := range all {
-			if record.Name == service.Name {
-				if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key || record.Labels[LabelSpec] == "" {
-					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
-				}
-				matches := record.Labels[LabelSpec] == service.Fingerprint
-				if !matches && service.MatchLegacyFingerprint != nil {
-					data, err := runner.Call(ctx, "inspect", record.ID)
-					if err != nil {
-						return nil, err
-					}
-					var inspection container.Inspection
-					if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || inspection.Generation != record.Generation {
-						return nil, fmt.Errorf("service %q changed during configuration preflight", service.Key)
-					}
-					matches = service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases)
-				}
-				if !matches && !selected[service.Key] && !options.DryRun {
-					return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
-				}
-				if service.Task && record.Terminal() && !selected[service.Key] && !options.DryRun {
-					if _, e := taskResult(service.Key, record.State, record.ExitCode, record.ExitReason, record.CleanupFailures); e != nil {
-						return nil, e
-					}
-				}
-				matching[service.Key] = matches
-				existing[service.Key] = record
+			if record.Name != service.Name {
+				continue
 			}
+			if record.Labels[LabelName] != plan.Name || record.Labels[LabelService] != service.Key || record.Labels[LabelSpec] == "" {
+				return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
+			}
+			matches := record.Labels[LabelSpec] == service.Fingerprint
+			if !matches && service.MatchLegacyFingerprint != nil {
+				data, err := runner.Call(ctx, "inspect", record.ID)
+				if err != nil {
+					return nil, err
+				}
+				var inspection container.Inspection
+				if json.Unmarshal(data, &inspection) != nil || inspection.ID != record.ID || inspection.Generation != record.Generation {
+					return nil, fmt.Errorf("service %q changed during configuration preflight", service.Key)
+				}
+				matches = service.MatchLegacyFingerprint(record.Labels[LabelSpec], inspection.Config.NetworkAliases)
+			}
+			if !matches && !selected[service.Key] && !options.DryRun {
+				return nil, fmt.Errorf("service %q already exists with different configuration or ownership; use --recreate for configuration changes or project down", service.Key)
+			}
+			if service.Task && record.Terminal() && !selected[service.Key] && !options.DryRun {
+				if _, e := taskResult(service.Key, record.State, record.ExitCode, record.ExitReason, record.CleanupFailures); e != nil {
+					return nil, e
+				}
+			}
+			matching[service.Key] = matches
+			existing[service.Key] = record
 		}
 	}
-	orphans := []container.Record{}
+	var orphans []container.Record
 	for _, record := range Managed(all, plan.Name) {
 		if expected, found := existing[record.Labels[LabelService]]; desired[record.Labels[LabelService]] && (!found || expected.ID != record.ID) {
 			return nil, errors.New("project has duplicate or renamed service records; use project down before recreating")
@@ -164,8 +149,10 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			orphans = append(orphans, record)
 		}
 	}
-	removing := maps.Clone(existing)
-	removalSelection := maps.Clone(selected)
+	var (
+		removing         = maps.Clone(existing)
+		removalSelection = maps.Clone(selected)
+	)
 	for _, record := range orphans {
 		key := record.Labels[LabelService]
 		name, err := ScopedName(plan.Name, key)
@@ -191,7 +178,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		return orphans[i].CreatedAt.After(orphans[j].CreatedAt)
 	})
-	inventories := map[string]map[string]Resource{}
+	inventories := make(map[string]map[string]Resource, 2)
 	for _, kind := range []string{"network", "volume"} {
 		inventory, e := runner.resources(ctx, kind)
 		if e != nil {
@@ -208,7 +195,10 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	for _, entry := range []struct {
 		kind  string
 		names []string
-	}{{"network", plan.Networks}, {"volume", plan.Volumes}} {
+	}{
+		{kind: "network", names: plan.Networks},
+		{kind: "volume", names: plan.Volumes},
+	} {
 		for _, name := range entry.names {
 			key := entry.kind + ":" + name
 			if resource, found := inventories[entry.kind][name]; found {
@@ -264,7 +254,7 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	}
 	// Check every source before removing any old execution. Pin resolved images
 	// for this invocation while retaining the desired-reference fingerprint.
-	prepared := map[string][]string{}
+	prepared := make(map[string][]string, len(plan.Services))
 	if len(removalSelection) > 0 {
 		oldPorts, err := runner.selectedPorts(ctx, removing, removalSelection)
 		if err != nil {
@@ -382,8 +372,10 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 			}
 		}
 	}
-	ids := map[string]string{}
-	executions := map[string]serviceExecution{}
+	var (
+		ids        = make(map[string]string, len(plan.Services))
+		executions = make(map[string]serviceExecution, len(plan.Services))
+	)
 	for _, service := range plan.Services {
 		dependencies := make([]string, 0, len(service.DependsOn))
 		for dep := range service.DependsOn {
@@ -391,15 +383,16 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 		}
 		sort.Strings(dependencies)
 		for _, dep := range dependencies {
-			if service.DependsOn[dep] == "completed" {
+			switch service.DependsOn[dep] {
+			case "completed":
 				if err = runner.waitTask(ctx, plan.Name, dep, executions[dep]); err != nil {
 					return nil, err
 				}
-			} else if service.DependsOn[dep] == "healthy" {
+			case "healthy":
 				if _, err = runner.Call(ctx, "wait", "--healthy", "--timeout", options.Timeout.String(), ids[dep]); err != nil {
 					return nil, fmt.Errorf("service %q dependency %q did not become healthy: %w", service.Key, dep, err)
 				}
-			} else {
+			default:
 				data, e := runner.Call(ctx, "inspect", ids[dep])
 				if e != nil {
 					return nil, e
@@ -498,6 +491,58 @@ func (runner *Runner) Up(ctx context.Context, plan Plan, options UpOptions) (rec
 	return records, nil
 }
 
+func (runner *Runner) Down(ctx context.Context, name string, removeVolumes bool) error {
+	records, err := runner.Records(ctx, name)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, record := range Managed(records, name) {
+		if _, err := runner.Call(ctx, "stop", record.ID); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if _, err := runner.Call(ctx, "rm", record.ID); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if err := runner.forgetService(record); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	keys := make([]string, 0, len(runner.State.Resources))
+	for key := range runner.State.Resources {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		resource := runner.State.Resources[key]
+		if resource.Kind == "volume" && !removeVolumes {
+			continue
+		}
+		if err := runner.removeResource(ctx, resource); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (runner *Runner) resources(ctx context.Context, kind string) (map[string]Resource, error) {
+	values, err := runner.Backend.Resources(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]Resource, len(values))
+	for _, value := range values {
+		value.Kind = kind
+		if value.Name == "" || value.CreatedAt.IsZero() {
+			return nil, errors.New("invalid resource identity")
+		}
+		result[value.Name] = value
+	}
+	return result, nil
+}
+
 func (runner *Runner) rollback(ctx context.Context, name, token string, created []Resource) error {
 	records, err := runner.Records(ctx, name)
 	var failures []error
@@ -544,36 +589,6 @@ func (runner *Runner) removeResource(ctx context.Context, resource Resource) err
 	return runner.Save(runner.State)
 }
 
-func (runner *Runner) Down(ctx context.Context, name string, removeVolumes bool) error {
-	records, err := runner.Records(ctx, name)
-	if err != nil {
-		return err
-	}
-	var failures []error
-	for _, record := range Managed(records, name) {
-		if _, err := runner.Call(ctx, "stop", record.ID); err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if _, err := runner.Call(ctx, "rm", record.ID); err != nil {
-			failures = append(failures, err)
-		} else if err := runner.forgetService(record); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	keys := make([]string, 0, len(runner.State.Resources))
-	for key := range runner.State.Resources {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		resource := runner.State.Resources[key]
-		if resource.Kind == "volume" && !removeVolumes {
-			continue
-		}
-		if err := runner.removeResource(ctx, resource); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	return errors.Join(failures...)
+func sameResource(a, b Resource) bool {
+	return a.Kind == b.Kind && a.Name == b.Name && a.CreatedAt.Equal(b.CreatedAt)
 }
