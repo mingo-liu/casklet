@@ -4,10 +4,11 @@ package integration
 
 import (
 	"fmt"
-	"golang.org/x/sys/unix"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestNamedVolumePersistsAcrossContainerReplacement(t *testing.T) {

@@ -389,8 +389,8 @@ func TestTerminalRestorationAndExitCodes(t *testing.T) {
 		options       []string
 		code          int
 	}{
-		{"command-exit", "echo ready; exit 19", nil, 19},
-		{"timeout", "echo ready; sleep 30", []string{"--timeout", "300ms"}, 124},
+		{name: "command-exit", command: "echo ready; exit 19", options: nil, code: 19},
+		{name: "timeout", command: "echo ready; sleep 30", options: []string{"--timeout", "300ms"}, code: 124},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			call := startTerminal(t, test.options, "/bin/sh", "-c", test.command)

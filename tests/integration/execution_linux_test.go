@@ -115,9 +115,9 @@ func TestNumericUser(t *testing.T) {
 	for _, test := range []struct {
 		name, user, uid, gid string
 	}{
-		{"default-root", "", "0", "0"},
-		{"implicit-group", "1000", "1000", "1000"},
-		{"explicit-group", "1000:1234", "1000", "1234"},
+		{name: "default-root", user: "", uid: "0", gid: "0"},
+		{name: "implicit-group", user: "1000", uid: "1000", gid: "1000"},
+		{name: "explicit-group", user: "1000:1234", uid: "1000", gid: "1234"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			options := []string{"--rootfs", source}

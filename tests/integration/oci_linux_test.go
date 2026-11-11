@@ -99,10 +99,10 @@ func ociRegistryFixtureWithAuth(t *testing.T, authenticated bool, healthTests ..
 		kind     byte
 		mode     int64
 	}{
-		{"usr/bin/toolbox", toolbox, 0, 0, tar.TypeReg, 0755},
-		{"etc/passwd", []byte("root:x:0:0:root:/:/bin/sh\napp:x:123:456:app:/data:/bin/sh\n"), 0, 0, tar.TypeReg, 0644},
-		{"etc/group", []byte("data:x:456:\n"), 0, 0, tar.TypeReg, 0644},
-		{"data", nil, 123, 456, tar.TypeDir, 0755},
+		{name: "usr/bin/toolbox", body: toolbox, uid: 0, gid: 0, kind: tar.TypeReg, mode: 0755},
+		{name: "etc/passwd", body: []byte("root:x:0:0:root:/:/bin/sh\napp:x:123:456:app:/data:/bin/sh\n"), uid: 0, gid: 0, kind: tar.TypeReg, mode: 0644},
+		{name: "etc/group", body: []byte("data:x:456:\n"), uid: 0, gid: 0, kind: tar.TypeReg, mode: 0644},
+		{name: "data", body: nil, uid: 123, gid: 456, kind: tar.TypeDir, mode: 0755},
 	} {
 		h := &tar.Header{Name: file.name, Size: int64(len(file.body)), Typeflag: file.kind, Mode: file.mode, Uid: file.uid, Gid: file.gid}
 		// Each fixture starts cold even when earlier test runs left download blobs.

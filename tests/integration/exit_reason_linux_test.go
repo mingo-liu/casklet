@@ -12,11 +12,11 @@ func TestStructuredExitReasonsAndRestartHistory(t *testing.T) {
 		options, command []string
 		code             int
 	}{
-		{"exit", "exited", nil, []string{"/bin/sh", "-c", "exit 7"}, 7},
-		{"literal-124", "exited", nil, []string{"/bin/sh", "-c", "exit 124"}, 124},
-		{"literal-137", "exited", nil, []string{"/bin/sh", "-c", "exit 137"}, 137},
-		{"timeout", "timeout", []string{"--timeout", "200ms", "--stop-timeout", "0s"}, []string{"/bin/sleep", "30"}, 124},
-		{"oom", "oom_killed", []string{"--memory", "32m", "--timeout", "15s"}, []string{"/bin/integration-helper", "memory"}, 137},
+		{name: "exit", reason: "exited", options: nil, command: []string{"/bin/sh", "-c", "exit 7"}, code: 7},
+		{name: "literal-124", reason: "exited", options: nil, command: []string{"/bin/sh", "-c", "exit 124"}, code: 124},
+		{name: "literal-137", reason: "exited", options: nil, command: []string{"/bin/sh", "-c", "exit 137"}, code: 137},
+		{name: "timeout", reason: "timeout", options: []string{"--timeout", "200ms", "--stop-timeout", "0s"}, command: []string{"/bin/sleep", "30"}, code: 124},
+		{name: "oom", reason: "oom_killed", options: []string{"--memory", "32m", "--timeout", "15s"}, command: []string{"/bin/integration-helper", "memory"}, code: 137},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := startBackground(t, backgroundName(t), tc.options, tc.command...)

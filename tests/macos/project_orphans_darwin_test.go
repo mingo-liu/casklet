@@ -6,13 +6,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/container"
-	"github.com/mingo-liu/casklet/internal/project"
 	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/project"
 )
 
 func TestProjectRemoveOrphansPreservesRunningServicesAndData(t *testing.T) {

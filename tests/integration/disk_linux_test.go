@@ -5,12 +5,13 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"github.com/mingo-liu/casklet/internal/storage"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mingo-liu/casklet/internal/storage"
+	"golang.org/x/sys/unix"
 )
 
 func TestDiskUsageAndUnusedImagePrune(t *testing.T) {

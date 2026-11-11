@@ -22,8 +22,8 @@ func TestStructuredExitReasonsThroughMacClient(t *testing.T) {
 		args         []string
 		code         int
 	}{
-		{"literal-137", "exited", []string{"--", "/bin/sh", "-c", "exit 137"}, 137},
-		{"timeout", "timeout", []string{"--timeout", "200ms", "--stop-timeout", "0s", "--", "/bin/sleep", "30"}, 124},
+		{name: "literal-137", reason: "exited", args: []string{"--", "/bin/sh", "-c", "exit 137"}, code: 137},
+		{name: "timeout", reason: "timeout", args: []string{"--timeout", "200ms", "--stop-timeout", "0s", "--", "/bin/sleep", "30"}, code: 124},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := detached(t, tc.args...)

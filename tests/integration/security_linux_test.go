@@ -218,16 +218,16 @@ func TestSecurityRootless(t *testing.T) {
 		code             int
 		text             string
 	}{
-		{"identity", nil, []string{"/bin/sh", "-c", "id -u; cat /proc/self/uid_map; cat /proc/self/gid_map; /bin/integration-helper security"}, 0, "security-ok"},
-		{"read-only", []string{"--read-only"}, []string{"/bin/sh", "-c", "echo tmp > /tmp/probe; ! touch /root-probe; cat /tmp/probe"}, 0, "tmp"},
-		{"tmpfs", []string{"--tmp-size", "32m", "--shm-size", "96m"}, []string{"/bin/sh", "-c", tmpfsCapacityProbe + " && echo tmpfs-ok"}, 0, "tmpfs-ok"},
-		{"tty", []string{"--tty"}, []string{"/bin/integration-helper", "security"}, 0, "security-ok"},
-		{"pids", []string{"--pids-limit", "32"}, []string{"/bin/integration-helper", "pids"}, 0, "process creation denied"},
-		{"memory", []string{"--memory", "32m"}, []string{"/bin/integration-helper", "memory"}, 137, "OOM"},
-		{"cpu", []string{"--cpus", "0.1"}, []string{"/bin/integration-helper", "cpu"}, 0, "cpu_us="},
-		{"timeout", []string{"--timeout", "100ms", "--stop-timeout", "0s"}, []string{"/bin/sleep", "30"}, 124, ""},
-		{"startup", nil, []string{"/missing-command"}, 125, ""},
-		{"no-fallback", []string{"--network", "bridge"}, []string{"/bin/echo", "must-not-run"}, 125, "rootless"},
+		{name: "identity", options: nil, command: []string{"/bin/sh", "-c", "id -u; cat /proc/self/uid_map; cat /proc/self/gid_map; /bin/integration-helper security"}, code: 0, text: "security-ok"},
+		{name: "read-only", options: []string{"--read-only"}, command: []string{"/bin/sh", "-c", "echo tmp > /tmp/probe; ! touch /root-probe; cat /tmp/probe"}, code: 0, text: "tmp"},
+		{name: "tmpfs", options: []string{"--tmp-size", "32m", "--shm-size", "96m"}, command: []string{"/bin/sh", "-c", tmpfsCapacityProbe + " && echo tmpfs-ok"}, code: 0, text: "tmpfs-ok"},
+		{name: "tty", options: []string{"--tty"}, command: []string{"/bin/integration-helper", "security"}, code: 0, text: "security-ok"},
+		{name: "pids", options: []string{"--pids-limit", "32"}, command: []string{"/bin/integration-helper", "pids"}, code: 0, text: "process creation denied"},
+		{name: "memory", options: []string{"--memory", "32m"}, command: []string{"/bin/integration-helper", "memory"}, code: 137, text: "OOM"},
+		{name: "cpu", options: []string{"--cpus", "0.1"}, command: []string{"/bin/integration-helper", "cpu"}, code: 0, text: "cpu_us="},
+		{name: "timeout", options: []string{"--timeout", "100ms", "--stop-timeout", "0s"}, command: []string{"/bin/sleep", "30"}, code: 124, text: ""},
+		{name: "startup", options: nil, command: []string{"/missing-command"}, code: 125, text: ""},
+		{name: "no-fallback", options: []string{"--network", "bridge"}, command: []string{"/bin/echo", "must-not-run"}, code: 125, text: "rootless"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			code, out := launch(test.options, test.command...)

@@ -449,8 +449,8 @@ func TestExecSignalAndTimeoutPreserveContainer(t *testing.T) {
 		trap   string
 		want   int
 	}{
-		{"interrupt", syscall.SIGINT, "trap 'exit 42' INT", 42},
-		{"termination", syscall.SIGTERM, "trap 'exit 43' TERM", 43},
+		{name: "interrupt", signal: syscall.SIGINT, trap: "trap 'exit 42' INT", want: 42},
+		{name: "termination", signal: syscall.SIGTERM, trap: "trap 'exit 43' TERM", want: 43},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			call := startExec(t, "", nil, name, "/bin/sh", "-c", test.trap+"; cat /proc/self/cgroup; echo signal-ready; while :; do sleep .1; done")

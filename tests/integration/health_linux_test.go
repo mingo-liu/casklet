@@ -5,11 +5,12 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"github.com/mingo-liu/casklet/internal/image"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/image"
 
 	"github.com/mingo-liu/casklet/internal/container"
 )

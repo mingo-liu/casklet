@@ -4,10 +4,11 @@ package integration
 
 import (
 	"context"
-	"github.com/mingo-liu/casklet/internal/image"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func TestManagedStopSignalOverrideAndRestart(t *testing.T) {

@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/network"
-	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/network"
+	"golang.org/x/sys/unix"
 )
 
 func namedNetwork(t *testing.T) string {
