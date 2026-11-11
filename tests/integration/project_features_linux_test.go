@@ -52,7 +52,7 @@ func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(output))
 	var last uint64
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	for decoder.More() {
 		var e container.Event
 		if err := decoder.Decode(&e); err != nil {
@@ -105,15 +105,16 @@ func TestProjectOperationsTasksAndEventsThroughLinux(t *testing.T) {
 func TestProjectTaskFailureAndDeadlineLinux(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
-	for _, tc := range []struct {
+	tests := []struct {
 		command, timeout string
 		code             int
-	}{{"exit 7", "10s", 7}, {"sleep 300", "300ms", 124}} {
+	}{{"exit 7", "10s", 7}, {"sleep 300", "300ms", 124}}
+	for _, tt := range tests {
 		name := fmt.Sprintf("task-fail-%x", time.Now().UnixNano())
-		file := linuxTaskConfig(t, name, tc.command)
-		code, _, stderr := backgroundCLI(t, "project", "up", "--config", file, "--timeout", tc.timeout)
-		if code != tc.code {
-			t.Fatalf("task code %d expected %d: %s", code, tc.code, stderr)
+		file := linuxTaskConfig(t, name, tt.command)
+		code, _, stderr := backgroundCLI(t, "project", "up", "--config", file, "--timeout", tt.timeout)
+		if code != tt.code {
+			t.Fatalf("task code %d expected %d: %s", code, tt.code, stderr)
 		}
 		if out := backgroundSuccess(t, "project", "ps", "--json", name); out != "[]\n" {
 			t.Fatalf("task rollback %s", out)

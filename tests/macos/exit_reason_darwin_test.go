@@ -17,27 +17,28 @@ func TestStructuredExitReasonsThroughMacClient(t *testing.T) {
 		}
 		return result
 	}
-	for _, tc := range []struct {
+	tests := []struct {
 		name, reason string
 		args         []string
 		code         int
 	}{
 		{name: "literal-137", reason: "exited", args: []string{"--", "/bin/sh", "-c", "exit 137"}, code: 137},
 		{name: "timeout", reason: "timeout", args: []string{"--timeout", "200ms", "--stop-timeout", "0s", "--", "/bin/sleep", "30"}, code: 124},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			id := detached(t, tc.args...)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id := detached(t, tt.args...)
 			_, _, code := command(t, "wait", id)
-			if code != tc.code {
+			if code != tt.code {
 				t.Fatalf("wait exit=%d", code)
 			}
 			result := inspect(id)
-			if result.ExitReason != tc.reason || result.OOMKilled {
+			if result.ExitReason != tt.reason || result.OOMKilled {
 				t.Fatalf("exit result: %+v", result)
 			}
 			success(t, "start", id)
 			result = inspect(id)
-			if result.Generation != 1 || result.PreviousExit == nil || result.PreviousExit.ExitReason != tc.reason || result.PreviousExit.OOMKilled {
+			if result.Generation != 1 || result.PreviousExit == nil || result.PreviousExit.ExitReason != tt.reason || result.PreviousExit.OOMKilled {
 				t.Fatalf("restart history: %+v", result)
 			}
 		})

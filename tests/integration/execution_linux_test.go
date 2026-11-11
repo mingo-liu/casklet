@@ -85,19 +85,20 @@ func TestWorkingDirectory(t *testing.T) {
 func TestNumericUser(t *testing.T) {
 	source := executionTemplate(t)
 	writeTemplateFile(t, source, "root-private", "root-private", 0600)
-	for _, test := range []struct {
+	tests := []struct {
 		name, user, uid, gid string
 	}{
 		{name: "default-root", user: "", uid: "0", gid: "0"},
 		{name: "implicit-group", user: "1000", uid: "1000", gid: "1000"},
 		{name: "explicit-group", user: "1000:1234", uid: "1000", gid: "1234"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			options := []string{"--rootfs", source}
-			if test.user != "" {
-				options = append(options, "--user", test.user)
+			if tt.user != "" {
+				options = append(options, "--user", tt.user)
 			}
-			if out := success(t, options, "/bin/sh", "-c", _checkIdentity, "sh", test.uid, test.gid); out != "identity-ok\n" {
+			if out := success(t, options, "/bin/sh", "-c", _checkIdentity, "sh", tt.uid, tt.gid); out != "identity-ok\n" {
 				t.Fatalf("unexpected identity output %q", out)
 			}
 		})

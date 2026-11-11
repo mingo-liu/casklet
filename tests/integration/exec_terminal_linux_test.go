@@ -173,31 +173,32 @@ func TestExecTerminalConcurrentSessionsRemainIndependent(t *testing.T) {
 func TestExecTerminalExternalSignalTargetsForegroundJob(t *testing.T) {
 	name, id := execContainer(t, nil)
 	const prompt = "exec-external-prompt> "
-	for _, test := range []struct {
+	tests := []struct {
 		name   string
 		signal syscall.Signal
 	}{
 		{"INT", syscall.SIGINT},
 		{"TERM", syscall.SIGTERM},
 		{"HUP", syscall.SIGHUP},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			call := startExecTerminal(t, []string{"--env", "PS1=" + prompt}, name, "/bin/sh", "-c", "echo exec-external-shell-ready; exec /bin/sh")
 			call.outputContains(t, "exec-external-shell-ready\r\n")
 			call.outputContains(t, prompt)
 			job := `/bin/sh -c 'echo exec-external-job-ready; exec sleep 30'`
-			handled := "exec-foreground-" + test.name + "-handled"
-			if test.signal != syscall.SIGINT {
+			handled := "exec-foreground-" + tt.name + "-handled"
+			if tt.signal != syscall.SIGINT {
 				// Readiness comes from the child after the interactive parent has
 				// assigned this separate job its foreground process group.
-				job = fmt.Sprintf(`/bin/sh -c 'trap "echo %s; exit 43" %s; echo exec-external-job-ready; while :; do sleep .1; done'`, handled, test.name)
+				job = fmt.Sprintf(`/bin/sh -c 'trap "echo %s; exit 43" %s; echo exec-external-job-ready; while :; do sleep .1; done'`, handled, tt.name)
 			}
 			call.write(t, job+"\n")
 			call.outputContains(t, "exec-external-job-ready\r\n")
 			before, _ := call.captured()
 			prompts := strings.Count(before, prompt)
 			started := time.Now()
-			signalExecTerminal(t, call, test.signal)
+			signalExecTerminal(t, call, tt.signal)
 			deadline := started.Add(3 * time.Second)
 			for {
 				out, err := call.captured()
@@ -208,18 +209,18 @@ func TestExecTerminalExternalSignalTargetsForegroundJob(t *testing.T) {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("exec %s did not interrupt foreground job: %q", test.name, out)
+					t.Fatalf("exec %s did not interrupt foreground job: %q", tt.name, out)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			continued := "EXEC-EXTERNAL-AFTER-" + test.name
+			continued := "EXEC-EXTERNAL-AFTER-" + tt.name
 			call.write(t, "echo "+continued+"; exit 41\n")
 			code, out, stderr := call.wait(t)
-			if code != 41 || !strings.Contains(out, continued+"\r\n") || (test.signal != syscall.SIGINT && !strings.Contains(out, handled+"\r\n")) {
-				t.Fatalf("exec external %s exit=%d stdout=%q stderr=%q", test.name, code, out, stderr)
+			if code != 41 || !strings.Contains(out, continued+"\r\n") || (tt.signal != syscall.SIGINT && !strings.Contains(out, handled+"\r\n")) {
+				t.Fatalf("exec external %s exit=%d stdout=%q stderr=%q", tt.name, code, out, stderr)
 			}
 			if elapsed := time.Since(started); elapsed > 3*time.Second {
-				t.Fatalf("exec %s waited for forced shutdown: %s", test.name, elapsed)
+				t.Fatalf("exec %s waited for forced shutdown: %s", tt.name, elapsed)
 			}
 			waitBackground(t, id, "running")
 			assertExecTerminalReleased(t, id)

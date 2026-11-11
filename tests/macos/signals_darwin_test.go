@@ -18,11 +18,12 @@ import (
 )
 
 func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		name   string
 		signal syscall.Signal
-	}{{"HUP", syscall.SIGHUP}, {"QUIT", syscall.SIGQUIT}} {
-		t.Run(test.name, func(t *testing.T) {
+	}{{"HUP", syscall.SIGHUP}, {"QUIT", syscall.SIGQUIT}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			// Recovery is only a fallback for a failed test, after its assertions.
@@ -48,7 +49,7 @@ func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
 				t.Fatalf("readiness: %q %v", ready, err)
 			}
 			path, cgroup := foregroundRun(t, membership)
-			if err := cmd.Process.Signal(test.signal); err != nil {
+			if err := cmd.Process.Signal(tt.signal); err != nil {
 				t.Fatal(err)
 			}
 			output, readErr := io.ReadAll(reader)

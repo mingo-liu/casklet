@@ -22,7 +22,7 @@ func TestProjectLogsSelectionFollowAndCancellation(t *testing.T) {
 	success(t, "doctor")
 	name := fmt.Sprintf("logs-%x", time.Now().UnixNano())
 	file := filepath.Join(t.TempDir(), "project.json")
-	services := map[string]any{}
+	services := make(map[string]any)
 	for _, key := range []string{"api", "db"} {
 		services[key] = map[string]any{"run": map[string]any{"network": "none", "command": []string{"/bin/sh", "-c", "echo first; echo second; sleep 300"}}}
 	}

@@ -13,20 +13,21 @@ import (
 )
 
 func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
-	for _, test := range []struct{ action, protocol, host string }{
+	tests := []struct{ action, protocol, host string }{
 		{"start", "tcp", "0.0.0.0"},
 		{"start", "udp", "127.0.0.1"},
 		{"restart", "tcp", "127.0.0.1"},
 		{"restart", "udp", "0.0.0.0"},
-	} {
-		t.Run(test.action+"-"+test.protocol+"-"+test.host, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.action+"-"+tt.protocol+"-"+tt.host, func(t *testing.T) {
 			client(t)
-			listener, port, err := listenMacPort(test.protocol, "127.0.0.1:0")
+			listener, port, err := listenMacPort(tt.protocol, "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
 			}
 			_ = listener.Close()
-			id := detached(t, "--network", "bridge", "-p", fmt.Sprintf("%s:%d:8080/%s", test.host, port, test.protocol), "--", "/bin/sleep", "300")
+			id := detached(t, "--network", "bridge", "-p", fmt.Sprintf("%s:%d:8080/%s", tt.host, port, tt.protocol), "--", "/bin/sleep", "300")
 			// A running start is idempotent even while Lima owns its host sockets.
 			original := inspectHost(t, id)
 			success(t, "start", id)
@@ -38,7 +39,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 			address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 			deadline := time.Now().Add(10 * time.Second)
 			for {
-				listener, _, err = listenMacPort(test.protocol, address)
+				listener, _, err = listenMacPort(tt.protocol, address)
 				if err == nil {
 					break
 				}
@@ -48,7 +49,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 				time.Sleep(50 * time.Millisecond)
 			}
 			defer func() { _ = listener.Close() }()
-			out, diagnostic, code := command(t, test.action, id)
+			out, diagnostic, code := command(t, tt.action, id)
 			if code != 125 || out != "" || !strings.Contains(diagnostic, "macOS host port unavailable") {
 				t.Fatalf("occupied port: exit=%d stdout=%q stderr=%q", code, out, diagnostic)
 			}
@@ -56,7 +57,7 @@ func TestLifecycleRejectsOccupiedMacPorts(t *testing.T) {
 				t.Fatalf("failed preflight changed execution: before=%+v after=%+v", stopped, next)
 			}
 			_ = listener.Close()
-			success(t, test.action, id)
+			success(t, tt.action, id)
 			if next := inspectHost(t, id); next.Generation != stopped.Generation+1 || next.State != "running" {
 				t.Fatalf("retry did not start a new execution: %+v", next)
 			}

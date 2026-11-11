@@ -68,7 +68,7 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(history))
 	var last uint64
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	for decoder.More() {
 		var e container.Event
 		if err := decoder.Decode(&e); err != nil {
@@ -127,15 +127,16 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 
 func TestProjectTaskFailureAndDeadlineThroughMac(t *testing.T) {
 	client(t)
-	for _, tc := range []struct {
+	tests := []struct {
 		command, timeout string
 		code             int
-	}{{"exit 7", "30s", 7}, {"sleep 300", "1s", 124}} {
+	}{{"exit 7", "30s", 7}, {"sleep 300", "1s", 124}}
+	for _, tt := range tests {
 		name := fmt.Sprintf("task-fail-%x", time.Now().UnixNano())
-		file := macTaskConfig(t, name, tc.command)
-		_, stderr, code := command(t, "project", "up", "--config", file, "--timeout", tc.timeout)
-		if code != tc.code {
-			t.Fatalf("task status %d expected %d: %s", code, tc.code, stderr)
+		file := macTaskConfig(t, name, tt.command)
+		_, stderr, code := command(t, "project", "up", "--config", file, "--timeout", tt.timeout)
+		if code != tt.code {
+			t.Fatalf("task status %d expected %d: %s", code, tt.code, stderr)
 		}
 		if out := success(t, "project", "ps", "--json", name); out != "[]\n" {
 			t.Fatalf("task rollback %s", out)

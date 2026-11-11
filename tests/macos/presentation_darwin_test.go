@@ -15,6 +15,7 @@ import (
 
 type hostInspection struct {
 	container.Inspection
+
 	GuestResources struct {
 		RootFS  string               `json:"rootfs"`
 		Mounts  []config.BindMount   `json:"mounts"`

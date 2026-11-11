@@ -69,7 +69,7 @@ func TestAutomaticRestartPoliciesAndManualStop(t *testing.T) {
 		backgroundSuccess(t, "rm", id)
 	})
 	t.Run("more than four services do not starve", func(t *testing.T) {
-		ids := []string{}
+		var ids []string
 		for i := 0; i < 6; i++ {
 			ids = append(ids, startBackground(t, backgroundName(t), []string{"--restart", "unless-stopped"}, "/bin/sh", "-c", "[ -f /resumed ] || { touch /resumed; exit 1; }; exec sleep 300"))
 		}
@@ -86,7 +86,7 @@ func TestAutomaticRestartRestoresPreviousBootPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := map[string]string{}
+	ids := make(map[string]string)
 	for _, policy := range []string{"always", "unless-stopped", "on-failure"} {
 		id := startBackground(t, backgroundName(t), []string{"--restart", policy}, "/bin/sleep", "300")
 		backgroundSuccess(t, "stop", id)

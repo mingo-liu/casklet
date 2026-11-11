@@ -100,7 +100,7 @@ func TestImageSharedBlobCacheAndPruneThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { backgroundSuccess(t, "image", "cache", "limit", strconv.FormatInt(original.MaxBytes, 10)) })
-	ids := []string{}
+	var ids []string
 	for i, ref := range refs {
 		code, out, stderr := start(t, "", "image", "pull", "--progress=plain", ref).wait(t)
 		id := strings.TrimSpace(out)

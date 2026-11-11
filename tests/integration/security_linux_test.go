@@ -208,7 +208,7 @@ func TestSecurityRootless(t *testing.T) {
 		}
 		return code, string(output)
 	}
-	for _, test := range []struct {
+	tests := []struct {
 		name             string
 		options, command []string
 		code             int
@@ -224,20 +224,21 @@ func TestSecurityRootless(t *testing.T) {
 		{name: "timeout", options: []string{"--timeout", "100ms", "--stop-timeout", "0s"}, command: []string{"/bin/sleep", "30"}, code: 124, text: ""},
 		{name: "startup", options: nil, command: []string{"/missing-command"}, code: 125, text: ""},
 		{name: "no-fallback", options: []string{"--network", "bridge"}, command: []string{"/bin/echo", "must-not-run"}, code: 125, text: "rootless"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			code, out := launch(test.options, test.command...)
-			if code != test.code || !strings.Contains(out, test.text) {
-				t.Fatalf("exit=%d expected=%d output=%q", code, test.code, out)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, out := launch(tt.options, tt.command...)
+			if code != tt.code || !strings.Contains(out, tt.text) {
+				t.Fatalf("exit=%d expected=%d output=%q", code, tt.code, out)
 			}
-			if test.name == "identity" {
+			if tt.name == "identity" {
 				hostUID, _ := strconv.Atoi(uid)
 				fields := strings.Fields(out)
 				if len(fields) < 7 || fields[0] != "0" || fields[2] != fmt.Sprint(hostUID) || fields[5] != account.Gid {
 					t.Fatalf("mapping output = %q", out)
 				}
 			}
-			if test.name == "cpu" {
+			if tt.name == "cpu" {
 				checkCPUQuota(t, out)
 			}
 		})

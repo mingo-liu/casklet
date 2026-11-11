@@ -150,19 +150,20 @@ printf 'private-tty-ok\n'`, "sh", strconv.Itoa(int(marker.number)))
 }
 
 func TestTerminalRestorationAndExitCodes(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		name, command string
 		options       []string
 		code          int
 	}{
 		{name: "command-exit", command: "echo ready; exit 19", options: nil, code: 19},
 		{name: "timeout", command: "echo ready; sleep 30", options: []string{"--timeout", "300ms"}, code: 124},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			call := startTerminal(t, test.options, "/bin/sh", "-c", test.command)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := startTerminal(t, tt.options, "/bin/sh", "-c", tt.command)
 			code, out, stderr := call.wait(t)
-			if code != test.code || !strings.Contains(out, "ready\r\n") {
-				t.Fatalf("terminal %s exit=%d stdout=%q stderr=%q", test.name, code, out, stderr)
+			if code != tt.code || !strings.Contains(out, "ready\r\n") {
+				t.Fatalf("terminal %s exit=%d stdout=%q stderr=%q", tt.name, code, out, stderr)
 			}
 		})
 	}

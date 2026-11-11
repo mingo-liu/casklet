@@ -152,14 +152,15 @@ func TestExecEnvironmentWorkdirAndLookup(t *testing.T) {
 	if out := execSuccess(t, nil, id, "/bin/sh", "-c", `[ "$VALUE" = base ] && [ "$PWD" = /workspace ] && [ "${EMPTY+x}" = x ] && [ -z "$EMPTY" ] && [ -z "${CASKLET_HOST_SECRET+x}" ] && echo environment-ok`); out != "environment-ok\n" {
 		t.Fatalf("exec leaked client variables or changed saved defaults: %q", out)
 	}
-	for _, test := range []struct {
+	tests := []struct {
 		options []string
 		command string
 	}{
 		{[]string{"--workdir", "/missing"}, "/bin/echo"},
 		{nil, "outside-configured-path"},
-	} {
-		code, out, stderr := startExec(t, "", test.options, name, test.command, "must-not-run").wait(t)
+	}
+	for _, tt := range tests {
+		code, out, stderr := startExec(t, "", tt.options, name, tt.command, "must-not-run").wait(t)
 		if code != 125 || out != "" || stderr == "" {
 			t.Fatalf("exec startup failure exit=%d stdout=%q stderr=%q", code, out, stderr)
 		}
@@ -323,7 +324,7 @@ func TestExecCPUQuota(t *testing.T) {
 
 func TestExecSignalAndTimeoutPreserveContainer(t *testing.T) {
 	name, id := execContainer(t, nil)
-	for _, test := range []struct {
+	tests := []struct {
 		name   string
 		signal syscall.Signal
 		trap   string
@@ -331,15 +332,16 @@ func TestExecSignalAndTimeoutPreserveContainer(t *testing.T) {
 	}{
 		{name: "interrupt", signal: syscall.SIGINT, trap: "trap 'exit 42' INT", want: 42},
 		{name: "termination", signal: syscall.SIGTERM, trap: "trap 'exit 43' TERM", want: 43},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			call := startExec(t, "", nil, name, "/bin/sh", "-c", test.trap+"; cat /proc/self/cgroup; echo signal-ready; while :; do sleep .1; done")
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := startExec(t, "", nil, name, "/bin/sh", "-c", tt.trap+"; cat /proc/self/cgroup; echo signal-ready; while :; do sleep .1; done")
 			group := execCgroup(t, call.ready(t, "signal-ready\n"))
-			if err := call.cmd.Process.Signal(test.signal); err != nil {
+			if err := call.cmd.Process.Signal(tt.signal); err != nil {
 				t.Fatal(err)
 			}
 			code, out, stderr := call.wait(t)
-			if code != test.want {
+			if code != tt.want {
 				t.Fatalf("exec signal did not preserve trap exit: exit=%d stdout=%q stderr=%q", code, out, stderr)
 			}
 			assertCgroupRemoved(t, group)

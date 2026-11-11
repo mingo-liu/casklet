@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mingo-liu/casklet/internal/image"
-
 	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func TestHealthProbeTransitionsIsolationAndRestart(t *testing.T) {
