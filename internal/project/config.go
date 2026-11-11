@@ -13,26 +13,16 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
-const LabelPrefix = "io.casklet.project."
-const LabelName = LabelPrefix + "name"
-const LabelService = LabelPrefix + "service"
-const LabelSpec = LabelPrefix + "spec"
-const LabelTransaction = LabelPrefix + "transaction"
-const LabelTask = LabelPrefix + "task"
+const (
+	LabelPrefix      = "io.casklet.project."
+	LabelName        = LabelPrefix + "name"
+	LabelService     = LabelPrefix + "service"
+	LabelSpec        = LabelPrefix + "spec"
+	LabelTransaction = LabelPrefix + "transaction"
+	LabelTask        = LabelPrefix + "task"
+)
 
-var dnsName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-
-func ValidateName(name string) error {
-	if !dnsName.MatchString(name) {
-		return errors.New("project identifiers require 1-63 lowercase DNS label characters")
-	}
-	return nil
-}
-
-func ScopedName(project, logical string) (string, error) {
-	name := "cp-" + project + "-" + logical
-	return name, ValidateName(name)
-}
+var _dnsName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type Document struct {
 	Name            string                   `json:"name"`
@@ -49,26 +39,38 @@ type ServiceConfig struct {
 }
 
 type Service struct {
-	Task   bool
-	Config config.Config
-	Fields map[string]string
+	Task   bool              `json:"Task"`
+	Config config.Config     `json:"Config"`
+	Fields map[string]string `json:"Fields"`
 
-	Key         string
-	Name        string
-	Fingerprint string
-	Args        []string
-	DependsOn   map[string]string
+	Key         string            `json:"Key"`
+	Name        string            `json:"Name"`
+	Fingerprint string            `json:"Fingerprint"`
+	Args        []string          `json:"Args"`
+	DependsOn   map[string]string `json:"DependsOn"`
 	// MatchLegacyFingerprint verifies an old ordered-alias hash using the
 	// desired configuration and the inspected container's saved alias order.
 	MatchLegacyFingerprint func(string, []string) bool `json:"-"`
 }
 
 type Plan struct {
-	Name            string
-	Networks        []string
-	Volumes         []string
-	ExternalVolumes []string  // Existing guest names, never project-owned.
-	Services        []Service // Topological order, with deterministic ties.
+	Name            string    `json:"Name"`
+	Networks        []string  `json:"Networks"`
+	Volumes         []string  `json:"Volumes"`
+	ExternalVolumes []string  `json:"ExternalVolumes"` // Existing guest names, never project-owned.
+	Services        []Service `json:"Services"`        // Topological order, with deterministic ties.
+}
+
+func ValidateName(name string) error {
+	if !_dnsName.MatchString(name) {
+		return errors.New("project identifiers require 1-63 lowercase DNS label characters")
+	}
+	return nil
+}
+
+func ScopedName(project, logical string) (string, error) {
+	name := "cp-" + project + "-" + logical
+	return name, ValidateName(name)
 }
 
 // Decode rejects duplicate keys at every level, nulls, excessive nesting and
@@ -103,7 +105,7 @@ func Decode(data []byte) (Document, error) {
 		if len(names) > 16 {
 			return doc, errors.New("project supports at most 16 networks and 16 volumes")
 		}
-		seen := map[string]bool{}
+		seen := make(map[string]bool, len(names))
 		for _, name := range names {
 			if _, err := ScopedName(doc.Name, name); err != nil || ValidateName(name) != nil || seen[name] {
 				return doc, errors.New("invalid, duplicate, or oversized project resource name")
@@ -114,8 +116,10 @@ func Decode(data []byte) (Document, error) {
 	if len(doc.Volumes)+len(doc.ExternalVolumes) > 16 {
 		return doc, errors.New("project supports at most 16 volumes including external volumes")
 	}
-	logicalNames := map[string]bool{}
-	actualNames := map[string]bool{}
+	var (
+		logicalNames = make(map[string]bool, len(doc.Volumes)+len(doc.ExternalVolumes))
+		actualNames  = make(map[string]bool, len(doc.Volumes)+len(doc.ExternalVolumes))
+	)
 	for _, name := range doc.Volumes {
 		logicalNames[name] = true
 		actual, _ := ScopedName(doc.Name, name)
@@ -154,55 +158,12 @@ func Decode(data []byte) (Document, error) {
 	return doc, err
 }
 
-func validateValue(decoder *json.Decoder, depth int) error {
-	if depth > 64 {
-		return errors.New("project config nesting exceeds 64 levels")
-	}
-	token, err := decoder.Token()
-	if err != nil {
-		return errors.New("invalid project JSON")
-	}
-	if token == nil {
-		return errors.New("project config cannot contain null")
-	}
-	delimiter, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		seen := map[string]bool{}
-		for decoder.More() {
-			token, err := decoder.Token()
-			if err != nil {
-				return errors.New("invalid project JSON")
-			}
-			key, ok := token.(string)
-			if !ok || seen[key] {
-				return errors.New("duplicate project config key")
-			}
-			seen[key] = true
-			if err := validateValue(decoder, depth+1); err != nil {
-				return err
-			}
-		}
-	case '[':
-		for decoder.More() {
-			if err := validateValue(decoder, depth+1); err != nil {
-				return err
-			}
-		}
-	default:
-		return errors.New("invalid project JSON delimiter")
-	}
-	_, err = decoder.Token()
-	return err
-}
-
 func (doc Document) Order() ([]string, error) {
-	var order []string
-	status := map[string]int{}
-	var visit func(string) error
+	var (
+		order  []string
+		status = make(map[string]int, len(doc.Services))
+		visit  func(string) error
+	)
 	visit = func(key string) error {
 		if status[key] == 1 {
 			return errors.New("project dependencies contain a cycle")
@@ -246,4 +207,49 @@ func (plan Plan) HasTasks() bool {
 		}
 	}
 	return false
+}
+
+func validateValue(decoder *json.Decoder, depth int) error {
+	if depth > 64 {
+		return errors.New("project config nesting exceeds 64 levels")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return errors.New("invalid project JSON")
+	}
+	if token == nil {
+		return errors.New("project config cannot contain null")
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]bool)
+		for decoder.More() {
+			token, err := decoder.Token()
+			if err != nil {
+				return errors.New("invalid project JSON")
+			}
+			key, ok := token.(string)
+			if !ok || seen[key] {
+				return errors.New("duplicate project config key")
+			}
+			seen[key] = true
+			if err := validateValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			if err := validateValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+	default:
+		return errors.New("invalid project JSON delimiter")
+	}
+	_, err = decoder.Token()
+	return err
 }

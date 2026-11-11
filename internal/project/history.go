@@ -15,9 +15,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxHistoryBytes = 16 << 20
-const maxDeploymentBytes = 4 << 20
-const maxDeployments = 32
+const (
+	_maxHistoryBytes    = 16 << 20
+	_maxDeploymentBytes = 4 << 20
+	_maxDeployments     = 32
+)
 
 // Deployment retains private effective inputs. Public history uses summaries;
 // commands and expanded environment assignments must never be printed here.
@@ -44,27 +46,33 @@ type DeploymentSummary struct {
 	Images       map[string]string `json:"images"`
 }
 
+func ValidateDeploymentSize(plan Plan) error {
+	data, err := json.Marshal(plan)
+	if err != nil {
+		return err
+	}
+	if len(data) > _maxDeploymentBytes {
+		return errors.New("deployment configuration exceeds 4 MiB history limit")
+	}
+	return nil
+}
+
 func (h History) Summaries() []DeploymentSummary {
 	summaries := make([]DeploymentSummary, 0, len(h.Deployments))
 	for _, d := range h.Deployments {
-		summary := DeploymentSummary{Revision: d.Revision, CreatedAt: d.CreatedAt, RestoredFrom: d.RestoredFrom, Images: maps.Clone(d.Images), Services: []string{}}
+		summary := DeploymentSummary{
+			Revision:     d.Revision,
+			CreatedAt:    d.CreatedAt,
+			RestoredFrom: d.RestoredFrom,
+			Images:       maps.Clone(d.Images),
+			Services:     make([]string, 0, len(d.Plan.Services)),
+		}
 		for _, service := range d.Plan.Services {
 			summary.Services = append(summary.Services, service.Key)
 		}
 		summaries = append(summaries, summary)
 	}
 	return summaries
-}
-
-func ValidateDeploymentSize(plan Plan) error {
-	data, err := json.Marshal(plan)
-	if err != nil {
-		return err
-	}
-	if len(data) > maxDeploymentBytes {
-		return errors.New("deployment configuration exceeds 4 MiB history limit")
-	}
-	return nil
 }
 
 func (store *Store) LoadHistory() (History, error) {
@@ -76,19 +84,19 @@ func (store *Store) LoadHistory() (History, error) {
 	if err != nil {
 		return h, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return h, err
 	}
-	if err := safeFile(info, false); err != nil {
+	if err := safeFile(info, false /* directory */); err != nil {
 		return h, err
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxHistoryBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, _maxHistoryBytes+1))
 	if err != nil {
 		return h, err
 	}
-	if len(data) > maxHistoryBytes {
+	if len(data) > _maxHistoryBytes {
 		return h, errors.New("project history exceeds 16 MiB")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -102,8 +110,80 @@ func (store *Store) LoadHistory() (History, error) {
 	return h, nil
 }
 
+// RecordDeployment atomically appends a successful deployment under the existing
+// project lock. Oldest revisions expire at 32 entries or 16 MiB; IDs never reuse.
+func (store *Store) RecordDeployment(h History, plan Plan, images, containers map[string]string, restoredFrom uint64) error {
+	if err := ValidateDeploymentSize(plan); err != nil {
+		return err
+	}
+	d := Deployment{Revision: 1, CreatedAt: time.Now().UTC(), RestoredFrom: restoredFrom, Plan: plan, Images: images, Containers: containers}
+	if n := len(h.Deployments); n > 0 {
+		previous := h.Deployments[n-1]
+		if previous.Revision == ^uint64(0) {
+			return errors.New("deployment revision exhausted")
+		}
+		d.Revision = previous.Revision + 1
+		before, _ := json.Marshal(struct {
+			Plan       Plan              `json:"Plan"`
+			Images     map[string]string `json:"Images"`
+			Containers map[string]string `json:"Containers"`
+		}{Plan: previous.Plan, Images: previous.Images, Containers: previous.Containers})
+		after, _ := json.Marshal(struct {
+			Plan       Plan              `json:"Plan"`
+			Images     map[string]string `json:"Images"`
+			Containers map[string]string `json:"Containers"`
+		}{Plan: plan, Images: images, Containers: containers})
+		if restoredFrom == 0 && bytes.Equal(before, after) {
+			return nil
+		}
+	}
+	h.Deployments = append(h.Deployments, d)
+	if len(h.Deployments) > _maxDeployments {
+		h.Deployments = h.Deployments[len(h.Deployments)-_maxDeployments:]
+	}
+	data, err := json.Marshal(h)
+	if err != nil {
+		return err
+	}
+	for len(data) > _maxHistoryBytes && len(h.Deployments) > 1 {
+		h.Deployments = h.Deployments[1:]
+		data, err = json.Marshal(h)
+		if err != nil {
+			return err
+		}
+	}
+	if err := store.validateHistory(h); err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(store.root, ".history-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+	_, err = file.Write(data)
+	if err == nil {
+		err = file.Sync()
+	}
+	err = errors.Join(err, file.Close())
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), filepath.Join(store.root, store.name+".history.json")); err != nil {
+		return err
+	}
+	dir, err := os.Open(store.root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("sync project history: %w", err)
+	}
+	return nil
+}
+
 func (store *Store) validateHistory(h History) error {
-	if h.Version != 1 || h.Name != store.name || len(h.Deployments) > maxDeployments {
+	if h.Version != 1 || h.Name != store.name || len(h.Deployments) > _maxDeployments {
 		return errors.New("invalid project history identity")
 	}
 	var last uint64
@@ -115,7 +195,7 @@ func (store *Store) validateHistory(h History) error {
 		if err := ValidateDeploymentSize(d.Plan); err != nil {
 			return err
 		}
-		services := map[string]bool{}
+		services := make(map[string]bool, len(d.Plan.Services))
 		for _, s := range d.Plan.Services {
 			name, err := ScopedName(store.name, s.Key)
 			if err != nil || name != s.Name || services[s.Key] || len(s.Args) == 0 || s.Args[0] != "run" {
@@ -135,78 +215,6 @@ func (store *Store) validateHistory(h History) error {
 				return errors.New("unknown deployment image service")
 			}
 		}
-	}
-	return nil
-}
-
-// RecordDeployment atomically appends a successful deployment under the existing
-// project lock. Oldest revisions expire at 32 entries or 16 MiB; IDs never reuse.
-func (store *Store) RecordDeployment(h History, plan Plan, images, containers map[string]string, restoredFrom uint64) error {
-	if err := ValidateDeploymentSize(plan); err != nil {
-		return err
-	}
-	d := Deployment{Revision: 1, CreatedAt: time.Now().UTC(), RestoredFrom: restoredFrom, Plan: plan, Images: images, Containers: containers}
-	if n := len(h.Deployments); n > 0 {
-		previous := h.Deployments[n-1]
-		if previous.Revision == ^uint64(0) {
-			return errors.New("deployment revision exhausted")
-		}
-		d.Revision = previous.Revision + 1
-		before, _ := json.Marshal(struct {
-			Plan       Plan
-			Images     map[string]string
-			Containers map[string]string
-		}{previous.Plan, previous.Images, previous.Containers})
-		after, _ := json.Marshal(struct {
-			Plan       Plan
-			Images     map[string]string
-			Containers map[string]string
-		}{plan, images, containers})
-		if restoredFrom == 0 && bytes.Equal(before, after) {
-			return nil
-		}
-	}
-	h.Deployments = append(h.Deployments, d)
-	if len(h.Deployments) > maxDeployments {
-		h.Deployments = h.Deployments[len(h.Deployments)-maxDeployments:]
-	}
-	data, err := json.Marshal(h)
-	if err != nil {
-		return err
-	}
-	for len(data) > maxHistoryBytes && len(h.Deployments) > 1 {
-		h.Deployments = h.Deployments[1:]
-		data, err = json.Marshal(h)
-		if err != nil {
-			return err
-		}
-	}
-	if err := store.validateHistory(h); err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(store.root, ".history-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	_, err = file.Write(data)
-	if err == nil {
-		err = file.Sync()
-	}
-	err = errors.Join(err, file.Close())
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(file.Name(), filepath.Join(store.root, store.name+".history.json")); err != nil {
-		return err
-	}
-	dir, err := os.Open(store.root)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("sync project history: %w", err)
 	}
 	return nil
 }

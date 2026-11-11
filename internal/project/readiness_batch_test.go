@@ -12,20 +12,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func readinessFixture(count int) (Plan, map[string]serviceExecution, []ServiceStatus) {
-	plan := Plan{Name: "demo"}
-	executions := map[string]serviceExecution{}
-	records := []ServiceStatus{}
-	for i := 0; i < count; i++ {
-		key := fmt.Sprintf("s%d", i)
-		id := fmt.Sprintf("%032x", i+1)
-		plan.Services = append(plan.Services, Service{Key: key})
-		executions[key] = serviceExecution{ID: id, Generation: 2, Healthcheck: true}
-		records = append(records, ServiceStatus{ID: id, Project: "demo", Service: key, Generation: 2, State: container.StateRunning, Health: container.HealthHealthy})
-	}
-	return plan, executions, records
-}
-
 func TestReadinessBatchOneCallAndPinnedIdentities(t *testing.T) {
 	for _, count := range []int{16, 64} {
 		plan, executions, records := readinessFixture(count)
@@ -115,4 +101,18 @@ func TestReadinessBatchResamplesDependenciesAndHonorsDeadline(t *testing.T) {
 	if err := runner.waitServices(ctx, plan, executions); !errors.Is(err, context.Canceled) || calls != 0 {
 		t.Fatalf("pre-canceled: %v calls=%d", err, calls)
 	}
+}
+
+func readinessFixture(count int) (Plan, map[string]serviceExecution, []ServiceStatus) {
+	plan := Plan{Name: "demo"}
+	executions := make(map[string]serviceExecution)
+	records := []ServiceStatus{}
+	for i := 0; i < count; i++ {
+		key := fmt.Sprintf("s%d", i)
+		id := fmt.Sprintf("%032x", i+1)
+		plan.Services = append(plan.Services, Service{Key: key})
+		executions[key] = serviceExecution{ID: id, Generation: 2, Healthcheck: true}
+		records = append(records, ServiceStatus{ID: id, Project: "demo", Service: key, Generation: 2, State: container.StateRunning, Health: container.HealthHealthy})
+	}
+	return plan, executions, records
 }
