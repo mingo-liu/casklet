@@ -11,8 +11,10 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
-var cpuPattern = regexp.MustCompile(`^(?:[0-9]+(?:\.[0-9]{1,3})?|\.[0-9]{1,3})$`)
-var identityPattern = regexp.MustCompile(`^[0-9]+$`)
+var (
+	_cpuPattern      = regexp.MustCompile(`^(?:[0-9]+(?:\.[0-9]{1,3})?|\.[0-9]{1,3})$`)
+	_identityPattern = regexp.MustCompile(`^[0-9]+$`)
+)
 
 func ParseMemory(value string) (int64, error) {
 	original := value
@@ -43,7 +45,7 @@ func ParseCPUs(value string) (int64, error) {
 	invalid := func() (int64, error) {
 		return 0, fmt.Errorf("invalid CPU limit %q: use 0 or 0.01-1000 cores with up to 3 decimal places", value)
 	}
-	if !cpuPattern.MatchString(value) {
+	if !_cpuPattern.MatchString(value) {
 		return invalid()
 	}
 	whole, fractional, _ := strings.Cut(value, ".")
@@ -73,7 +75,7 @@ func ParseUser(value string) (*config.User, error) {
 		gidText = uidText
 	}
 	parseID := func(text string) (uint32, error) {
-		if !identityPattern.MatchString(text) {
+		if !_identityPattern.MatchString(text) {
 			return 0, errors.New("invalid numeric ID")
 		}
 		id, err := strconv.ParseUint(text, 10, 32)

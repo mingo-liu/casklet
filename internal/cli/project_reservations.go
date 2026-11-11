@@ -21,7 +21,7 @@ func parseProjectReservations(args []string) (Request, error) {
 	} else if r.Cursor == "" || !validProjectCursor(r.Cursor) {
 		return Request{}, errors.New("invalid project reservation cursor")
 	}
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(args)-1)
 	for _, id := range args[1:] {
 		if id == "" || !validProjectCursor(id) || seen[id] {
 			return Request{}, errors.New("invalid project reservation exclusion")

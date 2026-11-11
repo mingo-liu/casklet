@@ -12,45 +12,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
-func validateProgressMode(mode string) error {
-	switch mode {
-	case "auto", "plain", "tty":
-		return nil
-	}
-	return errors.New("--progress must be auto, plain, or tty")
-}
-
-func progressMode(mode string, output io.Writer) string {
-	if mode != "" && mode != "auto" {
-		return mode
-	}
-	if file, ok := output.(*os.File); ok && os.Getenv("TERM") != "dumb" && isProgressTerminal(file) {
-		return "tty"
-	}
-	return "plain"
-}
-
-// Resolve auto on the Mac before SSH removes terminal properties. Appending the
-// option after existing flags preserves explicit mode choices and workload args.
-func guestProgressArguments(args []string, r Request, stderr io.Writer) []string {
-	if r.Action != "image-pull" && (r.Action != "run" || r.Config.Image == "") {
-		return args
-	}
-	index := len(args)
-	for i, arg := range args {
-		if arg == "--" {
-			index = i
-			break
-		}
-	}
-	if r.Action == "image-pull" && index == len(args) {
-		index-- // The sole positional reference follows the flags.
-	}
-	result := append([]string(nil), args[:index]...)
-	result = append(result, "--progress="+progressMode(r.Progress, stderr))
-	return append(result, args[index:]...)
-}
-
 type pullProgress struct {
 	output io.Writer
 	tty    bool
@@ -64,13 +25,6 @@ type pullProgress struct {
 
 func newPullProgress(output io.Writer, mode string) *pullProgress {
 	return &pullProgress{output: output, tty: progressMode(mode, output) == "tty", last: make(map[int]image.Progress), times: make(map[int]time.Time), now: time.Now}
-}
-
-func (p *pullProgress) write(text string) {
-	if !p.failed {
-		written, err := io.WriteString(p.output, text)
-		p.failed = err != nil || written != len(text)
-	}
 }
 
 func (p *pullProgress) observe(event image.Progress) {
@@ -110,7 +64,7 @@ func (p *pullProgress) observe(event image.Progress) {
 	}
 	p.last[event.Index], p.times[event.Index] = event, now
 	if !p.tty {
-		p.write(layerProgressLine(event, false) + "\n")
+		p.write(layerProgressLine(event, false /* bar */) + "\n")
 		return
 	}
 	found := false
@@ -133,11 +87,57 @@ func (p *pullProgress) observe(event image.Progress) {
 	}
 	for _, row := range p.rows {
 		frame.WriteString("\r\x1b[2K")
-		frame.WriteString(layerProgressLine(row, true))
+		frame.WriteString(layerProgressLine(row, true /* bar */))
 		frame.WriteByte('\n')
 	}
 	p.write(frame.String())
 	p.lines = len(p.rows)
+}
+
+func (p *pullProgress) write(text string) {
+	if !p.failed {
+		written, err := io.WriteString(p.output, text)
+		p.failed = err != nil || written != len(text)
+	}
+}
+
+func validateProgressMode(mode string) error {
+	switch mode {
+	case "auto", "plain", "tty":
+		return nil
+	}
+	return errors.New("--progress must be auto, plain, or tty")
+}
+
+func progressMode(mode string, output io.Writer) string {
+	if mode != "" && mode != "auto" {
+		return mode
+	}
+	if file, ok := output.(*os.File); ok && os.Getenv("TERM") != "dumb" && isProgressTerminal(file) {
+		return "tty"
+	}
+	return "plain"
+}
+
+// Resolve auto on the Mac before SSH removes terminal properties. Appending the
+// option after existing flags preserves explicit mode choices and workload args.
+func guestProgressArguments(args []string, r Request, stderr io.Writer) []string {
+	if r.Action != "image-pull" && (r.Action != "run" || r.Config.Image == "") {
+		return args
+	}
+	index := len(args)
+	for i, arg := range args {
+		if arg == "--" {
+			index = i
+			break
+		}
+	}
+	if r.Action == "image-pull" && index == len(args) {
+		index-- // The sole positional reference follows the flags.
+	}
+	result := append([]string(nil), args[:index]...)
+	result = append(result, "--progress="+progressMode(r.Progress, stderr))
+	return append(result, args[index:]...)
 }
 
 func layerProgressLine(event image.Progress, bar bool) string {

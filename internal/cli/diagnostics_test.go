@@ -11,7 +11,7 @@ import (
 )
 
 func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		args  []string
 		hints []string
 	}{
@@ -27,7 +27,8 @@ func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
 		{[]string{"volume", "restore", "one", "two"}, []string{"casklet volume restore --help"}},
 		{[]string{"volume", "unknown"}, []string{"casklet volume --help"}},
 		{[]string{"unknown"}, []string{"casklet help"}},
-	} {
+	}
+	for _, tt := range tests {
 		_, err := Parse(tt.args)
 		if err == nil {
 			t.Fatalf("accepted %q", tt.args)
@@ -41,7 +42,7 @@ func TestArgumentErrorsGiveScopedHelpAndSeparatorExamples(t *testing.T) {
 }
 
 func TestOperationHintsPreserveErrorIdentity(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		cause   error
 		request Request
 		hint    string
@@ -51,7 +52,8 @@ func TestOperationHintsPreserveErrorIdentity(t *testing.T) {
 		{container.ErrNameInUse, Request{Action: "run", Name: "worker"}, "casklet inspect 'worker'"},
 		{image.ErrNotFound, Request{Action: "image-rm"}, "casklet image ls"},
 		{image.ErrInUse, Request{Action: "image-rm"}, "casklet inspect NAME"},
-	} {
+	}
+	for _, tt := range tests {
 		wrapped := fmt.Errorf("operation failed: %w", tt.cause)
 		got := operationError(tt.request, wrapped)
 		if !errors.Is(got, tt.cause) || !strings.Contains(got.Error(), tt.hint) {

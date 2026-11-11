@@ -16,15 +16,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func projectConfigFile(t *testing.T, body string) string {
-	t.Helper()
-	file := filepath.Join(t.TempDir(), "project.json")
-	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return file
-}
-
 func TestProjectPlanExpandsFilesScopesResourcesAndFingerprintsConfig(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "project.json")
@@ -59,7 +50,9 @@ func TestProjectPlanExpandsFilesScopesResourcesAndFingerprintsConfig(t *testing.
 	if err != nil || again.Project.Services[1].Fingerprint != first.Project.Services[1].Fingerprint {
 		t.Fatalf("unstable fingerprint %v", err)
 	}
-	os.WriteFile(env, []byte("MODE=two\n"), 0600)
+	if err := os.WriteFile(env, []byte("MODE=two\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	changed, err := Parse([]string{"project", "up", "--config", file})
 	if err != nil || changed.Project.Services[1].Fingerprint == first.Project.Services[1].Fingerprint {
 		t.Fatalf("env drift undetected %v", err)
@@ -133,112 +126,91 @@ func TestProjectAliasFingerprintIgnoresOrderAndDetectsChanges(t *testing.T) {
 	}
 }
 
-func TestProjectLegacyAliasFingerprintReusesServicesAndRejectsDrift(t *testing.T) {
-	// This hash was generated before alias order was normalized, with explicit
-	// aliases web/backend followed by the automatically added service alias app.
-	const legacyFingerprint = "eb2ce534958b53f25d0e707e930104a3fcb722e8133cc7ad94678b90b28b8d61"
-	for _, test := range []struct {
-		name         string
-		fields       string
-		owner        string
-		inspectionID string
-		inspectError bool
-		canonical    bool
-		stopped      bool
-		wantError    bool
+func TestProjectLegacyAliasFingerprintReusesEquivalentConfigurations(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields string
 	}{
 		{name: "unchanged", fields: `"network-alias":["web","backend"]`},
 		{name: "reordered", fields: `"network-alias":["backend","web"]`},
 		{name: "service alias reordered", fields: `"network-alias":["app","backend","web"]`},
-		{name: "canonical fast path", fields: `"network-alias":["backend","web"]`, canonical: true},
-		{name: "stopped", fields: `"network-alias":["backend","web"]`, stopped: true},
-		{name: "added alias", fields: `"network-alias":["backend","web","extra"]`, wantError: true},
-		{name: "removed alias", fields: `"network-alias":["web"]`, wantError: true},
-		{name: "changed environment", fields: `"network-alias":["backend","web"],"env":["MODE=changed"]`, wantError: true},
-		{name: "changed command", fields: `"network-alias":["backend","web"],"command":["/bin/true"]`, wantError: true},
-		{name: "wrong ownership", fields: `"network-alias":["backend","web"]`, owner: "other", wantError: true},
-		{name: "wrong inspected identity", fields: `"network-alias":["backend","web"]`, inspectionID: "other", wantError: true},
-		{name: "inspection failure", fields: `"network-alias":["backend","web"]`, inspectError: true, wantError: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			file := projectConfigFile(t, `{"name":"demo","services":{"app":{"run":{"image":"app:1",`+test.fields+`}}}}`)
-			request, err := Parse([]string{"project", "up", "--config", file})
-			if err != nil {
-				t.Fatal(err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newLegacyProjectFixture(t, tt.fields)
+			assertLegacyProjectReuse(t, fixture, nil)
+		})
+	}
+}
+
+func TestProjectCanonicalFingerprintSkipsLegacyInspection(t *testing.T) {
+	fixture := newLegacyProjectFixture(t, `"network-alias":["backend","web"]`)
+	fixture.record.Labels[project.LabelSpec] = fixture.request.Project.Services[0].Fingerprint
+	assertLegacyProjectReuse(t, fixture, nil)
+	if fixture.inspections != 0 {
+		t.Fatal("canonical fingerprint performed legacy inspection")
+	}
+}
+
+func TestProjectLegacyFingerprintStartsStoppedService(t *testing.T) {
+	fixture := newLegacyProjectFixture(t, `"network-alias":["backend","web"]`)
+	fixture.record.State = container.StateExited
+	assertLegacyProjectReuse(t, fixture, []string{"start"})
+}
+
+func TestProjectLegacyFingerprintRejectsConfigurationDrift(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields string
+	}{
+		{name: "added alias", fields: `"network-alias":["backend","web","extra"]`},
+		{name: "removed alias", fields: `"network-alias":["web"]`},
+		{name: "changed environment", fields: `"network-alias":["backend","web"],"env":["MODE=changed"]`},
+		{name: "changed command", fields: `"network-alias":["backend","web"],"command":["/bin/true"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newLegacyProjectFixture(t, tt.fields)
+			if _, err := fixture.runner.Up(context.Background(), fixture.request.Project, project.UpOptions{Timeout: time.Second}); err == nil {
+				t.Fatal("accepted changed legacy configuration")
 			}
-			record := container.Record{ID: strings.Repeat("1", 32), Name: "cp-demo-app", State: container.StateRunning,
-				Labels: map[string]string{project.LabelName: "demo", project.LabelService: "app", project.LabelSpec: legacyFingerprint}}
-			if test.canonical {
-				record.Labels[project.LabelSpec] = request.Project.Services[0].Fingerprint
-			}
-			savedFingerprint := record.Labels[project.LabelSpec]
-			if test.owner != "" {
-				record.Labels[project.LabelName] = test.owner
-			}
-			if test.stopped {
-				record.State = container.StateExited
-			}
-			network := project.Resource{Kind: "network", Name: "cp-demo-default", CreatedAt: time.Unix(100, 0).UTC()}
-			var mutations []string
-			call := func(ctx context.Context, args ...string) ([]byte, error) {
-				switch args[0] {
-				case "ps":
-					return json.Marshal([]container.Record{record})
-				case "inspect":
-					if test.canonical || test.owner != "" || args[1] != record.ID {
-						t.Fatalf("inspected unowned or wrong container: %v", args)
-					}
-					if test.inspectError {
-						return nil, errors.New("inspection failed")
-					}
-					id := record.ID
-					if test.inspectionID != "" {
-						id = test.inspectionID
-					}
-					return json.Marshal(container.Inspection{ID: id, Config: container.InspectionConfig{
-						NetworkAliases: []string{"web", "backend", "app", "cp-demo-app"}}})
-				case "network":
-					return json.Marshal([]project.Resource{network})
-				case "volume":
-					return []byte("[]"), nil
-				case "start":
-					mutations = append(mutations, "start")
-					if !test.stopped || args[1] != record.ID {
-						t.Fatalf("unexpected start: %v", args)
-					}
-					record.State = container.StateRunning
-					return []byte(record.ID), nil
-				default:
-					mutations = append(mutations, args[0])
-					return nil, errors.New("unexpected mutation")
-				}
-			}
-			runner := project.Runner{Backend: project.CommandBackend{Call: call}, Call: call, State: project.State{Version: 1, Name: "demo",
-				Resources: map[string]project.Resource{"network:cp-demo-default": network}}, Save: func(state project.State) error {
-				if test.wantError || !reflect.DeepEqual(state.Resources, map[string]project.Resource{"network:cp-demo-default": network}) {
-					t.Fatal("comparison baseline changed resource ownership")
-				}
-				receipt := state.Services["app"]
-				if receipt.ID != record.ID || receipt.Spec != savedFingerprint || !reflect.DeepEqual(receipt.Fields, request.Project.Services[0].Fields) {
-					t.Fatalf("incorrect legacy comparison baseline: %+v", receipt)
-				}
-				return nil
-			}}
-			records, err := runner.Up(context.Background(), request.Project, project.UpOptions{Timeout: time.Second})
-			if (err != nil) != test.wantError {
-				t.Fatalf("up returned %v, want error %v", err, test.wantError)
-			}
-			if !test.wantError && (len(records) != 1 || records[0].ID != record.ID || records[0].Labels[project.LabelSpec] != savedFingerprint) {
-				t.Fatalf("legacy service was not preserved: %v", records)
-			}
-			if test.stopped {
-				if !reflect.DeepEqual(mutations, []string{"start"}) {
-					t.Fatalf("stopped service was not resumed: %v", mutations)
-				}
-			} else if len(mutations) != 0 {
-				t.Fatalf("existing service or resources mutated: %v", mutations)
+			if len(fixture.mutations) != 0 || fixture.saved.ID != "" {
+				t.Fatal("configuration drift changed resources or comparison history")
 			}
 		})
+	}
+}
+
+func TestProjectLegacyFingerprintRejectsUnownedServiceBeforeInspection(t *testing.T) {
+	fixture := newLegacyProjectFixture(t, `"network-alias":["backend","web"]`)
+	fixture.record.Labels[project.LabelName] = "other"
+	if _, err := fixture.runner.Up(context.Background(), fixture.request.Project, project.UpOptions{Timeout: time.Second}); err == nil {
+		t.Fatal("accepted unowned legacy service")
+	}
+	if fixture.inspections != 0 || len(fixture.mutations) != 0 {
+		t.Fatal("inspected or mutated unowned service")
+	}
+}
+
+func TestProjectLegacyFingerprintRejectsChangedInspectionIdentity(t *testing.T) {
+	fixture := newLegacyProjectFixture(t, `"network-alias":["backend","web"]`)
+	fixture.inspection.ID = "other"
+	if _, err := fixture.runner.Up(context.Background(), fixture.request.Project, project.UpOptions{Timeout: time.Second}); err == nil {
+		t.Fatal("accepted changed inspection identity")
+	}
+	if len(fixture.mutations) != 0 {
+		t.Fatal("changed inspection identity reached mutations")
+	}
+}
+
+func TestProjectLegacyFingerprintPreservesInspectionFailure(t *testing.T) {
+	fixture := newLegacyProjectFixture(t, `"network-alias":["backend","web"]`)
+	fixture.inspectionErr = errors.New("inspection failed")
+	if _, err := fixture.runner.Up(context.Background(), fixture.request.Project, project.UpOptions{Timeout: time.Second}); !errors.Is(err, fixture.inspectionErr) {
+		t.Fatalf("lost inspection failure: %v", err)
+	}
+	if len(fixture.mutations) != 0 {
+		t.Fatal("inspection failure reached mutations")
 	}
 }
 
@@ -315,7 +287,7 @@ func TestProjectWaitOptionsAndHelp(t *testing.T) {
 }
 
 func TestProjectWaitTimeoutExitStatus(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		wait bool
 		err  error
 		code int
@@ -323,7 +295,8 @@ func TestProjectWaitTimeoutExitStatus(t *testing.T) {
 		{true, project.ErrWaitTimeout, 124},
 		{false, project.ErrWaitTimeout, 125},
 		{true, context.DeadlineExceeded, 125},
-	} {
+	}
+	for _, tt := range tests {
 		var diagnostic strings.Builder
 		code := manageOperation(Request{Action: "project-up", Wait: tt.wait}, &diagnostic, func(context.Context) (int, error) { return 0, tt.err })
 		if code != tt.code {
@@ -342,7 +315,7 @@ func TestProjectWaitDeadlineIncludesLocalProjectLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer locked.Close()
+	defer func() { _ = locked.Close() }()
 	var out, diagnostic strings.Builder
 	code := executeProject(Request{Action: "project-up", Project: project.Plan{Name: "demo"}, Wait: true, WaitTimeout: 20 * time.Millisecond}, &out, &diagnostic)
 	if code != 124 || out.Len() != 0 || !strings.Contains(diagnostic.String(), "project readiness") {
@@ -434,5 +407,102 @@ func TestProjectRecreateAndPreviewParsingAndHelp(t *testing.T) {
 		if _, err := parseProjectReplace(args); err == nil {
 			t.Fatalf("accepted identity %v", args)
 		}
+	}
+}
+
+func projectConfigFile(t *testing.T, body string) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "project.json")
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+type legacyProjectFixture struct {
+	request       Request
+	record        container.Record
+	inspection    container.Inspection
+	inspectionErr error
+	inspections   int
+	mutations     []string
+	saved         project.ServiceReceipt
+	runner        project.Runner
+}
+
+func newLegacyProjectFixture(t *testing.T, fields string) *legacyProjectFixture {
+	t.Helper()
+	// Generated before alias normalization with web/backend followed by app.
+	const legacyFingerprint = "eb2ce534958b53f25d0e707e930104a3fcb722e8133cc7ad94678b90b28b8d61"
+	file := projectConfigFile(t, `{"name":"demo","services":{"app":{"run":{"image":"app:1",`+fields+`}}}}`)
+	request, err := Parse([]string{"project", "up", "--config", file})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &legacyProjectFixture{
+		request: request,
+		record: container.Record{ID: strings.Repeat("1", 32), Name: "cp-demo-app", State: container.StateRunning,
+			Labels: map[string]string{project.LabelName: "demo", project.LabelService: "app", project.LabelSpec: legacyFingerprint}},
+	}
+	fixture.inspection = container.Inspection{ID: fixture.record.ID, Config: container.InspectionConfig{
+		NetworkAliases: []string{"web", "backend", "app", "cp-demo-app"}}}
+	network := project.Resource{Kind: "network", Name: "cp-demo-default", CreatedAt: time.Unix(100, 0).UTC()}
+	call := func(ctx context.Context, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "ps":
+			return json.Marshal([]container.Record{fixture.record})
+		case "inspect":
+			fixture.inspections++
+			if args[1] != fixture.record.ID {
+				t.Fatalf("inspected wrong container: %v", args)
+			}
+			if fixture.inspectionErr != nil {
+				return nil, fixture.inspectionErr
+			}
+			return json.Marshal(fixture.inspection)
+		case "network":
+			return json.Marshal([]project.Resource{network})
+		case "volume":
+			return []byte("[]"), nil
+		case "start":
+			fixture.mutations = append(fixture.mutations, "start")
+			if fixture.record.State != container.StateExited || args[1] != fixture.record.ID {
+				t.Fatalf("unexpected start: %v", args)
+			}
+			fixture.record.State = container.StateRunning
+			return []byte(fixture.record.ID), nil
+		default:
+			fixture.mutations = append(fixture.mutations, args[0])
+			return nil, errors.New("unexpected mutation")
+		}
+	}
+	fixture.runner = project.Runner{
+		Backend: project.CommandBackend{Call: call},
+		Call:    call,
+		State: project.State{Version: 1, Name: "demo",
+			Resources: map[string]project.Resource{"network:cp-demo-default": network}},
+		Save: func(state project.State) error {
+			if !reflect.DeepEqual(state.Resources, map[string]project.Resource{"network:cp-demo-default": network}) {
+				t.Fatal("comparison baseline changed resource ownership")
+			}
+			fixture.saved = state.Services["app"]
+			return nil
+		},
+	}
+	return fixture
+}
+
+func assertLegacyProjectReuse(t *testing.T, fixture *legacyProjectFixture, wantMutations []string) {
+	t.Helper()
+	savedFingerprint := fixture.record.Labels[project.LabelSpec]
+	records, err := fixture.runner.Up(context.Background(), fixture.request.Project, project.UpOptions{Timeout: time.Second})
+	if err != nil || len(records) != 1 || records[0].ID != fixture.record.ID || records[0].Labels[project.LabelSpec] != savedFingerprint {
+		t.Fatalf("legacy service was not preserved: %v %v", records, err)
+	}
+	if fixture.saved.ID != fixture.record.ID || fixture.saved.Spec != savedFingerprint || !reflect.DeepEqual(fixture.saved.Fields, fixture.request.Project.Services[0].Fields) {
+		t.Fatalf("incorrect legacy comparison baseline: %+v", fixture.saved)
+	}
+	if !reflect.DeepEqual(fixture.mutations, wantMutations) {
+		t.Fatalf("unexpected mutations: %v", fixture.mutations)
 	}
 }

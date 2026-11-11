@@ -15,7 +15,7 @@ import (
 
 func TestProjectReservationsBoundSnapshotsAndExcludePrivateData(t *testing.T) {
 	records := make([]container.Record, 129)
-	byID := map[string]container.Record{}
+	byID := make(map[string]container.Record)
 	for i := range records {
 		records[i] = container.Record{ID: fmt.Sprintf("%032x", i+1), Name: fmt.Sprintf("record-%d", i), State: container.StateRunning, Generation: uint64(i)}
 		byID[records[i].ID] = records[i]

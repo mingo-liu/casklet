@@ -18,7 +18,7 @@ import (
 )
 
 func deploymentContainers(plan project.Plan, records []container.Record) map[string]string {
-	ids := map[string]string{}
+	ids := make(map[string]string)
 	for _, service := range plan.Services {
 		for _, record := range records {
 			if record.Name == service.Name && record.Labels[project.LabelName] == plan.Name && record.Labels[project.LabelService] == service.Key {
@@ -31,7 +31,7 @@ func deploymentContainers(plan project.Plan, records []container.Record) map[str
 }
 
 func deploymentImages(ctx context.Context, plan project.Plan, records []container.Record, call project.Call) (map[string]string, error) {
-	images := map[string]string{}
+	images := make(map[string]string)
 	for _, service := range plan.Services {
 		if service.Config.Image == "" {
 			continue
@@ -71,11 +71,11 @@ func restoreDeployment(d project.Deployment) (project.Plan, error) {
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return plan, err
 	}
-	doc := project.Document{Name: plan.Name, Networks: []string{}, Volumes: []string{}, ExternalVolumes: map[string]string{}, Services: map[string]project.ServiceConfig{}}
+	doc := project.Document{Name: plan.Name, Networks: []string{}, Volumes: []string{}, ExternalVolumes: make(map[string]string), Services: make(map[string]project.ServiceConfig)}
 	for _, s := range plan.Services {
 		depends := s.DependsOn
 		if depends == nil {
-			depends = map[string]string{}
+			depends = make(map[string]string)
 		}
 		doc.Services[s.Key] = project.ServiceConfig{Task: s.Task, Run: json.RawMessage(`{}`), DependsOn: depends}
 	}
@@ -160,7 +160,7 @@ func restoreDeployment(d project.Deployment) (project.Plan, error) {
 		if len(names) > 16 {
 			return plan, errors.New("too many saved deployment resources")
 		}
-		seen := map[string]bool{}
+		seen := make(map[string]bool)
 		for _, name := range names {
 			if project.ValidateName(name) != nil || !strings.HasPrefix(name, "cp-"+plan.Name+"-") || seen[name] {
 				return plan, errors.New("invalid saved deployment resource")

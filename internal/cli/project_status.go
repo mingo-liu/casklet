@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/project"
@@ -17,14 +18,14 @@ func parseProjectStatus(args []string) (Request, error) {
 	if err := project.ValidateName(args[0]); err != nil {
 		return Request{}, err
 	}
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(args)-1)
 	for _, id := range args[1:] {
 		if id == "" || !validProjectCursor(id) || seen[id] {
 			return Request{}, errors.New("invalid project status ID selection")
 		}
 		seen[id] = true
 	}
-	return Request{Action: "project-status", Reference: args[0], References: args[1:]}, nil
+	return Request{Action: "project-status", Reference: args[0], References: slices.Clone(args[1:])}, nil
 }
 
 func executeProjectStatus(ctx context.Context, r Request, out io.Writer) error {
