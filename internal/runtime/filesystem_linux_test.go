@@ -49,30 +49,25 @@ func TestPrepareRetainedRootPublishesIndependentCopy(t *testing.T) {
 	}
 }
 
-func TestPrepareRetainedRootFailureRemovesStaging(t *testing.T) {
-	for _, failure := range []string{"canceled", "invalid source"} {
-		t.Run(failure, func(t *testing.T) {
-			parent, source := t.TempDir(), t.TempDir()
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			if failure == "canceled" {
-				cancel()
-			} else {
-				source = filepath.Join(source, "missing")
-			}
-			path, err := prepareRunRootFS(ctx, source, "", filepath.Join(parent, "rootfs"), false)
-			if path != "" || err == nil {
-				t.Fatalf("invalid preparation succeeded: %q, %v", path, err)
-			}
-			if failure == "canceled" && !errors.Is(err, context.Canceled) {
-				t.Fatalf("lost cancellation: %v", err)
-			}
-			entries, err := os.ReadDir(parent)
-			if err != nil || len(entries) != 0 {
-				t.Fatalf("partial root or staging directory leaked: %v, %v", entries, err)
-			}
-		})
+func TestCanceledRetainedRootPreparationRemovesStaging(t *testing.T) {
+	parent, source := t.TempDir(), t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	path, err := prepareRunRootFS(ctx, source, "", filepath.Join(parent, "rootfs"), false)
+	if path != "" || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled preparation: %q, %v", path, err)
 	}
+	assertNoRootFSStaging(t, parent)
+}
+
+func TestInvalidRetainedRootSourceRemovesStaging(t *testing.T) {
+	parent := t.TempDir()
+	source := filepath.Join(t.TempDir(), "missing")
+	path, err := prepareRunRootFS(context.Background(), source, "", filepath.Join(parent, "rootfs"), false)
+	if path != "" || err == nil {
+		t.Fatalf("invalid preparation succeeded: %q, %v", path, err)
+	}
+	assertNoRootFSStaging(t, parent)
 }
 
 func TestAcquireRunTemplateRejectsRetainedSymlink(t *testing.T) {
@@ -139,49 +134,81 @@ func TestAcquireLegacyRootIgnoresImageAndBackendMarkerFiles(t *testing.T) {
 	if err != nil || !ready || source.Path != retained {
 		t.Fatalf("legacy root requires missing source: %+v, %v, %v", source, ready, err)
 	}
-	source.Close()
+	_ = source.Close()
 }
 
-func TestAcquireRetainedOverlayRejectsDamageWithoutReinitializing(t *testing.T) {
-	for _, kind := range []string{"missing marker", "wrong image", "rootless", "userns", "storage symlink"} {
-		t.Run(kind, func(t *testing.T) {
-			retained := filepath.Join(t.TempDir(), "rootfs")
-			storage := rootfs.OverlayStoragePath(retained)
-			if err := os.Mkdir(storage, 0700); err != nil {
-				t.Fatal(err)
-			}
-			id := "sha256:" + strings.Repeat("a", 64)
-			if err := rootfs.CreateOverlayStorage(context.Background(), t.TempDir(), storage, id); err != nil {
-				t.Fatal(err)
-			}
-			cfg := config.Config{Image: id}
-			switch kind {
-			case "missing marker":
-				if err := os.Remove(filepath.Join(storage, ".casklet-overlay-v1.json")); err != nil {
-					t.Fatal(err)
-				}
-			case "wrong image":
-				cfg.Image = "sha256:" + strings.Repeat("b", 64)
-			case "rootless":
-				cfg.Rootless = true
-			case "userns":
-				cfg.UserNS = true
-			case "storage symlink":
-				other := storage + ".saved"
-				if err := os.Rename(storage, other); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(other, storage); err != nil {
-					t.Fatal(err)
-				}
-			}
-			source, ready, err := acquireRunTemplate(context.Background(), cfg, retained)
-			if err == nil || ready || source != nil {
-				t.Fatalf("damaged overlay accepted: %+v, %v, %v", source, ready, err)
-			}
-			if _, err := os.Lstat(retained); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("damaged overlay was reinitialized: %v", err)
-			}
+func TestAcquireRetainedOverlayRejectsMissingMarker(t *testing.T) {
+	retained, storage, id := retainedOverlayFixture(t)
+	if err := os.Remove(filepath.Join(storage, ".casklet-overlay-v1.json")); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedOverlayRejected(t, retained, config.Config{Image: id})
+}
+
+func TestAcquireRetainedOverlayRejectsWrongImage(t *testing.T) {
+	retained, _, _ := retainedOverlayFixture(t)
+	cfg := config.Config{Image: "sha256:" + strings.Repeat("b", 64)}
+	assertRetainedOverlayRejected(t, retained, cfg)
+}
+
+func TestAcquireRetainedOverlayRejectsUnprivilegedModes(t *testing.T) {
+	tests := []struct {
+		name                     string
+		giveRootless, giveUserNS bool
+	}{
+		{name: "rootless", giveRootless: true},
+		{name: "userns", giveUserNS: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retained, _, id := retainedOverlayFixture(t)
+			cfg := config.Config{Image: id, Rootless: tt.giveRootless, UserNS: tt.giveUserNS}
+			assertRetainedOverlayRejected(t, retained, cfg)
 		})
+	}
+}
+
+func TestAcquireRetainedOverlayRejectsStorageSymlink(t *testing.T) {
+	retained, storage, id := retainedOverlayFixture(t)
+	other := storage + ".saved"
+	if err := os.Rename(storage, other); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, storage); err != nil {
+		t.Fatal(err)
+	}
+	assertRetainedOverlayRejected(t, retained, config.Config{Image: id})
+}
+
+func assertNoRootFSStaging(t *testing.T, parent string) {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("partial root or staging directory leaked: %v, %v", entries, err)
+	}
+}
+
+func retainedOverlayFixture(t *testing.T) (string, string, string) {
+	t.Helper()
+	retained := filepath.Join(t.TempDir(), "rootfs")
+	storage := rootfs.OverlayStoragePath(retained)
+	if err := os.Mkdir(storage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	id := "sha256:" + strings.Repeat("a", 64)
+	if err := rootfs.CreateOverlayStorage(context.Background(), t.TempDir(), storage, id); err != nil {
+		t.Fatal(err)
+	}
+	return retained, storage, id
+}
+
+func assertRetainedOverlayRejected(t *testing.T, retained string, cfg config.Config) {
+	t.Helper()
+	source, ready, err := acquireRunTemplate(context.Background(), cfg, retained)
+	if err == nil || ready || source != nil {
+		t.Fatalf("damaged overlay accepted: %+v, %v, %v", source, ready, err)
+	}
+	if _, err := os.Lstat(retained); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("damaged overlay was reinitialized: %v", err)
 	}
 }

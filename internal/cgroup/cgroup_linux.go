@@ -16,9 +16,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const mountRoot = "/sys/fs/cgroup"
+const _mountRoot = "/sys/fs/cgroup"
 
-var creationMu sync.Mutex
+// Delegation migration changes process-wide state and must be serialized.
+var _creationMu sync.Mutex
 
 // Check validates a writable, exclusively owned systemd delegation without
 // modifying it. The CLI automatically creates a scope when needed.
@@ -27,9 +28,58 @@ func Check() error {
 	return err
 }
 
+// Create moves the supervisor to a manager leaf and creates one limited
+// workload leaf. Use a new delegated scope for every invocation.
+func Create(memory, pids, cpuQuota int64) (*Group, error) {
+	_creationMu.Lock()
+	defer _creationMu.Unlock()
+	if err := validateLimits(memory, pids, cpuQuota); err != nil {
+		return nil, err
+	}
+	dir, err := delegation(cpuQuota)
+	if err != nil {
+		return nil, err
+	}
+	manager := filepath.Join(dir, "manager")
+	if err := os.Mkdir(manager, 0700); err != nil {
+		return nil, fmt.Errorf("create manager cgroup: %w", err)
+	}
+	// Writing a PID to cgroup.procs migrates every thread, including Go threads.
+	if err := writeControl(filepath.Join(manager, "cgroup.procs"), strconv.Itoa(os.Getpid())); err != nil {
+		return nil, errors.Join(err, os.Remove(manager))
+	}
+	// Leave the populated manager leaf to systemd's scope teardown on failure.
+	procs, err := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	if err != nil {
+		return nil, fmt.Errorf("inspect delegation after migration: %w", err)
+	}
+	if len(strings.Fields(string(procs))) != 0 {
+		return nil, errors.New("delegated cgroup still contains processes after supervisor migration")
+	}
+	controllers := requiredControllers(cpuQuota)
+	if err := writeControl(filepath.Join(dir, "cgroup.subtree_control"), "+"+strings.Join(controllers, " +")); err != nil {
+		return nil, err
+	}
+	var id [12]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return nil, fmt.Errorf("generate cgroup ID: %w", err)
+	}
+	g := &Group{path: filepath.Join(dir, "container-"+hex.EncodeToString(id[:]))}
+	if err := os.Mkdir(g.path, 0700); err != nil {
+		return nil, fmt.Errorf("create workload cgroup: %w", err)
+	}
+	if err := configureLimits(g.path, memory, pids, cpuQuota, writeControl); err != nil {
+		return nil, errors.Join(err, g.Close())
+	}
+	if err := unix.Access(filepath.Join(g.path, "cgroup.kill"), unix.W_OK); err != nil {
+		return nil, errors.Join(fmt.Errorf("workload requires writable cgroup.kill: %w", err), g.Close())
+	}
+	return g, nil
+}
+
 func delegation(cpuQuota int64) (string, error) {
 	var fs unix.Statfs_t
-	if err := unix.Statfs(mountRoot, &fs); err != nil {
+	if err := unix.Statfs(_mountRoot, &fs); err != nil {
 		return "", fmt.Errorf("inspect cgroup mount: %w", err)
 	}
 	if fs.Type != unix.CGROUP2_SUPER_MAGIC {
@@ -43,7 +93,7 @@ func delegation(cpuQuota int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(mountRoot, relative)
+	dir := filepath.Join(_mountRoot, relative)
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil || resolved != dir {
 		return "", fmt.Errorf("cgroup path must exist without symlinks: %s", dir)
@@ -105,53 +155,4 @@ func delegation(cpuQuota int64) (string, error) {
 		}
 	}
 	return dir, nil
-}
-
-// Create moves the supervisor to a manager leaf and creates one limited
-// workload leaf. Use a new delegated scope for every invocation.
-func Create(memory, pids, cpuQuota int64) (*Group, error) {
-	creationMu.Lock()
-	defer creationMu.Unlock()
-	if err := validateLimits(memory, pids, cpuQuota); err != nil {
-		return nil, err
-	}
-	dir, err := delegation(cpuQuota)
-	if err != nil {
-		return nil, err
-	}
-	manager := filepath.Join(dir, "manager")
-	if err := os.Mkdir(manager, 0700); err != nil {
-		return nil, fmt.Errorf("create manager cgroup: %w", err)
-	}
-	// Writing a PID to cgroup.procs migrates every thread, including Go threads.
-	if err := writeControl(filepath.Join(manager, "cgroup.procs"), strconv.Itoa(os.Getpid())); err != nil {
-		return nil, errors.Join(err, os.Remove(manager))
-	}
-	// Leave the populated manager leaf to systemd's scope teardown on failure.
-	procs, err := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
-	if err != nil {
-		return nil, fmt.Errorf("inspect delegation after migration: %w", err)
-	}
-	if len(strings.Fields(string(procs))) != 0 {
-		return nil, errors.New("delegated cgroup still contains processes after supervisor migration")
-	}
-	controllers := requiredControllers(cpuQuota)
-	if err := writeControl(filepath.Join(dir, "cgroup.subtree_control"), "+"+strings.Join(controllers, " +")); err != nil {
-		return nil, err
-	}
-	var id [12]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return nil, fmt.Errorf("generate cgroup ID: %w", err)
-	}
-	g := &Group{path: filepath.Join(dir, "container-"+hex.EncodeToString(id[:]))}
-	if err := os.Mkdir(g.path, 0700); err != nil {
-		return nil, fmt.Errorf("create workload cgroup: %w", err)
-	}
-	if err := configureLimits(g.path, memory, pids, cpuQuota, writeControl); err != nil {
-		return nil, errors.Join(err, g.Close())
-	}
-	if err := unix.Access(filepath.Join(g.path, "cgroup.kill"), unix.W_OK); err != nil {
-		return nil, errors.Join(fmt.Errorf("workload requires writable cgroup.kill: %w", err), g.Close())
-	}
-	return g, nil
 }

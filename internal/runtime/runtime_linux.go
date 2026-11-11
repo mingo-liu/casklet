@@ -39,7 +39,7 @@ func RunWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 
 // RunManaged retains the private rootfs while isolating transient run resources.
 func RunManaged(cfg config.Config, stdin, stdout, stderr *os.File, observer Observer, executor Executor, retainedRoot string, stoppingTimeout func() time.Duration) (int, ExitStatus, error) {
-	status := ExitStatus{}
+	var status ExitStatus
 	code, err := runWithExec(cfg, stdin, stdout, stderr, observer, executor, retainedRoot, stoppingTimeout, &status)
 	return code, status, err
 }
@@ -61,13 +61,15 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, fmt.Errorf("interactive TTY requires terminal stdin: %w", err)
 		}
 	}
+	// Buffer short bursts during preparation; Notify may coalesce excess signals.
 	incomingSignals := make(chan os.Signal, 8)
-	signals := make(chan os.Signal, 8)
+	// A full relay queue can block only until its consumer or shutdown proceeds.
+	signals := make(chan syscall.Signal, 8)
 	// Remote clients and their watchdogs forward these signals for every run.
 	// Catch them before preparation so cancellation still performs cleanup.
 	signal.Notify(incomingSignals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer signal.Stop(incomingSignals)
-	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), startupLimit)
+	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), _startupLimit)
 	defer cancelPrepare()
 	signalDone := make(chan struct{})
 	signalStopped := make(chan struct{})
@@ -79,7 +81,11 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		defer close(signalStopped)
 		for {
 			select {
-			case sig := <-incomingSignals:
+			case incoming := <-incomingSignals:
+				sig, ok := incoming.(syscall.Signal)
+				if !ok {
+					continue
+				}
 				select {
 				case signals <- sig:
 					// Queue the signal before cancellation so failed preparation can
@@ -101,18 +107,18 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		return preparationError(err, signals)
 	}
 	if namedLease != nil {
-		defer namedLease.Close()
+		defer func() { _ = namedLease.Close() }()
 	}
 	volumes, err := volume.AcquireMounts(prepareCtx, cfg.Mounts)
 	if err != nil {
 		return preparationError(err, signals)
 	}
-	defer volumes.Close()
+	defer func() { _ = volumes.Close() }()
 	source, retainedReady, err := acquireRunTemplate(prepareCtx, cfg, retainedRoot)
 	if err != nil {
 		return preparationError(err, signals)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	cfg.RootFS = source.Path
 	if err := checkConfig(cfg); err != nil {
 		return code, err
@@ -131,7 +137,6 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			defer networkLease.Close()
 		}
 		if err := run.remove(); err != nil {
-			fmt.Fprintf(stderr, "casklet: cleanup %s: %v\n", run.path, err)
 			runErr = errors.Join(runErr, cleanupFailure("run.remove", err))
 		}
 	}()
@@ -182,28 +187,25 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			return code, err
 		}
 		if config.IsNamedNetwork(cfg.Network) {
-			var r network.Record
-			store, e := network.OpenStore()
-			if e != nil {
-				return code, e
+			store, err := network.OpenStore()
+			if err != nil {
+				return code, err
 			}
-			r, e = store.Inspect(prepareCtx, cfg.Network)
-			if e != nil {
-				return code, e
+			record, err := store.Inspect(prepareCtx, cfg.Network)
+			if err != nil {
+				return code, err
 			}
-			servers = []string{r.Gateway}
+			servers = []string{record.Gateway}
 		}
 		if overlay != nil {
 			overlayDNS = servers
-		} else {
-			if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
-				return code, fmt.Errorf("configure DNS: %w", err)
-			}
+		} else if err := rootfs.ConfigureDNS(cfg.RootFS, servers); err != nil {
+			return code, fmt.Errorf("configure DNS: %w", err)
 		}
 	}
 	select {
 	case sig := <-signals:
-		return 128 + int(sig.(syscall.Signal)), nil
+		return 128 + int(sig), nil
 	default:
 	}
 	group, err := cgroup.Create(cfg.Memory, cfg.PidsLimit, cfg.CPUQuota)
@@ -218,8 +220,10 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := run.record(group.Path()); err != nil {
 		return code, err
 	}
-	var namespaces []*os.File
-	var executable *os.File
+	var (
+		namespaces []*os.File
+		executable *os.File
+	)
 	if executor != nil {
 		if cfg.TTY {
 			return code, errors.New("managed exec is unavailable for terminal runs")
@@ -228,7 +232,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			runErr = errors.Join(runErr, cleanupFailure("exec.close", executor.Close()))
 			ipc.CloseFiles(namespaces)
 			if executable != nil {
-				executable.Close()
+				_ = executable.Close()
 			}
 		}()
 	}
@@ -244,8 +248,8 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 	control := os.NewFile(uintptr(fds[0]), "supervisor-control")
 	childControl := os.NewFile(uintptr(fds[1]), "init-control")
-	defer control.Close()
-	defer childControl.Close()
+	defer func() { _ = control.Close() }()
+	defer func() { _ = childControl.Close() }()
 	exe, err := os.Executable()
 	if err != nil {
 		return code, err
@@ -263,10 +267,10 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		if err != nil {
 			return code, err
 		}
-		defer input.Close()
+		defer func() { _ = input.Close() }()
 		cmd.Stdin = input
 	}
-	cmd.Env = baseEnvironment
+	cmd.Env = baseEnvironment()
 	cmd.ExtraFiles = []*os.File{childControl, run.lock}
 	var terminalSocket, childTerminal *os.File
 	if cfg.TTY || executor != nil {
@@ -276,8 +280,8 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		}
 		terminalSocket = os.NewFile(uintptr(fds[0]), "terminal-control")
 		childTerminal = os.NewFile(uintptr(fds[1]), "init-terminal-control")
-		defer terminalSocket.Close()
-		defer childTerminal.Close()
+		defer func() { _ = terminalSocket.Close() }()
+		defer func() { _ = childTerminal.Close() }()
 		cmd.ExtraFiles = append(cmd.ExtraFiles, childTerminal)
 	}
 
@@ -286,7 +290,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		if err != nil {
 			return code, err
 		}
-		defer binary.Close()
+		defer func() { _ = binary.Close() }()
 		cmd.ExtraFiles = append(cmd.ExtraFiles, binary)
 		cmd.Path = fmt.Sprintf("/proc/self/fd/%d", 2+len(cmd.ExtraFiles))
 	}
@@ -308,11 +312,11 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			_ = cmd.Wait()
 			return code, fmt.Errorf("pin container network namespace: %w", err)
 		}
-		defer networkNamespace.Close()
+		defer func() { _ = networkNamespace.Close() }()
 	}
-	childControl.Close()
+	_ = childControl.Close()
 	if childTerminal != nil {
-		childTerminal.Close()
+		_ = childTerminal.Close()
 	}
 	waited := make(chan error, 1)
 	waitConsumed := false
@@ -321,13 +325,14 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		// After the main loop, guarantee Wait has reaped init before disk cleanup.
 		if !waitConsumed {
 			if err := group.Kill(); err != nil {
-				fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
 				_ = cmd.Process.Kill()
 			}
 			select {
-			case <-waited:
+			//lint:ignore S1005 Cleanup only needs to join init here; normal completion checks its status.
+			case _ = <-waited:
 				waitConsumed = true
-			case <-time.After(stopGrace):
+			case <-time.After(_stopGrace):
 				run.keep = true
 				runErr = errors.Join(runErr, cleanupFailure("init.wait", errors.New("init did not exit before the cleanup deadline")))
 			}
@@ -335,7 +340,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}()
 	if err := group.Add(cmd.Process.Pid); err != nil {
 		// Init may still be outside the workload cgroup on a failed migration.
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		return code, fmt.Errorf("attach init to cgroup: %w", err)
 	}
 	if cfg.NetworkMode() != "none" {
@@ -345,7 +350,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		}
 	}
 	encoder := json.NewEncoder(control)
-	if err := control.SetWriteDeadline(time.Now().Add(startupLimit)); err != nil {
+	if err := control.SetWriteDeadline(time.Now().Add(_startupLimit)); err != nil {
 		return code, err
 	}
 	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg, ExecEnabled: executor != nil, Overlay: overlay, DNS: overlayDNS, ImageLease: overlay != nil}); err != nil {
@@ -353,10 +358,12 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 	events, stopEvents := startControlEvents(control)
 	defer stopEvents()
-	startupTimer := time.NewTimer(startupLimit)
+	startupTimer := time.NewTimer(_startupLimit)
 	defer startupTimer.Stop()
-	var timeoutTimer, killTimer *time.Timer
-	var timeout, kill <-chan time.Time
+	var (
+		timeoutTimer, killTimer *time.Timer
+		timeout, kill           <-chan time.Time
+	)
 	defer func() {
 		if timeoutTimer != nil {
 			timeoutTimer.Stop()
@@ -418,7 +425,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 					}
 					bridge, err := startTerminalBridge(master, stdin, stdout, cfg.Interactive)
 					if err != nil {
-						master.Close()
+						_ = master.Close()
 						return 125, err
 					}
 					terminalErrors = bridge.errors
@@ -499,7 +506,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 			if !authorized {
 				// No command can have started before authorization. Abort setup
 				// promptly rather than leaving init blocked on its start message.
-				return 128 + int(sig.(syscall.Signal)), nil
+				return 128 + int(sig), nil
 			}
 			grace := cfg.StoppingTimeout()
 			if sig == syscall.SIGTERM && stoppingTimeout != nil {
@@ -530,7 +537,7 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 		case <-kill:
 			kill = nil
 			if err := group.Kill(); err != nil {
-				fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
+				_, _ = fmt.Fprintf(stderr, "casklet: stop init after cgroup kill failure: %v\n", err)
 				if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 					return 125, fmt.Errorf("force container shutdown: %w", err)
 				}
@@ -541,10 +548,10 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	}
 }
 
-func preparationError(err error, signals <-chan os.Signal) (int, error) {
+func preparationError(err error, signals <-chan syscall.Signal) (int, error) {
 	select {
 	case sig := <-signals:
-		return 128 + int(sig.(syscall.Signal)), nil
+		return 128 + int(sig), nil
 	default:
 		return 125, err
 	}

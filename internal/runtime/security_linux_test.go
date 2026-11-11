@@ -56,24 +56,25 @@ func TestSeccompPolicy(t *testing.T) {
 		return 0
 	}
 	denied := uint32(unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM))
-	for _, test := range []struct{ nr, arch, arg0, arg1, want uint32 }{
-		{unix.SYS_READ, arch, 0, 0, unix.SECCOMP_RET_ALLOW},
-		{unix.SYS_EXECVE, arch, 0, 0, unix.SECCOMP_RET_ALLOW},
-		{unix.SYS_UNSHARE, arch, 0, 0, denied},
-		{unix.SYS_SETNS, arch, 0, 0, denied},
-		{unix.SYS_BPF, arch, 0, 0, denied},
-		{unix.SYS_IO_URING_SETUP, arch, 0, 0, denied},
-		{unix.SYS_CLONE, arch, unix.CLONE_VM | unix.CLONE_THREAD, 0, unix.SECCOMP_RET_ALLOW},
-		{unix.SYS_CLONE, arch, unix.CLONE_NEWUSER, 0, denied},
-		{unix.SYS_CLONE, arch, unix.CLONE_NEWPID, 0, denied},
-		{unix.SYS_CLONE3, arch, 0, 0, unix.SECCOMP_RET_ERRNO | uint32(unix.ENOSYS)},
-		{unix.SYS_IOCTL, arch, 0, unix.TIOCSTI, denied},
-		{unix.SYS_IOCTL, arch, 0, unix.TIOCLINUX, denied},
-		{unix.SYS_IOCTL, arch, 0, unix.TIOCGWINSZ, unix.SECCOMP_RET_ALLOW},
-		{unix.SYS_READ, 0, 0, 0, unix.SECCOMP_RET_KILL_PROCESS},
-	} {
-		if got := evaluate(test.nr, test.arch, test.arg0, test.arg1); got != test.want {
-			t.Fatalf("%+v: action %#x", test, got)
+	tests := []struct{ nr, arch, arg0, arg1, want uint32 }{
+		{nr: unix.SYS_READ, arch: arch, arg0: 0, arg1: 0, want: unix.SECCOMP_RET_ALLOW},
+		{nr: unix.SYS_EXECVE, arch: arch, arg0: 0, arg1: 0, want: unix.SECCOMP_RET_ALLOW},
+		{nr: unix.SYS_UNSHARE, arch: arch, arg0: 0, arg1: 0, want: denied},
+		{nr: unix.SYS_SETNS, arch: arch, arg0: 0, arg1: 0, want: denied},
+		{nr: unix.SYS_BPF, arch: arch, arg0: 0, arg1: 0, want: denied},
+		{nr: unix.SYS_IO_URING_SETUP, arch: arch, arg0: 0, arg1: 0, want: denied},
+		{nr: unix.SYS_CLONE, arch: arch, arg0: unix.CLONE_VM | unix.CLONE_THREAD, arg1: 0, want: unix.SECCOMP_RET_ALLOW},
+		{nr: unix.SYS_CLONE, arch: arch, arg0: unix.CLONE_NEWUSER, arg1: 0, want: denied},
+		{nr: unix.SYS_CLONE, arch: arch, arg0: unix.CLONE_NEWPID, arg1: 0, want: denied},
+		{nr: unix.SYS_CLONE3, arch: arch, arg0: 0, arg1: 0, want: unix.SECCOMP_RET_ERRNO | uint32(unix.ENOSYS)},
+		{nr: unix.SYS_IOCTL, arch: arch, arg0: 0, arg1: unix.TIOCSTI, want: denied},
+		{nr: unix.SYS_IOCTL, arch: arch, arg0: 0, arg1: unix.TIOCLINUX, want: denied},
+		{nr: unix.SYS_IOCTL, arch: arch, arg0: 0, arg1: unix.TIOCGWINSZ, want: unix.SECCOMP_RET_ALLOW},
+		{nr: unix.SYS_READ, arch: 0, arg0: 0, arg1: 0, want: unix.SECCOMP_RET_KILL_PROCESS},
+	}
+	for _, tt := range tests {
+		if got := evaluate(tt.nr, tt.arch, tt.arg0, tt.arg1); got != tt.want {
+			t.Fatalf("%+v: action %#x", tt, got)
 		}
 	}
 	if runtime.GOARCH == "amd64" && evaluate(0x40000000|unix.SYS_READ, arch, 0, 0) != unix.SECCOMP_RET_KILL_PROCESS {
@@ -94,6 +95,7 @@ func TestSeccompThreadSynchronization(t *testing.T) {
 	}
 	var ready, done sync.WaitGroup
 	start := make(chan struct{})
+	// Each worker can report at most one failure before the parent drains them.
 	failures := make(chan error, 8)
 	for i := 0; i < 8; i++ {
 		ready.Add(1)

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/mingo-liu/casklet/internal/cgroup"
 )
 
 type workloadCleanup interface {
@@ -17,8 +19,10 @@ type workloadCleanup interface {
 	Close() error
 }
 
+var _ workloadCleanup = (*cgroup.Group)(nil)
+
 func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), stopGrace)
+	ctx, cancel := context.WithTimeout(context.Background(), _stopGrace)
 	defer cancel()
 	var result error
 	if err := group.Kill(); err != nil {
@@ -33,7 +37,7 @@ func cleanupWorkload(group workloadCleanup, run *runDirectory, stderr io.Writer)
 		oom = false
 	}
 	if oom {
-		fmt.Fprintln(stderr, "casklet: container exceeded its memory limit (OOM)")
+		_, _ = fmt.Fprintln(stderr, "casklet: container exceeded its memory limit (OOM)")
 	}
 	if err := group.Close(); err != nil {
 		// Keep the cgroup identity for a later recovery attempt even when empty.

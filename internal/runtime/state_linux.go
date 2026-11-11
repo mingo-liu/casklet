@@ -12,18 +12,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/cgroup"
 	"github.com/mingo-liu/casklet/internal/network"
-
 	"golang.org/x/sys/unix"
 )
 
 const (
-	runsRoot         = "/var/lib/casklet/runs"
-	maxStateBytes    = 4096
-	runRecoveryLimit = 2 * time.Second
+	_runsRoot         = "/var/lib/casklet/runs"
+	_maxStateBytes    = 4096
+	_runRecoveryLimit = 2 * time.Second
 )
 
 var errRunPopulated = errors.New("recorded cgroup still contains processes")
@@ -40,88 +40,30 @@ type runMetadata struct {
 	Cgroup string `json:"cgroup"`
 }
 
-func secureDirectory(path string) error { return ownedDirectory(path, uint32(os.Geteuid())) }
+type statePaths struct {
+	runsRoot, cgroupRoot, mountInfo string
+	checkDirectory                  func(string) error
+}
 
-func ownedDirectory(path string, owner uint32) error {
-	info, err := os.Lstat(path)
-	if err != nil {
+// RecoverAbandoned honors run locks and reclaims only verified stale resources.
+func RecoverAbandoned(ctx context.Context, stderr io.Writer) error {
+	return recoverRuns(ctx, stderr)
+}
+
+// RecoverRun reclaims only an abandoned foreground working directory. A live
+// init retains its run lock, so background management cannot remove its rootfs.
+func RecoverRun(ctx context.Context, path string) error {
+	paths := productionStatePaths()
+	if err := validateRunPath(paths.runsRoot, path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
-	stat, ok := info.Sys().(*unix.Stat_t)
-	// os.FileInfo uses syscall.Stat_t, whose type is not unix.Stat_t.
-	var actual unix.Stat_t
-	if !ok {
-		if err := unix.Lstat(path, &actual); err != nil {
-			return err
-		}
-		stat = &actual
-	}
-	if !info.IsDir() || info.Mode().Perm()&0022 != 0 || stat.Uid != owner {
-		return fmt.Errorf("runtime directory must be real, owned by UID %d, and not writable by group or others: %s", owner, path)
-	}
-	return nil
-}
-
-func ensureRunsRoot() error {
-	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", runsRoot} {
-		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
-			return err
-		}
-		if err := secureDirectory(dir); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func openRunLock(path string, create bool) (*os.File, error) {
-	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
-	if create {
-		flags |= unix.O_CREAT | unix.O_EXCL
-	}
-	fd, err := unix.Open(path, flags, 0600)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), "run-lock")
-	info, err := f.Stat()
-	var stat unix.Stat_t
-	statErr := unix.Fstat(fd, &stat)
-	if err != nil || statErr != nil || !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&0022 != 0 {
-		f.Close()
-		return nil, fmt.Errorf("invalid run lock: %s", path)
-	}
-	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		f.Close()
-		return nil, err
-	}
-	return f, nil
-}
-
-func createRun(ctx context.Context) (*runDirectory, error) {
 	if err := ensureRunsRoot(); err != nil {
-		return nil, err
+		return err
 	}
-	return createRunAt(ctx, runsRoot)
-}
-
-func createRunAt(ctx context.Context, root string) (*runDirectory, error) {
-	coordination, err := acquireStateLock(ctx, root, false)
-	if err != nil {
-		return nil, err
-	}
-	defer coordination.Close()
-	// Recovery cannot inspect a new directory until its own lock is held.
-	path, err := os.MkdirTemp(root, "run-")
-	if err != nil {
-		return nil, err
-	}
-	lock, err := openRunLock(filepath.Join(path, "lock"), true)
-	if err != nil {
-		os.RemoveAll(path)
-		return nil, err
-	}
-	return &runDirectory{path: path, root: root, lock: lock, owner: uint32(os.Geteuid())}, nil
+	return recoverRunAt(ctx, path, paths)
 }
 
 func (run *runDirectory) record(group string) error {
@@ -133,13 +75,13 @@ func (run *runDirectory) record(group string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
@@ -150,7 +92,7 @@ func (run *runDirectory) record(group string) error {
 }
 
 func (run *runDirectory) remove() error {
-	defer run.lock.Close()
+	defer func() { _ = run.lock.Close() }()
 	if run.keep {
 		return nil
 	}
@@ -160,12 +102,71 @@ func (run *runDirectory) remove() error {
 	if err := ownedDirectory(run.path, run.owner); err != nil {
 		return err
 	}
-	if run.root == runsRoot {
+	if run.root == _runsRoot {
 		if err := network.Cleanup(run.path); err != nil {
 			return fmt.Errorf("network cleanup: %w", err)
 		}
 	}
 	return os.RemoveAll(run.path)
+}
+
+func recoverExecutionRuns(ctx context.Context, stderr io.Writer, rootless, userns bool) error {
+	root, err := executionRunsRoot(rootless, userns)
+	if err != nil {
+		return err
+	}
+	paths := productionStatePaths()
+	paths.runsRoot = root
+	if userns && !rootless {
+		paths.checkDirectory = func(path string) error {
+			var stat unix.Stat_t
+			if err := unix.Lstat(path, &stat); err != nil {
+				return err
+			}
+			return ownedDirectory(path, stat.Uid)
+		}
+	}
+	return recoverRunsAt(ctx, stderr, paths)
+}
+
+func createExecutionRun(ctx context.Context, rootless, userns bool) (*runDirectory, error) {
+	root, err := executionRunsRoot(rootless, userns)
+	if err != nil {
+		return nil, err
+	}
+	return createRunAt(ctx, root)
+}
+
+// Rootless state lives under the login manager's per-user runtime directory.
+// Ignore XDG_RUNTIME_DIR so an environment override cannot redirect recovery.
+func executionRunsRoot(rootless, userns bool) (string, error) {
+	if !rootless {
+		if !userns {
+			return _runsRoot, ensureRunsRoot()
+		}
+		root := "/tmp/casklet-userns"
+		if err := os.Mkdir(root, 0711); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		if err := secureDirectory(root); err != nil {
+			return "", err
+		}
+		return root, nil
+	}
+	base := fmt.Sprintf("/run/user/%d", os.Geteuid())
+	if err := secureDirectory(base); err != nil {
+		return "", fmt.Errorf("rootless requires a login session with a private /run/user directory: %w", err)
+	}
+	root := filepath.Join(base, "casklet", "runs")
+	for _, dir := range []string{filepath.Dir(root), root} {
+		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return "", err
+		}
+		if err := secureDirectory(dir); err != nil {
+			return "", err
+		}
+	}
+	return root, nil
 }
 
 func recoverRuns(ctx context.Context, stderr io.Writer) error {
@@ -197,50 +198,22 @@ func recoverRunsAt(ctx context.Context, stderr io.Writer, paths statePaths) erro
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			fmt.Fprintf(stderr, "casklet: leave unrecognized run directory %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(stderr, "casklet: leave unrecognized run directory %s: %v\n", path, err)
 			continue
 		}
 		if err := reclaimRunAt(path, paths); err != nil {
-			fmt.Fprintf(stderr, "casklet: preserve stale run %s: %v\n", path, err)
+			_, _ = fmt.Fprintf(stderr, "casklet: preserve stale run %s: %v\n", path, err)
 		}
-		lock.Close()
+		_ = lock.Close()
 	}
 	return nil
-}
-
-func productionStatePaths() statePaths {
-	return statePaths{
-		runsRoot: runsRoot, cgroupRoot: "/sys/fs/cgroup", mountInfo: "/proc/self/mountinfo",
-		checkDirectory: secureDirectory,
-	}
-}
-
-// RecoverAbandoned honors run locks and reclaims only verified stale resources.
-func RecoverAbandoned(ctx context.Context, stderr io.Writer) error {
-	return recoverRuns(ctx, stderr)
-}
-
-// RecoverRun reclaims only an abandoned foreground working directory. A live
-// init retains its run lock, so background management cannot remove its rootfs.
-func RecoverRun(ctx context.Context, path string) error {
-	paths := productionStatePaths()
-	if err := validateRunPath(paths.runsRoot, path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	if err := ensureRunsRoot(); err != nil {
-		return err
-	}
-	return recoverRunAt(ctx, path, paths)
 }
 
 // Recovery can overlap another scanner or the final kernel teardown of a
 // stopped unit. Wait briefly for those owners; every attempt still acquires the
 // usage lock and verifies the cgroup before removing any storage.
 func recoverRunAt(ctx context.Context, path string, paths statePaths) error {
-	bounded, cancel := context.WithTimeout(ctx, runRecoveryLimit)
+	bounded, cancel := context.WithTimeout(ctx, _runRecoveryLimit)
 	defer cancel()
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
@@ -269,7 +242,7 @@ func recoverRunAt(ctx context.Context, path string, paths statePaths) error {
 			err = fmt.Errorf("lock abandoned container resources: %w", err)
 		} else {
 			err = reclaimRunAt(path, paths)
-			lock.Close()
+			_ = lock.Close()
 		}
 		if err == nil {
 			return nil
@@ -298,9 +271,83 @@ func recoverRunAt(ctx context.Context, path string, paths statePaths) error {
 	}
 }
 
-type statePaths struct {
-	runsRoot, cgroupRoot, mountInfo string
-	checkDirectory                  func(string) error
+func productionStatePaths() statePaths {
+	return statePaths{
+		runsRoot: _runsRoot, cgroupRoot: "/sys/fs/cgroup", mountInfo: "/proc/self/mountinfo",
+		checkDirectory: secureDirectory,
+	}
+}
+
+func createRunAt(ctx context.Context, root string) (*runDirectory, error) {
+	coordination, err := acquireStateLock(ctx, root, false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = coordination.Close() }()
+	// Recovery cannot inspect a new directory until its own lock is held.
+	path, err := os.MkdirTemp(root, "run-")
+	if err != nil {
+		return nil, err
+	}
+	lock, err := openRunLock(filepath.Join(path, "lock"), true)
+	if err != nil {
+		_ = os.RemoveAll(path)
+		return nil, err
+	}
+	return &runDirectory{path: path, root: root, lock: lock, owner: uint32(os.Geteuid())}, nil
+}
+
+func secureDirectory(path string) error { return ownedDirectory(path, uint32(os.Geteuid())) }
+
+func ownedDirectory(path string, owner uint32) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat == nil {
+		return errors.New("runtime directory ownership metadata is unavailable")
+	}
+	if !info.IsDir() || info.Mode().Perm()&0022 != 0 || stat.Uid != owner {
+		return fmt.Errorf("runtime directory must be real, owned by UID %d, and not writable by group or others: %s", owner, path)
+	}
+	return nil
+}
+
+func ensureRunsRoot() error {
+	for _, dir := range []string{"/var", "/var/lib", "/var/lib/casklet", _runsRoot} {
+		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := secureDirectory(dir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func openRunLock(path string, create bool) (*os.File, error) {
+	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
+	if create {
+		flags |= unix.O_CREAT | unix.O_EXCL
+	}
+	fd, err := unix.Open(path, flags, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), "run-lock")
+	info, err := f.Stat()
+	var stat unix.Stat_t
+	statErr := unix.Fstat(fd, &stat)
+	if err != nil || statErr != nil || !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&0022 != 0 {
+		_ = f.Close()
+		return nil, fmt.Errorf("invalid run lock: %s", path)
+	}
+	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 func lockRecoveryCandidate(ctx context.Context, path string, paths statePaths) (*os.File, error) {
@@ -308,7 +355,7 @@ func lockRecoveryCandidate(ctx context.Context, path string, paths statePaths) (
 	if err != nil {
 		return nil, err
 	}
-	defer coordination.Close()
+	defer func() { _ = coordination.Close() }()
 	if err := paths.checkDirectory(path); err != nil {
 		return nil, err
 	}
@@ -329,11 +376,11 @@ func acquireStateLock(ctx context.Context, root string, shared bool) (*os.File, 
 	file := os.NewFile(uintptr(fd), "state-coordination")
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&0022 != 0 || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
-		file.Close()
+		_ = file.Close()
 		return nil, errors.New("state coordination lock must be a singly linked regular file owned by the current user without group or other write permissions")
 	}
 	operation := unix.LOCK_EX
@@ -344,7 +391,7 @@ func acquireStateLock(ctx context.Context, root string, shared bool) (*os.File, 
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(fd, operation|unix.LOCK_NB)
@@ -352,12 +399,12 @@ func acquireStateLock(ctx context.Context, root string, shared bool) (*os.File, 
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
@@ -442,7 +489,7 @@ func reclaimRunAt(path string, paths statePaths) error {
 			}
 		}
 	}
-	if paths.runsRoot == runsRoot {
+	if paths.runsRoot == _runsRoot {
 		if err := network.Cleanup(path); err != nil {
 			return fmt.Errorf("recover network: %w", err)
 		}
@@ -458,7 +505,7 @@ func readRunState(path string) ([]byte, error) {
 		return nil, err
 	}
 	file := os.NewFile(uintptr(fd), "run-state")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -470,14 +517,14 @@ func readRunState(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() || stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 || stat.Mode&0022 != 0 {
 		return nil, errors.New("run state must be a singly linked regular file owned by the supervisor without group or other write permissions")
 	}
-	if info.Size() > maxStateBytes {
+	if info.Size() > _maxStateBytes {
 		return nil, errors.New("run state exceeds the size limit")
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxStateBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, _maxStateBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > maxStateBytes {
+	if len(data) > _maxStateBytes {
 		return nil, errors.New("run state exceeds the size limit")
 	}
 	return data, nil
@@ -508,63 +555,4 @@ func cgroupEmpty(events string) (bool, error) {
 		return false, errors.New("missing populated counter")
 	}
 	return empty, nil
-}
-
-// Rootless state lives under the login manager's per-user runtime directory.
-// Ignore XDG_RUNTIME_DIR so an environment override cannot redirect recovery.
-func executionRunsRoot(rootless, userns bool) (string, error) {
-	if !rootless {
-		if !userns {
-			return runsRoot, ensureRunsRoot()
-		}
-		root := "/tmp/casklet-userns"
-		if err := os.Mkdir(root, 0711); err != nil && !errors.Is(err, os.ErrExist) {
-			return "", err
-		}
-		if err := secureDirectory(root); err != nil {
-			return "", err
-		}
-		return root, nil
-	}
-	base := fmt.Sprintf("/run/user/%d", os.Geteuid())
-	if err := secureDirectory(base); err != nil {
-		return "", fmt.Errorf("rootless requires a login session with a private /run/user directory: %w", err)
-	}
-	root := filepath.Join(base, "casklet", "runs")
-	for _, dir := range []string{filepath.Dir(root), root} {
-		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
-			return "", err
-		}
-		if err := secureDirectory(dir); err != nil {
-			return "", err
-		}
-	}
-	return root, nil
-}
-
-func createExecutionRun(ctx context.Context, rootless, userns bool) (*runDirectory, error) {
-	root, err := executionRunsRoot(rootless, userns)
-	if err != nil {
-		return nil, err
-	}
-	return createRunAt(ctx, root)
-}
-
-func recoverExecutionRuns(ctx context.Context, stderr io.Writer, rootless, userns bool) error {
-	root, err := executionRunsRoot(rootless, userns)
-	if err != nil {
-		return err
-	}
-	paths := productionStatePaths()
-	paths.runsRoot = root
-	if userns && !rootless {
-		paths.checkDirectory = func(path string) error {
-			var stat unix.Stat_t
-			if err := unix.Lstat(path, &stat); err != nil {
-				return err
-			}
-			return ownedDirectory(path, stat.Uid)
-		}
-	}
-	return recoverRunsAt(ctx, stderr, paths)
 }

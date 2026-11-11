@@ -14,12 +14,11 @@ import (
 )
 
 const (
-	namespaceFlags = unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWIPC | unix.CLONE_NEWNET
-	startupLimit   = 30 * time.Second
-	stopGrace      = 5 * time.Second
+	_namespaceFlags       = unix.CLONE_NEWPID | unix.CLONE_NEWNS | unix.CLONE_NEWUTS | unix.CLONE_NEWIPC | unix.CLONE_NEWNET
+	_startupLimit         = 30 * time.Second
+	_stopGrace            = 5 * time.Second
+	_terminalPollInterval = 100 * time.Millisecond
 )
-
-var baseEnvironment = []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 
 type message struct {
 	Kind        string          `json:"kind"`
@@ -65,4 +64,8 @@ func startControlEvents(control *os.File) (<-chan message, func()) {
 		})
 		<-done
 	}
+}
+
+func baseEnvironment() []string {
+	return []string{"PATH=/bin:/usr/bin", "HOME=/", "LANG=C"}
 }

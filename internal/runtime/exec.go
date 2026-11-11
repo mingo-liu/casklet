@@ -14,6 +14,7 @@ type ExecTerminal func(context.Context, *os.File) error
 
 // ExecResources pins a live container's namespaces, root, and executable.
 // Namespace descriptors are ordered mount, UTS, IPC, network, and PID.
+// Descriptors and configuration collections are borrowed until Executor.Close returns.
 type ExecResources struct {
 	Namespaces []*os.File
 	Root       *os.File
