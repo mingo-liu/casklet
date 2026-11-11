@@ -38,8 +38,8 @@ func fixture() (v1.Image, error) {
 		name string
 		data []byte
 	}{
-		{"bin/busybox", toolbox},
-		{"fixture", []byte(nonce)},
+		{name: "bin/busybox", data: toolbox},
+		{name: "fixture", data: []byte(nonce)},
 	} {
 		var archive bytes.Buffer
 		writer := tar.NewWriter(&archive)
@@ -52,7 +52,9 @@ func fixture() (v1.Image, error) {
 		if err := writer.Close(); err != nil {
 			return nil, err
 		}
-		layer, err := tarball.LayerFromReader(bytes.NewReader(archive.Bytes()))
+		layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(archive.Bytes())), nil
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -79,7 +81,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var mutex sync.Mutex
-	downloads := map[string]int{}
+	downloads := make(map[string]int)
 	registryHandler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
 	var authentication atomic.Bool
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,11 +134,11 @@ func main() {
 		authentication.Store(true)
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(struct {
-		References []string
-		PID        int
-		Layers     []string
-		MetricsURL string
-	}{refs, os.Getpid(), layers, "http://" + listener.Addr().String() + "/casklet-test-downloads"}); err != nil {
+		References []string `json:"References"`
+		PID        int      `json:"PID"`
+		Layers     []string `json:"Layers"`
+		MetricsURL string   `json:"MetricsURL"`
+	}{References: refs, PID: os.Getpid(), Layers: layers, MetricsURL: "http://" + listener.Addr().String() + "/casklet-test-downloads"}); err != nil {
 		log.Fatal(err)
 	}
 	select {}

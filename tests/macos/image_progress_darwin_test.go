@@ -21,10 +21,10 @@ import (
 )
 
 type registryFixture struct {
-	References []string
-	PID        int
-	Layers     []string
-	MetricsURL string
+	References []string `json:"References"`
+	PID        int      `json:"PID"`
+	Layers     []string `json:"Layers"`
+	MetricsURL string   `json:"MetricsURL"`
 }
 
 func TestImagePullProgressThroughVMAndHostTerminal(t *testing.T) {
