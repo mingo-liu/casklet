@@ -14,22 +14,15 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 	"github.com/mingo-liu/casklet/internal/template"
 	"github.com/mingo-liu/casklet/internal/volume"
 )
 
 const (
-	detachedStartupLimit = 95 * time.Second
-	managementStopLimit  = 35 * time.Second
+	_detachedStartupLimit = 95 * time.Second
+	_managementStopLimit  = 35 * time.Second
 )
-
-func managementStore(ctx context.Context) (*Store, error) {
-	if err := checkSystemd(); err != nil {
-		return nil, err
-	}
-	return OpenStoreContext(ctx)
-}
 
 // Start schedules an independent supervisor and waits for durable command startup.
 // Even a command that immediately exits successfully receives a retained record.
@@ -45,14 +38,14 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
-	defer volumes.Close()
+	defer func() { _ = volumes.Close() }()
 	source, err := template.Acquire(ctx, cfg)
 	if err != nil {
 		return Record{}, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	cfg.RootFS = source.Path
-	ctx, cancel := context.WithTimeout(ctx, detachedStartupLimit)
+	ctx, cancel := context.WithTimeout(ctx, _detachedStartupLimit)
 	defer cancel()
 	record, err := store.Create(ctx, cfg, name)
 	if err != nil {
@@ -63,7 +56,7 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	if err != nil {
 		return record, rollbackStart(store, id, record.Generation, err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := store.Update(ctx, id, func(record *Record) error {
 		record.State = StateStarting
 		return nil
@@ -72,166 +65,6 @@ func Start(ctx context.Context, cfg config.Config, name string) (Record, error) 
 	}
 	record.State = StateStarting
 	return launchExecution(ctx, store, record)
-}
-
-func launchExecution(ctx context.Context, store *Store, record Record) (Record, error) {
-	id := record.ID
-	generation := record.Generation
-	exe, err := os.Executable()
-	if err != nil {
-		return record, rollbackStart(store, id, generation, err)
-	}
-	args := []string{"--quiet", "--service-type=exec", "--unit=" + unitName(id, record.Generation),
-		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=95s",
-		"--property=Restart=no", "--property=StandardInput=null", "--property=StandardOutput=null",
-		"--property=StandardError=null", "--working-directory=/", "--", exe, "__supervise", id, strconv.FormatUint(record.Generation, 10)}
-	if _, err := systemdCommand(ctx, "systemd-run", args...); err != nil {
-		return record, rollbackStart(store, id, generation, err)
-	}
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		record, err = store.Get(ctx, id)
-		if err == nil && record.Generation != generation {
-			return record, errors.New("container execution changed during startup")
-		}
-		if err == nil {
-			record, err = refreshRecord(ctx, store, record, true)
-		}
-		if err != nil {
-			return record, rollbackStart(store, id, generation, err)
-		}
-		if record.StartedAt != nil {
-			return record, nil
-		}
-		if record.Terminal() {
-			return record, fmt.Errorf("container %s failed to start: %s", record.ID, record.Error)
-		}
-		select {
-		case <-ctx.Done():
-			return record, rollbackStart(store, id, generation, ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
-func rollbackStart(store *Store, id string, generation uint64, cause error) error {
-	ctx, cancel := context.WithTimeout(context.Background(), managementStopLimit)
-	defer cancel()
-	if err := stopUnit(ctx, id, generation); err != nil {
-		return errors.Join(cause, fmt.Errorf("stop failed startup %s: %w", id, err))
-	}
-	record, err := store.Get(ctx, id)
-	if err != nil {
-		return errors.Join(cause, err)
-	}
-	if record.Generation != generation {
-		return cause
-	}
-	if err := containerruntime.RecoverAbandoned(ctx, os.Stderr); err != nil {
-		return errors.Join(cause, err)
-	}
-	if record.RunPath != "" {
-		if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
-			return errors.Join(cause, err)
-		}
-	}
-	return errors.Join(cause, store.Complete(ctx, id, generation, func(record *Record) {
-		if !record.Terminal() {
-			finished := time.Now().UTC()
-			record.State, record.FinishedAt, record.Error = StateFailed, &finished, cause.Error()
-			record.ExitReason = "startup_failed"
-		}
-	}))
-}
-
-// refreshRecord fences a lost supervisor with its lease before reclaiming state.
-// No numeric PID from disk is ever used for signaling or deletion.
-func refreshRecord(ctx context.Context, store *Store, record Record, launched bool) (Record, error) {
-	if record.Terminal() {
-		return record, nil
-	}
-	status, err := inspectUnit(ctx, record.ID, record.Generation)
-	if err != nil || status.live() {
-		return record, err
-	}
-	// A concurrent run may have published its record but not scheduled its unit.
-	if !launched {
-		pending, err := schedulingPending(record, status)
-		if err != nil || pending {
-			return record, err
-		}
-	}
-	lease, err := store.AcquireLease(ctx, record.ID)
-	if errors.Is(err, ErrBusy) {
-		return store.Get(ctx, record.ID)
-	}
-	if err != nil {
-		return record, err
-	}
-	defer lease.Close()
-	expectedGeneration := record.Generation
-	record, err = store.Get(ctx, record.ID)
-	if err != nil || record.Terminal() || record.Generation != expectedGeneration {
-		return record, err
-	}
-	// Stopping the immutable unit also handles any remaining delegated children.
-	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
-		return record, err
-	}
-	// Scan safely locked working directories as well, covering interruption
-	// between a directory's publication and its first durable observer update.
-	if err := containerruntime.RecoverAbandoned(ctx, os.Stderr); err != nil {
-		return record, err
-	}
-	if record.RunPath != "" {
-		if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
-			return record, fmt.Errorf("preserve container %s: %w", record.ID, err)
-		}
-	}
-	err = store.Complete(ctx, record.ID, record.Generation, func(record *Record) {
-		finished := time.Now().UTC()
-		record.State, record.FinishedAt = StateFailed, &finished
-		record.Error = "supervisor exited without recording completion"
-		record.ExitReason = "supervisor_lost"
-		// systemd's status belongs to the supervisor, not the user command.
-		// Leave the command exit code unknown after an abrupt supervisor loss.
-	})
-	if err != nil {
-		return record, err
-	}
-	return store.Get(ctx, record.ID)
-}
-
-func schedulingPending(record Record, status unitStatus) (bool, error) {
-	if record.StartedAt != nil {
-		return false, nil
-	}
-	bootID, err := currentBootID()
-	if err != nil {
-		return false, err
-	}
-	return schedulingPendingAt(record, status, bootID, time.Now()), nil
-}
-
-func schedulingPendingAt(record Record, status unitStatus, bootID string, now time.Time) bool {
-	// A transient unit is briefly loaded but inactive before its start job runs.
-	// Readers must not claim its supervisor lease in that scheduling window.
-	unscheduled := status.LoadState == "not-found" || status.LoadState == "loaded" && status.ActiveState == "inactive" && status.MainPID == 0 && status.ExitCode == 0
-	if !unscheduled || record.StartedAt != nil || (record.State != StateCreated && record.State != StateStarting) {
-		return false
-	}
-	if record.BootID != "" && record.BootID != bootID {
-		return false
-	}
-	launchedAt := record.CreatedAt
-	if record.LaunchAt != nil {
-		launchedAt = *record.LaunchAt
-	}
-	age := now.Sub(launchedAt)
-	// A previous boot or a backwards wall-clock jump must not make an absent
-	// supervisor look like an in-progress launch indefinitely.
-	return age >= 0 && age < detachedStartupLimit
 }
 
 func List(ctx context.Context, all bool) ([]Record, error) {
@@ -267,135 +100,6 @@ func List(ctx context.Context, all bool) ([]Record, error) {
 	return result, nil
 }
 
-// listingRecord reads only the saved ports without reopening state.json.
-// The shared lock fences removal of the immutable full ID's configuration.
-func listingRecord(ctx context.Context, store *Store, record Record) (Record, error) {
-	if err := validateID(record.ID); err != nil {
-		return Record{}, err
-	}
-	lock, err := store.lock(ctx, true)
-	if err != nil {
-		return Record{}, err
-	}
-	defer lock.Close()
-	dir := filepath.Join(store.root, record.ID)
-	if err := store.checkDirectory(dir, true); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Record{}, ErrNotFound
-		}
-		return Record{}, err
-	}
-	var saved struct {
-		Publish []config.PortMapping `json:"publish"`
-	}
-	if err := store.readJSON(filepath.Join(dir, "config.json"), maxConfigBytes, &saved); err != nil {
-		return Record{}, err
-	}
-	if err := config.ValidateNetwork("bridge", nil, saved.Publish, nil); err != nil {
-		return Record{}, err
-	}
-	record.Publish = saved.Publish
-	return record, nil
-}
-
-// Stop lets the runtime forward SIGTERM and clean up; systemd enforces a final
-// whole-service kill boundary if the supervisor cannot complete its shutdown.
-func stopLocked(ctx context.Context, store *Store, record Record, override *time.Duration) (Record, error) {
-	cfg, err := store.Config(ctx, record.ID)
-	if err != nil {
-		return record, err
-	}
-	grace := cfg.StoppingTimeout()
-	if override != nil {
-		grace = *override
-	}
-	ctx, cancel := context.WithTimeout(ctx, grace+managementStopLimit)
-	defer cancel()
-	status, err := inspectUnit(ctx, record.ID, record.Generation)
-	if err != nil {
-		return record, err
-	}
-	if !record.Terminal() {
-		pending, err := schedulingPending(record, status)
-		if err != nil {
-			return record, err
-		}
-		if pending {
-			return record, errors.New("container is still being scheduled; retry stop after startup completes")
-		}
-	}
-	if !record.Terminal() {
-		if err := store.Update(ctx, record.ID, func(record *Record) error {
-			if !record.Terminal() {
-				record.State = StateStopping
-				record.StopTimeout = &grace
-			}
-			return nil
-		}); err != nil {
-			return record, err
-		}
-	}
-	// systemd cannot change TimeoutStopSec on an existing service. Its fixed
-	// boundary allows the maximum configurable grace plus cleanup; the runtime
-	// enforces the selected per-operation timeout itself.
-	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
-		return record, err
-	}
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		record, err = store.Get(ctx, record.ID)
-		if err == nil {
-			record, err = refreshRecord(ctx, store, record, true)
-		}
-		if err != nil {
-			return record, err
-		}
-		if record.Terminal() {
-			if record.RunPath != "" {
-				if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
-					return record, err
-				}
-			}
-			return record, nil
-		}
-		select {
-		case <-ctx.Done():
-			return record, ctx.Err()
-		case <-ticker.C:
-		}
-	}
-}
-
-func removeLocked(ctx context.Context, store *Store, record Record) error {
-	var err error
-	record, err = refreshRecord(ctx, store, record, false)
-	if err != nil {
-		return err
-	}
-	if !record.Terminal() {
-		return ErrNotTerminal
-	}
-	status, err := inspectUnit(ctx, record.ID, record.Generation)
-	if err != nil {
-		return err
-	}
-	if status.live() {
-		return ErrBusy
-	}
-	if record.RunPath != "" {
-		if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
-			return err
-		}
-	}
-	if status.LoadState != "not-found" && status.ActiveState == "failed" {
-		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID, record.Generation)); err != nil {
-			return err
-		}
-	}
-	return store.Remove(ctx, record.ID)
-}
-
 func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer) error {
 	if tail < -1 || tail > 1000000 {
 		return errors.New("log tail must be between 0 and 1000000, or -1 for the entire log")
@@ -419,7 +123,7 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 	}
 	defer func() {
 		if cursor.pin != nil {
-			cursor.pin.Close()
+			_ = cursor.pin.Close()
 		}
 	}()
 	if _, err := io.Copy(out, bytes.NewReader(data)); err != nil || !follow {
@@ -474,4 +178,304 @@ func Logs(ctx context.Context, ref string, tail int, follow bool, out io.Writer)
 		case <-ticker.C:
 		}
 	}
+}
+
+func managementStore(ctx context.Context) (*Store, error) {
+	if err := checkSystemd(); err != nil {
+		return nil, err
+	}
+	return OpenStoreContext(ctx)
+}
+
+func launchExecution(ctx context.Context, store *Store, record Record) (Record, error) {
+	var (
+		id         = record.ID
+		generation = record.Generation
+	)
+	exe, err := os.Executable()
+	if err != nil {
+		return record, rollbackStart(store, id, generation, err)
+	}
+	args := []string{"--quiet", "--service-type=exec", "--unit=" + unitName(id, record.Generation),
+		"--property=Delegate=memory pids cpu", "--property=KillMode=mixed", "--property=TimeoutStopSec=95s",
+		"--property=Restart=no", "--property=StandardInput=null", "--property=StandardOutput=null",
+		"--property=StandardError=null", "--working-directory=/", "--", exe, "__supervise", id, strconv.FormatUint(record.Generation, 10)}
+	if _, err := systemdCommand(ctx, "systemd-run", args...); err != nil {
+		return record, rollbackStart(store, id, generation, err)
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		record, err = store.Get(ctx, id)
+		if err == nil && record.Generation != generation {
+			return record, errors.New("container execution changed during startup")
+		}
+		if err == nil {
+			record, err = refreshRecord(ctx, store, record, true)
+		}
+		if err != nil {
+			return record, rollbackStart(store, id, generation, err)
+		}
+		if record.StartedAt != nil {
+			return record, nil
+		}
+		if record.Terminal() {
+			return record, fmt.Errorf("container %s failed to start: %s", record.ID, record.Error)
+		}
+		select {
+		case <-ctx.Done():
+			return record, rollbackStart(store, id, generation, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func rollbackStart(store *Store, id string, generation uint64, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), _managementStopLimit)
+	defer cancel()
+	if err := stopUnit(ctx, id, generation); err != nil {
+		return errors.Join(cause, fmt.Errorf("stop failed startup %s: %w", id, err))
+	}
+	record, err := store.Get(ctx, id)
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if record.Generation != generation {
+		return cause
+	}
+	if err := runtime.RecoverAbandoned(ctx, os.Stderr); err != nil {
+		return errors.Join(cause, err)
+	}
+	if record.RunPath != "" {
+		if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
+			return errors.Join(cause, err)
+		}
+	}
+	return errors.Join(cause, store.Complete(ctx, id, generation, func(record *Record) {
+		if !record.Terminal() {
+			finished := time.Now().UTC()
+			record.State, record.FinishedAt, record.Error = StateFailed, &finished, cause.Error()
+			record.ExitReason = "startup_failed"
+		}
+	}))
+}
+
+// refreshRecord fences a lost supervisor with its lease before reclaiming state.
+// No numeric PID from disk is ever used for signaling or deletion.
+func refreshRecord(ctx context.Context, store *Store, record Record, launched bool) (Record, error) {
+	if record.Terminal() {
+		return record, nil
+	}
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
+	if err != nil || status.live() {
+		return record, err
+	}
+	// A concurrent run may have published its record but not scheduled its unit.
+	if !launched {
+		pending, err := schedulingPending(record, status)
+		if err != nil || pending {
+			return record, err
+		}
+	}
+	lease, err := store.AcquireLease(ctx, record.ID)
+	if errors.Is(err, ErrBusy) {
+		return store.Get(ctx, record.ID)
+	}
+	if err != nil {
+		return record, err
+	}
+	defer func() { _ = lease.Close() }()
+	expectedGeneration := record.Generation
+	record, err = store.Get(ctx, record.ID)
+	if err != nil || record.Terminal() || record.Generation != expectedGeneration {
+		return record, err
+	}
+	// Stopping the immutable unit also handles any remaining delegated children.
+	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
+		return record, err
+	}
+	// Scan safely locked working directories as well, covering interruption
+	// between a directory's publication and its first durable observer update.
+	if err := runtime.RecoverAbandoned(ctx, os.Stderr); err != nil {
+		return record, err
+	}
+	if record.RunPath != "" {
+		if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
+			return record, fmt.Errorf("preserve container %s: %w", record.ID, err)
+		}
+	}
+	err = store.Complete(ctx, record.ID, record.Generation, func(record *Record) {
+		finished := time.Now().UTC()
+		record.State, record.FinishedAt = StateFailed, &finished
+		record.Error = "supervisor exited without recording completion"
+		record.ExitReason = "supervisor_lost"
+		// systemd's status belongs to the supervisor, not the user command.
+		// Leave the command exit code unknown after an abrupt supervisor loss.
+	})
+	if err != nil {
+		return record, err
+	}
+	return store.Get(ctx, record.ID)
+}
+
+func schedulingPending(record Record, status unitStatus) (bool, error) {
+	if record.StartedAt != nil {
+		return false, nil
+	}
+	bootID, err := currentBootID()
+	if err != nil {
+		return false, err
+	}
+	return schedulingPendingAt(record, status, bootID, time.Now()), nil
+}
+
+func schedulingPendingAt(record Record, status unitStatus, bootID string, now time.Time) bool {
+	// A transient unit is briefly loaded but inactive before its start job runs.
+	// Readers must not claim its supervisor lease in that scheduling window.
+	unscheduled := status.LoadState == "not-found" ||
+		status.LoadState == "loaded" && status.ActiveState == "inactive" && status.MainPID == 0 &&
+			status.ExitCode == 0
+	if !unscheduled || record.StartedAt != nil || (record.State != StateCreated && record.State != StateStarting) {
+		return false
+	}
+	if record.BootID != "" && record.BootID != bootID {
+		return false
+	}
+	launchedAt := record.CreatedAt
+	if record.LaunchAt != nil {
+		launchedAt = *record.LaunchAt
+	}
+	age := now.Sub(launchedAt)
+	// A previous boot or a backwards wall-clock jump must not make an absent
+	// supervisor look like an in-progress launch indefinitely.
+	return age >= 0 && age < _detachedStartupLimit
+}
+
+// listingRecord reads only the saved ports without reopening state.json.
+// The shared lock fences removal of the immutable full ID's configuration.
+func listingRecord(ctx context.Context, store *Store, record Record) (Record, error) {
+	if err := validateID(record.ID); err != nil {
+		return Record{}, err
+	}
+	lock, err := store.lock(ctx, true)
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { _ = lock.Close() }()
+	dir := filepath.Join(store.root, record.ID)
+	if err := store.checkDirectory(dir, true); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Record{}, ErrNotFound
+		}
+		return Record{}, err
+	}
+	var saved struct {
+		Publish []config.PortMapping `json:"publish"`
+	}
+	if err := store.readJSON(filepath.Join(dir, "config.json"), _maxConfigBytes, &saved); err != nil {
+		return Record{}, err
+	}
+	if err := config.ValidateNetwork("bridge", nil, saved.Publish, nil); err != nil {
+		return Record{}, err
+	}
+	record.Publish = saved.Publish
+	return record, nil
+}
+
+// Stop lets the runtime forward SIGTERM and clean up; systemd enforces a final
+// whole-service kill boundary if the supervisor cannot complete its shutdown.
+func stopLocked(ctx context.Context, store *Store, record Record, override *time.Duration) (Record, error) {
+	cfg, err := store.Config(ctx, record.ID)
+	if err != nil {
+		return record, err
+	}
+	grace := cfg.StoppingTimeout()
+	if override != nil {
+		grace = *override
+	}
+	ctx, cancel := context.WithTimeout(ctx, grace+_managementStopLimit)
+	defer cancel()
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
+	if err != nil {
+		return record, err
+	}
+	if !record.Terminal() {
+		pending, err := schedulingPending(record, status)
+		if err != nil {
+			return record, err
+		}
+		if pending {
+			return record, errors.New("container is still being scheduled; retry stop after startup completes")
+		}
+	}
+	if !record.Terminal() {
+		if err := store.Update(ctx, record.ID, func(record *Record) error {
+			if !record.Terminal() {
+				record.State = StateStopping
+				record.StopTimeout = &grace
+			}
+			return nil
+		}); err != nil {
+			return record, err
+		}
+	}
+	// systemd cannot change TimeoutStopSec on an existing service. Its fixed
+	// boundary allows the maximum configurable grace plus cleanup; the runtime
+	// enforces the selected per-operation timeout itself.
+	if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
+		return record, err
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		record, err = store.Get(ctx, record.ID)
+		if err == nil {
+			record, err = refreshRecord(ctx, store, record, true)
+		}
+		if err != nil {
+			return record, err
+		}
+		if record.Terminal() {
+			if record.RunPath != "" {
+				if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
+					return record, err
+				}
+			}
+			return record, nil
+		}
+		select {
+		case <-ctx.Done():
+			return record, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func removeLocked(ctx context.Context, store *Store, record Record) error {
+	var err error
+	record, err = refreshRecord(ctx, store, record, false)
+	if err != nil {
+		return err
+	}
+	if !record.Terminal() {
+		return ErrNotTerminal
+	}
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
+	if err != nil {
+		return err
+	}
+	if status.live() {
+		return ErrBusy
+	}
+	if record.RunPath != "" {
+		if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
+			return err
+		}
+	}
+	if status.LoadState != "not-found" && status.ActiveState == "failed" {
+		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID, record.Generation)); err != nil {
+			return err
+		}
+	}
+	return store.Remove(ctx, record.ID)
 }

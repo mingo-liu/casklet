@@ -8,12 +8,14 @@ import (
 )
 
 func TestHealthGraceRetriesRecoveryAndHistory(t *testing.T) {
-	start := time.Unix(1600000000, 0)
-	grace := time.Minute
-	retries := 2
-	cfg := &config.HealthConfig{StartPeriod: &grace, Retries: &retries}
-	health := Health{Status: HealthStarting}
-	result := HealthResult{StartedAt: start.Add(time.Second), FinishedAt: start.Add(2 * time.Second), ExitCode: 1}
+	var (
+		start   = time.Unix(1600000000, 0)
+		grace   = time.Minute
+		retries = 2
+		cfg     = &config.HealthConfig{StartPeriod: &grace, Retries: &retries}
+		health  = Health{Status: HealthStarting}
+		result  = HealthResult{StartedAt: start.Add(time.Second), FinishedAt: start.Add(2 * time.Second), ExitCode: 1}
+	)
 	health = health.next(cfg, start, result)
 	if health.Status != HealthStarting || health.FailingStreak != 0 {
 		t.Fatal(health)

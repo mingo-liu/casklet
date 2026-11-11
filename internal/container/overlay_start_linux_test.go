@@ -15,9 +15,11 @@ import (
 
 func overlayStartFixture(t *testing.T) (config.Config, string, string) {
 	t.Helper()
-	lower := t.TempDir()
-	retained := filepath.Join(t.TempDir(), "rootfs")
-	storage := retained + ".overlay"
+	var (
+		lower    = t.TempDir()
+		retained = filepath.Join(t.TempDir(), "rootfs")
+		storage  = retained + ".overlay"
+	)
 	if err := os.Mkdir(storage, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -58,8 +60,10 @@ func TestRetainedRootCandidateRejectsIncompleteOverlay(t *testing.T) {
 	for _, kind := range []string{"missing record", "corrupt record", "record symlink", "storage symlink", "missing upper", "missing work"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg, retained, storage := overlayStartFixture(t)
-			marker := filepath.Join(storage, ".casklet-overlay-v1.json")
-			var err error
+			var (
+				marker = filepath.Join(storage, ".casklet-overlay-v1.json")
+				err    error
+			)
 			switch kind {
 			case "missing record":
 				err = os.Remove(marker)
@@ -94,9 +98,11 @@ func TestRetainedRootCandidateRejectsIncompleteOverlay(t *testing.T) {
 func TestRetainedRootCandidateIgnoresLegacyApplicationMarker(t *testing.T) {
 	for _, kind := range []string{"ordinary file", "symlink"} {
 		t.Run(kind, func(t *testing.T) {
-			retained := t.TempDir()
-			marker := filepath.Join(retained, ".casklet-overlay-v1.json")
-			var err error
+			var (
+				retained = t.TempDir()
+				marker   = filepath.Join(retained, ".casklet-overlay-v1.json")
+				err      error
+			)
 			if kind == "ordinary file" {
 				err = os.WriteFile(marker, []byte("application data, not backend metadata"), 0644)
 			} else {

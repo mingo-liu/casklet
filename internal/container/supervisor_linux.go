@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 )
 
 // Supervisor is an internal entry point launched only by an immutable unit.
@@ -21,33 +21,33 @@ func Supervisor(id string, generations ...uint64) int {
 		generation = generations[0]
 	}
 	if err := validateID(id); err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	if err := checkSupervisorUnit(id, generation); err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	store, err := OpenStore()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	lease, err := store.AcquireLease(ctx, id)
 	cancel()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	record, err := store.Get(ctx, id)
 	cancel()
 	if err != nil || record.Terminal() || record.Generation != generation {
 		return 125
 	}
-	code, runErr, truncated, outcome := supervise(store, id, generation)
+	code, truncated, outcome, runErr := supervise(store, id, generation)
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := store.Complete(ctx, id, generation, func(record *Record) {
@@ -55,7 +55,7 @@ func Supervisor(id string, generations ...uint64) int {
 		if record.ExitReason == "" {
 			record.ExitReason = "startup_failed"
 		}
-		record.CleanupFailures = containerruntime.CleanupStages(runErr)
+		record.CleanupFailures = runtime.CleanupStages(runErr)
 		if record.Health != nil {
 			record.Health.Status = HealthStopped
 		}
@@ -71,13 +71,13 @@ func Supervisor(id string, generations ...uint64) int {
 			record.Error = fmt.Sprintf("startup stopped before the command began (exit %d)", code)
 		}
 	}); err != nil {
-		fmt.Fprintln(os.Stderr, "casklet: record completion:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet: record completion:", err)
 		return 125
 	}
 	return code
 }
 
-func supervise(store *Store, id string, generation uint64) (int, error, bool, containerruntime.ExitStatus) {
+func supervise(store *Store, id string, generation uint64) (int, bool, runtime.ExitStatus, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := store.Update(ctx, id, func(record *Record) error {
 		if record.Generation != generation || record.Terminal() {
@@ -87,79 +87,83 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool, co
 		return nil
 	}); err != nil {
 		cancel()
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
 	cfg, err := store.Config(ctx, id)
 	cancel()
 	if err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
 	root, err := store.RootFS(context.Background(), id)
 	if err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
 	if err := store.cleanupRootFSStages(id); err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
 	record, err := store.Get(context.Background(), id)
 	if err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
 	previouslyTruncated := record.LogTruncated
 
 	input, err := os.Open("/dev/null")
 	if err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		return 125, err, false, containerruntime.ExitStatus{}
+		return 125, false, runtime.ExitStatus{}, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	type captureResult struct {
 		truncated bool
 		err       error
 	}
-	completed := make(chan captureResult, 1)
-	log := &rotatingLog{store: store, id: id, cfg: cfg, truncated: previouslyTruncated}
+	var (
+		completed = make(chan captureResult, 1)
+		log       = &rotatingLog{store: store, id: id, cfg: cfg, truncated: previouslyTruncated}
+	)
 	go func() {
 		err := captureLog(reader, log)
-		completed <- captureResult{log.truncated, errors.Join(err, log.Sync())}
+		completed <- captureResult{truncated: log.truncated, err: errors.Join(err, log.Sync())}
 	}()
 
-	executor := newExecServer(store, id, generation)
-	observer := func(event containerruntime.Event) error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err := store.Update(ctx, id, func(record *Record) error {
-			if record.Terminal() || record.Generation != generation {
-				return errors.New("container was finalized before startup")
-			}
-			record.RunPath = event.RunPath
-			if event.Cgroup != "" {
-				record.Cgroup = event.Cgroup
-			}
-			if event.Phase == "started" {
-				started := time.Now().UTC()
-				record.StartedAt = &started
-				if cfg.Healthcheck.Enabled() {
-					record.Health = &Health{Status: HealthStarting, Checks: []HealthResult{}}
+	var (
+		executor = newExecServer(store, id, generation)
+		observer = func(event runtime.Event) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := store.Update(ctx, id, func(record *Record) error {
+				if record.Terminal() || record.Generation != generation {
+					return errors.New("container was finalized before startup")
 				}
-				if record.State != StateStopping {
-					record.State = StateRunning
+				record.RunPath = event.RunPath
+				if event.Cgroup != "" {
+					record.Cgroup = event.Cgroup
 				}
-			} else if record.State != StateStopping {
-				record.State = StateStarting
+				if event.Phase == "started" {
+					started := time.Now().UTC()
+					record.StartedAt = &started
+					if cfg.Healthcheck.Enabled() {
+						record.Health = &Health{Status: HealthStarting, Checks: []HealthResult{}}
+					}
+					if record.State != StateStopping {
+						record.State = StateRunning
+					}
+				} else if record.State != StateStopping {
+					record.State = StateStarting
+				}
+				return nil
+			})
+			if err == nil && event.Phase == "started" {
+				executor.startHealth()
 			}
-			return nil
-		})
-		if err == nil && event.Phase == "started" {
-			executor.startHealth()
+			return err
 		}
-		return err
-	}
-	code, outcome, runErr := containerruntime.RunManaged(cfg, input, writer, writer, observer, executor, root, func() time.Duration {
+	)
+	code, outcome, runErr := runtime.RunManaged(cfg, input, writer, writer, observer, executor, root, func() time.Duration {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		record, err := store.Get(ctx, id)
@@ -169,15 +173,15 @@ func supervise(store *Store, id string, generation uint64) (int, error, bool, co
 		return cfg.StoppingTimeout()
 	})
 	if runErr != nil {
-		fmt.Fprintln(writer, "casklet:", runErr)
+		_, _ = fmt.Fprintln(writer, "casklet:", runErr)
 	}
 	closeErr := writer.Close()
 	select {
 	case result := <-completed:
-		return code, errors.Join(runErr, closeErr, result.err), result.truncated, outcome
+		return code, result.truncated, outcome, errors.Join(runErr, closeErr, result.err)
 	case <-time.After(5 * time.Second):
-		reader.Close()
-		return code, errors.Join(runErr, errors.New("log capture did not finish after container cleanup")), true, outcome
+		_ = reader.Close()
+		return code, true, outcome, errors.Join(runErr, errors.New("log capture did not finish after container cleanup"))
 	}
 }
 

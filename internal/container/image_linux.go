@@ -20,10 +20,6 @@ func ImageReferenced(ctx context.Context, id string) (bool, error) {
 	return store.imageReferenced(ctx, id)
 }
 
-func (store *Store) imageReferenced(ctx context.Context, id string) (bool, error) {
-	return store.configReferenced(ctx, func(cfg config.Config) bool { return cfg.Image == id })
-}
-
 // VolumeReferenced includes stopped containers; lock order is volume then container.
 func VolumeReferenced(ctx context.Context, name string) (bool, error) {
 	store, err := OpenStoreContext(ctx)
@@ -40,12 +36,25 @@ func VolumeReferenced(ctx context.Context, name string) (bool, error) {
 	})
 }
 
+// NetworkReferenced includes stopped containers. Lock order is network then container.
+func NetworkReferenced(ctx context.Context, name string) (bool, error) {
+	s, err := OpenStoreContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.configReferenced(ctx, func(c config.Config) bool { return c.Network == name })
+}
+
+func (store *Store) imageReferenced(ctx context.Context, id string) (bool, error) {
+	return store.configReferenced(ctx, func(cfg config.Config) bool { return cfg.Image == id })
+}
+
 func (store *Store) configReferenced(ctx context.Context, matches func(config.Config) bool) (bool, error) {
 	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return false, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	records, err := store.listLocked()
 	if err != nil {
 		return false, err
@@ -55,7 +64,7 @@ func (store *Store) configReferenced(ctx context.Context, matches func(config.Co
 			return false, err
 		}
 		var cfg config.Config
-		if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), maxConfigBytes, &cfg); err != nil {
+		if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), _maxConfigBytes, &cfg); err != nil {
 			return false, err
 		}
 		if err := cfg.ValidateExecution(); err != nil {
@@ -66,13 +75,4 @@ func (store *Store) configReferenced(ctx context.Context, matches func(config.Co
 		}
 	}
 	return false, nil
-}
-
-// NetworkReferenced includes stopped containers. Lock order is network then container.
-func NetworkReferenced(ctx context.Context, name string) (bool, error) {
-	s, err := OpenStoreContext(ctx)
-	if err != nil {
-		return false, err
-	}
-	return s.configReferenced(ctx, func(c config.Config) bool { return c.Network == name })
 }

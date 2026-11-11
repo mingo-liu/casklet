@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/ipc"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 )
 
 func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
@@ -24,7 +24,7 @@ func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(directory)
+			defer func() { _ = os.RemoveAll(directory) }()
 			store, err := newStoreAt(filepath.Join(directory, "containers"))
 			if err != nil {
 				t.Fatal(err)
@@ -41,16 +41,18 @@ func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer root.Close()
-			server := newExecServer(store, record.ID, record.Generation)
-			resources := containerruntime.ExecResources{Root: root}
+			defer func() { _ = root.Close() }()
+			var (
+				server    = newExecServer(store, record.ID, record.Generation)
+				resources = runtime.ExecResources{Root: root}
+			)
 			if kind == "missing-root" {
 				resources.Root = nil
 			}
 			if err := server.Start(resources); err != nil {
 				t.Fatal(err)
 			}
-			defer server.Close()
+			defer func() { _ = server.Close() }()
 			if kind == "stopped" {
 				if err := store.Update(context.Background(), record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
 					t.Fatal(err)
@@ -60,8 +62,10 @@ func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer conn.Close()
-			conn.SetDeadline(time.Now().Add(3 * time.Second))
+			defer func() { _ = conn.Close() }()
+			if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
 			generation := record.Generation
 			if kind == "wrong-generation" {
 				generation++
@@ -83,7 +87,10 @@ func TestCopyRootEndpointFencesGenerationAndLifecycle(t *testing.T) {
 					t.Fatalf("root response %+v files=%d", response, len(files))
 				}
 				info, err := files[0].Stat()
-				expected, _ := root.Stat()
+				expected, statErr := root.Stat()
+				if statErr != nil {
+					t.Fatal(statErr)
+				}
 				if err != nil || !os.SameFile(info, expected) {
 					t.Fatalf("wrong pinned root %v", err)
 				}

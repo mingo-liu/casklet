@@ -48,7 +48,7 @@ func benchmarkLogSnapshot(b *testing.B, tail int) {
 	for i := 0; i < b.N; i++ {
 		data, cursor, err := store.logSnapshotTail(context.Background(), record.ID, cfg, logCursor{}, record.Generation, tail)
 		if cursor.pin != nil {
-			cursor.pin.Close()
+			_ = cursor.pin.Close()
 		}
 		want := size * files
 		if tail >= 0 {

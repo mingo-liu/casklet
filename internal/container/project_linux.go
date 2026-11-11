@@ -17,7 +17,7 @@ func RemoveProjectService(ctx context.Context, id string, generation uint64, lab
 	if err != nil {
 		return err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := verifyProjectService(record, id, generation, labels); err != nil {
 		return err
 	}
@@ -31,18 +31,6 @@ func RemoveProjectService(ctx context.Context, id string, generation uint64, lab
 	return removeLocked(ctx, store, record)
 }
 
-func verifyProjectService(record Record, id string, generation uint64, labels map[string]string) error {
-	if record.ID != id || record.Generation != generation {
-		return errors.New("project service execution changed before replacement; retry")
-	}
-	for key, value := range labels {
-		if record.Labels[key] != value {
-			return errors.New("project service ownership changed before replacement")
-		}
-	}
-	return nil
-}
-
 // PreflightProjectStart validates the actual saved retained source rather than
 // reopening a possibly removed original template or merging a mutable tag.
 func PreflightProjectStart(ctx context.Context, id string, generation uint64, labels map[string]string) error {
@@ -50,7 +38,7 @@ func PreflightProjectStart(ctx context.Context, id string, generation uint64, la
 	if err != nil {
 		return err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := verifyProjectService(record, id, generation, labels); err != nil {
 		return err
 	}
@@ -75,7 +63,7 @@ func PreflightProjectStart(ctx context.Context, id string, generation uint64, la
 		if err != nil {
 			return err
 		}
-		defer lease.Close()
+		defer func() { _ = lease.Close() }()
 		candidate = tree
 	}
 	if _, err := rootfs.Validate(candidate); err != nil {
@@ -85,4 +73,16 @@ func PreflightProjectStart(ctx context.Context, id string, generation uint64, la
 		return err
 	}
 	return rootfs.ValidateMountSources(cfg.Mounts, candidate)
+}
+
+func verifyProjectService(record Record, id string, generation uint64, labels map[string]string) error {
+	if record.ID != id || record.Generation != generation {
+		return errors.New("project service execution changed before replacement; retry")
+	}
+	for key, value := range labels {
+		if record.Labels[key] != value {
+			return errors.New("project service ownership changed before replacement")
+		}
+	}
+	return nil
 }

@@ -25,14 +25,16 @@ func finishTestExecution(t *testing.T, store *Store, record Record, code int) {
 }
 
 func TestExecutionReceiptsSurviveLaterStarts(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "lifecycle")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "lifecycle")
+	)
 	finishTestExecution(t, store, record, 7)
 	operation, err := store.AcquireOperation(context.Background(), record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	next, err := store.BeginExecution(context.Background(), record.ID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -62,12 +64,22 @@ func TestExecutionReceiptsSurviveLaterStarts(t *testing.T) {
 }
 
 func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "receipt-recovery")
-	code := 11
-	now := time.Now().UTC()
-	saved := ExecutionResult{ExitReason: "oom_killed", OOMKilled: true, CleanupFailures: []string{"cgroup.remove"}, Generation: 0, StartedAt: &now, FinishedAt: &now, ExitCode: &code}
-	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), saved, maxRecordBytes); err != nil {
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "receipt-recovery")
+		code   = 11
+		now    = time.Now().UTC()
+		saved  = ExecutionResult{
+			ExitReason:      "oom_killed",
+			OOMKilled:       true,
+			CleanupFailures: []string{"cgroup.remove"},
+			Generation:      0,
+			StartedAt:       &now,
+			FinishedAt:      &now,
+			ExitCode:        &code,
+		}
+	)
+	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), saved, _maxRecordBytes); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Complete(context.Background(), record.ID, 0, func(record *Record) { record.State = StateFailed; record.FinishedAt = &now; record.ExitCode = nil }); err != nil {
@@ -80,9 +92,11 @@ func TestCompletionRecoversAlreadyPublishedReceipt(t *testing.T) {
 }
 
 func TestCleanupFailuresSurviveRestartInExecutionReceipt(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "cleanup-receipt")
-	code := 7
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "cleanup-receipt")
+		code   = 7
+	)
 	if err := store.Complete(context.Background(), record.ID, 0, func(r *Record) {
 		now := time.Now().UTC()
 		r.State, r.StartedAt, r.FinishedAt, r.ExitCode = StateExited, &now, &now, &code
@@ -95,7 +109,7 @@ func TestCleanupFailuresSurviveRestartInExecutionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	next, err := store.BeginExecution(context.Background(), record.ID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -110,13 +124,15 @@ func TestCleanupFailuresSurviveRestartInExecutionReceipt(t *testing.T) {
 }
 
 func TestLifecycleOperationLockDoesNotBlockReaders(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "operation-lock")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "operation-lock")
+	)
 	operation, err := store.AcquireOperation(context.Background(), record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := store.Get(ctx, record.ID); err != nil {
@@ -128,8 +144,10 @@ func TestLifecycleOperationLockDoesNotBlockReaders(t *testing.T) {
 }
 
 func TestBeginExecutionRequiresInactiveSupervisor(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "leased-execution")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "leased-execution")
+	)
 	if _, err := store.BeginExecution(context.Background(), record.ID, 0); err == nil {
 		t.Fatal("started an active container")
 	}
@@ -141,15 +159,17 @@ func TestBeginExecutionRequiresInactiveSupervisor(t *testing.T) {
 	if _, err := store.BeginExecution(context.Background(), record.ID, 0); !errors.Is(err, ErrBusy) {
 		t.Fatalf("started with active supervisor lease: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	if _, err := store.BeginExecution(context.Background(), record.ID, 4); err == nil {
 		t.Fatal("accepted stale generation")
 	}
 }
 
 func TestRetainedRootFSRemovalDoesNotFollowSymlinks(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "retained-filesystem")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "retained-filesystem")
+	)
 	root, err := store.RootFS(context.Background(), record.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -157,8 +177,10 @@ func TestRetainedRootFSRemovalDoesNotFollowSymlinks(t *testing.T) {
 	if err := os.Mkdir(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	outside := t.TempDir()
-	marker := filepath.Join(outside, "keep")
+	var (
+		outside = t.TempDir()
+		marker  = filepath.Join(outside, "keep")
+	)
 	if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -175,9 +197,11 @@ func TestRetainedRootFSRemovalDoesNotFollowSymlinks(t *testing.T) {
 }
 
 func TestExitReasonSurvivesRestartAndReceiptRecovery(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "exit-reason")
-	code := 137
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "exit-reason")
+		code   = 137
+	)
 	if err := store.Complete(context.Background(), record.ID, 0, func(r *Record) {
 		now := time.Now().UTC()
 		r.State, r.StartedAt, r.FinishedAt, r.ExitCode = StateExited, &now, &now, &code
@@ -189,7 +213,7 @@ func TestExitReasonSurvivesRestartAndReceiptRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	next, err := store.BeginExecution(context.Background(), record.ID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +227,7 @@ func TestExitReasonSurvivesRestartAndReceiptRecovery(t *testing.T) {
 	}
 	// Reject invalid persisted reasons instead of displaying arbitrary metadata.
 	result.ExitReason = "invalid"
-	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), result, maxRecordBytes); err != nil {
+	if err := store.writeJSON(filepath.Join(store.root, record.ID), receiptName(0), result, _maxRecordBytes); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.Completion(context.Background(), record.ID, 0); err == nil {

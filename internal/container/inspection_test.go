@@ -11,12 +11,37 @@ import (
 )
 
 func TestInspectionPublicConfiguration(t *testing.T) {
-	cfg := config.Config{Mounts: []config.BindMount{{Source: "/srv/data", Target: "/data", ReadOnly: true}}, RootFS: "/template", Hostname: "worker", Command: []string{"/bin/sleep", "30"},
-		Env: []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="}, Memory: 64 << 20, PidsLimit: 32,
-		TmpSize: 32 << 20, ShmSize: 96 << 20, CPUQuota: 25000, Timeout: 30 * time.Second, User: &config.User{UID: 1000, GID: 1001}, ReadOnly: true}
-	record := Record{ID: "id", Name: "worker", State: StateFailed, CreatedAt: time.Now(),
-		ExitReason: "oom_killed", OOMKilled: true, RunPath: "/private-run", Cgroup: "/private-cgroup", BootID: "private-boot", Error: "private-error", CleanupFailures: []string{"cgroup.remove"}}
-	got := inspectRecord(record, cfg)
+	var (
+		cfg = config.Config{
+			Mounts:    []config.BindMount{{Source: "/srv/data", Target: "/data", ReadOnly: true}},
+			RootFS:    "/template",
+			Hostname:  "worker",
+			Command:   []string{"/bin/sleep", "30"},
+			Env:       []string{"TOKEN=private-token", "TOKEN=second-secret", "EMPTY="},
+			Memory:    64 << 20,
+			PidsLimit: 32,
+			TmpSize:   32 << 20,
+			ShmSize:   96 << 20,
+			CPUQuota:  25000,
+			Timeout:   30 * time.Second,
+			User:      &config.User{UID: 1000, GID: 1001},
+			ReadOnly:  true,
+		}
+		record = Record{
+			ID:              "id",
+			Name:            "worker",
+			State:           StateFailed,
+			CreatedAt:       time.Now(),
+			ExitReason:      "oom_killed",
+			OOMKilled:       true,
+			RunPath:         "/private-run",
+			Cgroup:          "/private-cgroup",
+			BootID:          "private-boot",
+			Error:           "private-error",
+			CleanupFailures: []string{"cgroup.remove"},
+		}
+		got = inspectRecord(record, cfg)
+	)
 	if got.ExitReason != "oom_killed" || !got.OOMKilled {
 		t.Fatalf("missing exit status: %+v", got)
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 )
 
 var errHealthInactive = errors.New("container health execution is no longer active")
@@ -26,16 +26,19 @@ func (server *execServer) startHealth() {
 
 func (server *execServer) monitorHealth(cfg *config.HealthConfig) {
 	record, err := server.healthRecord()
-	if err != nil || record.Generation != server.generation || record.State != StateRunning || record.StartedAt == nil {
+	if err != nil || record.Generation != server.generation || record.State != StateRunning ||
+		record.StartedAt == nil {
 		return
 	}
-	started := *record.StartedAt
-	health := Health{Status: HealthStarting, Checks: []HealthResult{}}
+	var (
+		started = *record.StartedAt
+		health  = Health{Status: HealthStarting, Checks: []HealthResult{}}
+	)
 	null, err := os.OpenFile("/dev/null", os.O_RDWR, 0)
 	if err != nil {
 		return
 	}
-	defer null.Close()
+	defer func() { _ = null.Close() }()
 	timer := time.NewTimer(health.delay(cfg, started, time.Now()))
 	defer timer.Stop()
 	for {
@@ -50,7 +53,7 @@ func (server *execServer) monitorHealth(cfg *config.HealthConfig) {
 		}
 		result := HealthResult{StartedAt: time.Now().UTC()}
 		probe, cancel := context.WithTimeout(server.ctx, cfg.TimeoutValue())
-		code, err := containerruntime.ExecuteProbe(probe, server.resources, cfg.Command(), null)
+		code, err := runtime.ExecuteProbe(probe, server.resources, cfg.Command(), null)
 		result.TimedOut = errors.Is(probe.Err(), context.DeadlineExceeded)
 		cancel()
 		if server.ctx.Err() != nil {
@@ -73,20 +76,10 @@ func (server *execServer) monitorHealth(cfg *config.HealthConfig) {
 			return
 		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "casklet: persist health result:", err)
+			_, _ = fmt.Fprintln(os.Stderr, "casklet: persist health result:", err)
 		}
 		timer.Reset(health.delay(cfg, started, time.Now()))
 	}
-}
-
-func (s *Store) updateHealth(ctx context.Context, id string, generation uint64, health Health) error {
-	return s.Update(ctx, id, func(record *Record) error {
-		if record.Generation != generation || record.State != StateRunning {
-			return errHealthInactive
-		}
-		record.Health = &health
-		return nil
-	})
 }
 
 // Metadata contention must not permanently stop a live container's monitor.
@@ -98,7 +91,7 @@ func (server *execServer) healthRecord() (Record, error) {
 		if err == nil || errors.Is(err, ErrNotFound) || server.ctx.Err() != nil {
 			return record, err
 		}
-		fmt.Fprintln(os.Stderr, "casklet: read health state:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet: read health state:", err)
 		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case <-server.ctx.Done():
@@ -107,4 +100,14 @@ func (server *execServer) healthRecord() (Record, error) {
 		case <-timer.C:
 		}
 	}
+}
+
+func (s *Store) updateHealth(ctx context.Context, id string, generation uint64, health Health) error {
+	return s.Update(ctx, id, func(record *Record) error {
+		if record.Generation != generation || record.State != StateRunning {
+			return errHealthInactive
+		}
+		record.Health = &health
+		return nil
+	})
 }

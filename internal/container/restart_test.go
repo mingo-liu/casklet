@@ -9,7 +9,7 @@ import (
 
 func TestRestartDecisionHonorsStopBootSuccessAndLimit(t *testing.T) {
 	exit0, exit1 := 0, 1
-	for _, tc := range []struct {
+	tests := []struct {
 		name, policy   string
 		exit           *int
 		manual         bool
@@ -23,19 +23,26 @@ func TestRestartDecisionHonorsStopBootSuccessAndLimit(t *testing.T) {
 		{name: "manual always", policy: "always", exit: &exit1, manual: true}, {name: "manual unless", policy: "unless-stopped", exit: &exit1, manual: true},
 		{name: "boot always", policy: "always", manual: true, oldBoot: true, want: true}, {name: "stop during boot", policy: "always", manual: true, oldBoot: true, stoppedCurrent: true},
 		{name: "boot unless stopped", policy: "unless-stopped", manual: true, oldBoot: true}, {name: "boot unless running", policy: "unless-stopped", oldBoot: true, want: true}, {name: "boot failure policy", policy: "on-failure", oldBoot: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := Record{State: StateExited, ExitCode: tc.exit, StoppedByUser: tc.manual, RestartCount: tc.count, BootID: "current"}
-			if tc.oldBoot {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := Record{
+				State:         StateExited,
+				ExitCode:      tt.exit,
+				StoppedByUser: tt.manual,
+				RestartCount:  tt.count,
+				BootID:        "current",
+			}
+			if tt.oldBoot {
 				r.BootID = "old"
 				r.StoppedBootID = "old"
 			}
-			if tc.stoppedCurrent {
+			if tt.stoppedCurrent {
 				r.StoppedBootID = "current"
 			}
-			got, _ := restartDecision(r, config.Config{RestartPolicy: tc.policy}, "current")
-			if got != tc.want {
-				t.Fatalf("eligible %v want %v", got, tc.want)
+			got, _ := restartDecision(r, config.Config{RestartPolicy: tt.policy}, "current")
+			if got != tt.want {
+				t.Fatalf("eligible %v want %v", got, tt.want)
 			}
 		})
 	}
@@ -46,10 +53,12 @@ func TestRestartBackoffAndHealthyReset(t *testing.T) {
 			t.Fatalf("delay %d: %s", count, got)
 		}
 	}
-	start := time.Now().Add(-11 * time.Second)
-	finish := time.Now()
-	exit := 1
-	r := Record{State: StateExited, ExitCode: &exit, StartedAt: &start, FinishedAt: &finish, RestartCount: 10}
+	var (
+		start  = time.Now().Add(-11 * time.Second)
+		finish = time.Now()
+		exit   = 1
+		r      = Record{State: StateExited, ExitCode: &exit, StartedAt: &start, FinishedAt: &finish, RestartCount: 10}
+	)
 	eligible, count := restartDecision(r, config.Config{RestartPolicy: "on-failure:2"}, "boot")
 	if !eligible || count != 0 {
 		t.Fatal("healthy execution did not reset retry cap")

@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	storeRoot            = "/var/lib/casklet/containers"
-	maxRecordBytes int64 = 64 * 1024
-	maxConfigBytes int64 = config.MaxExecutionConfigBytes
+	_storeRoot            = "/var/lib/casklet/containers"
+	_maxRecordBytes int64 = 64 * 1024
+	_maxConfigBytes int64 = config.MaxExecutionConfigBytes
 )
 
 // Store coordinates metadata updates across independent CLI and supervisor processes.
@@ -45,28 +45,6 @@ func OpenStoreContext(ctx context.Context) (*Store, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return openStoreContext(ctx)
-}
-
-func openStoreContext(ctx context.Context) (*Store, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if os.Geteuid() != 0 {
-		return nil, errors.New("container management requires root privileges")
-	}
-	store := &Store{root: storeRoot, owner: 0}
-	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", storeRoot} {
-		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		if err := store.checkDirectory(dir, dir == storeRoot); err != nil {
-			return nil, err
-		}
-	}
-	if err := store.recoverTransactions(ctx); err != nil {
-		return nil, err
-	}
-	return store, nil
 }
 
 func newStoreAt(root string) (*Store, error) {
@@ -104,14 +82,16 @@ func (store *Store) openFile(path string, flags int, create bool) (*os.File, err
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
-	var stat unix.Stat_t
+	var (
+		file = os.NewFile(uintptr(fd), path)
+		stat unix.Stat_t
+	)
 	if err := unix.Fstat(fd, &stat); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != store.owner || stat.Mode&0077 != 0 || stat.Nlink != 1 {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("container file must be private, singly linked, and owned by the storage owner: %s", path)
 	}
 	return file, nil
@@ -136,7 +116,7 @@ func (store *Store) lock(ctx context.Context, shared bool) (*os.File, error) {
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(int(file.Fd()), operation|unix.LOCK_NB)
@@ -144,12 +124,12 @@ func (store *Store) lock(ctx context.Context, shared bool) (*os.File, error) {
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
@@ -171,7 +151,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 		return Record{}, err
 	}
 	if networkLease != nil {
-		defer networkLease.Close()
+		defer func() { _ = networkLease.Close() }()
 	}
 	if err := store.recoverTransactions(ctx); err != nil {
 		return Record{}, err
@@ -184,7 +164,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return Record{}, err
@@ -217,7 +197,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	if config.IsNamedNetwork(cfg.Network) {
 		for _, record := range records {
 			var saved config.Config
-			if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), maxConfigBytes, &saved); err != nil {
+			if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), _maxConfigBytes, &saved); err != nil {
 				return Record{}, err
 			}
 			if saved.Network != cfg.Network {
@@ -245,11 +225,22 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 	published := false
 	defer func() {
 		if !published {
-			os.RemoveAll(path)
+			_ = os.RemoveAll(path)
 		}
 	}()
-	record := Record{Labels: maps.Clone(cfg.Labels), LogLocking: true, RetainRootFS: true, Version: 1, ID: id, BootID: bootID, Name: name, State: StateCreated, CreatedAt: time.Now().UTC(), Command: append([]string(nil), cfg.Command...)}
-	if err := store.writeJSON(path, "config.json", cfg, maxConfigBytes); err != nil {
+	record := Record{
+		Labels:       maps.Clone(cfg.Labels),
+		LogLocking:   true,
+		RetainRootFS: true,
+		Version:      1,
+		ID:           id,
+		BootID:       bootID,
+		Name:         name,
+		State:        StateCreated,
+		CreatedAt:    time.Now().UTC(),
+		Command:      append([]string(nil), cfg.Command...),
+	}
+	if err := store.writeJSON(path, "config.json", cfg, _maxConfigBytes); err != nil {
 		return Record{}, err
 	}
 	for _, filename := range []string{".lease", ".operation", ".logs", "container.log"} {
@@ -261,7 +252,7 @@ func (store *Store) Create(ctx context.Context, cfg config.Config, name string) 
 			return Record{}, err
 		}
 	}
-	if err := store.writeJSON(path, "state.json", record, maxRecordBytes); err != nil {
+	if err := store.writeJSON(path, "state.json", record, _maxRecordBytes); err != nil {
 		return Record{}, err
 	}
 	final := filepath.Join(store.root, id)
@@ -286,7 +277,7 @@ func (store *Store) readJSON(path string, limit int64, target any) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	stat, err := file.Stat()
 	if err != nil {
 		return err
@@ -319,7 +310,7 @@ func (store *Store) writeJSON(dir, name string, value any, limit int64) error {
 		if err != nil {
 			return err
 		}
-		file.Close()
+		_ = file.Close()
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -327,13 +318,13 @@ func (store *Store) writeJSON(dir, name string, value any, limit int64) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
@@ -343,15 +334,6 @@ func (store *Store) writeJSON(dir, name string, value any, limit int64) error {
 		return err
 	}
 	return syncDirectory(dir)
-}
-
-func syncDirectory(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return file.Sync()
 }
 
 func (store *Store) readRecord(id string) (Record, error) {
@@ -366,7 +348,7 @@ func (store *Store) readRecord(id string) (Record, error) {
 		return Record{}, err
 	}
 	var record Record
-	if err := store.readJSON(filepath.Join(path, "state.json"), maxRecordBytes, &record); err != nil {
+	if err := store.readJSON(filepath.Join(path, "state.json"), _maxRecordBytes, &record); err != nil {
 		return Record{}, fmt.Errorf("read container %s: %w", id, err)
 	}
 	return record, validateRecord(record, id)
@@ -379,7 +361,7 @@ func (store *Store) listLocked() ([]Record, error) {
 	}
 	records := make([]Record, 0, len(entries))
 	for _, entry := range entries {
-		if !containerID.MatchString(entry.Name()) {
+		if !_containerID.MatchString(entry.Name()) {
 			continue
 		}
 		record, err := store.readRecord(entry.Name())
@@ -401,7 +383,7 @@ func (store *Store) resolveLocked(ref string) (Record, error) {
 	if err := validateReference(ref); err != nil {
 		return Record{}, err
 	}
-	if containerID.MatchString(ref) {
+	if _containerID.MatchString(ref) {
 		return store.readRecord(ref)
 	}
 	records, err := store.listLocked()
@@ -433,7 +415,7 @@ func (store *Store) Get(ctx context.Context, ref string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	return store.resolveLocked(ref)
 }
 
@@ -445,7 +427,7 @@ func (store *Store) List(ctx context.Context) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	return store.listLocked()
 }
 
@@ -454,14 +436,16 @@ func (store *Store) Update(ctx context.Context, id string, update func(*Record) 
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	record, err := store.readRecord(id)
 	if err != nil {
 		return err
 	}
-	before := snapshotEvents(record)
-	originalName := record.Name
-	labels := maps.Clone(record.Labels)
+	var (
+		before       = snapshotEvents(record)
+		originalName = record.Name
+		labels       = maps.Clone(record.Labels)
+	)
 	if err := update(&record); err != nil {
 		return err
 	}
@@ -482,12 +466,12 @@ func (store *Store) Config(ctx context.Context, id string) (config.Config, error
 	if err != nil {
 		return config.Config{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := store.readRecord(id); err != nil {
 		return config.Config{}, err
 	}
 	var cfg config.Config
-	if err := store.readJSON(filepath.Join(store.root, id, "config.json"), maxConfigBytes, &cfg); err != nil {
+	if err := store.readJSON(filepath.Join(store.root, id, "config.json"), _maxConfigBytes, &cfg); err != nil {
 		return config.Config{}, err
 	}
 	return cfg, cfg.ValidateExecution()
@@ -499,7 +483,7 @@ func (store *Store) AcquireLease(ctx context.Context, id string) (*os.File, erro
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := store.readRecord(id); err != nil {
 		return nil, err
 	}
@@ -508,7 +492,7 @@ func (store *Store) AcquireLease(ctx context.Context, id string) (*os.File, erro
 		return nil, err
 	}
 	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		file.Close()
+		_ = file.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return nil, ErrBusy
 		}
@@ -522,7 +506,7 @@ func (store *Store) OpenLog(ctx context.Context, id string, write bool) (*os.Fil
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := store.readRecord(id); err != nil {
 		return nil, err
 	}
@@ -550,17 +534,17 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer deletion.Close()
+	defer func() { _ = deletion.Close() }()
 	logLock, _, err := store.lockLog(ctx, id, false)
 	if err != nil {
 		return err
 	}
-	defer logLock.Close()
+	defer func() { _ = logLock.Close() }()
 	lock, err := store.lock(ctx, false)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	record, err = store.readRecord(id)
 	if err != nil {
 		return err
@@ -572,7 +556,7 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if err := unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return ErrBusy
@@ -600,7 +584,7 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	store.publishEventsLocked([]Event{newLifecycleEvent(record, "remove")})
 	// Publication is complete. Recursive deletion is fenced by the stable
 	// transaction lock, so logs and metadata for other containers can proceed.
-	lock.Close()
+	_ = lock.Close()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -610,13 +594,44 @@ func (store *Store) Remove(ctx context.Context, id string) error {
 	return syncDirectory(store.root)
 }
 
+func openStoreContext(ctx context.Context) (*Store, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if os.Geteuid() != 0 {
+		return nil, errors.New("container management requires root privileges")
+	}
+	store := &Store{root: _storeRoot}
+	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", _storeRoot} {
+		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if err := store.checkDirectory(dir, dir == _storeRoot); err != nil {
+			return nil, err
+		}
+	}
+	if err := store.recoverTransactions(ctx); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+func syncDirectory(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	return file.Sync()
+}
+
 // currentBootID distinguishes persistent records from an earlier system boot.
 func currentBootID() (string, error) {
 	file, err := os.Open("/proc/sys/kernel/random/boot_id")
 	if err != nil {
 		return "", fmt.Errorf("read system boot ID: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, 129))
 	if err != nil {
 		return "", fmt.Errorf("read system boot ID: %w", err)
@@ -625,7 +640,7 @@ func currentBootID() (string, error) {
 		return "", errors.New("system boot ID exceeds its size limit")
 	}
 	id := strings.TrimSpace(string(data))
-	if !bootIDPattern.MatchString(id) {
+	if !_bootIDPattern.MatchString(id) {
 		return "", errors.New("system boot ID is not a lowercase UUID")
 	}
 	return id, nil

@@ -27,9 +27,11 @@ func EnsureRestartManager(ctx context.Context, replace bool) error {
 	if strings.ContainsAny(exe, "\n\r\x00") {
 		return errors.New("invalid restart manager executable path")
 	}
-	path := "/etc/systemd/system/" + restartUnit
-	body := []byte("[Unit]\nDescription=casklet automatic container restarts\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=" + strconv.Quote(strings.ReplaceAll(exe, "%", "%%")) + " __restart-manager\nRestart=on-failure\nRestartSec=2s\nTimeoutStopSec=45s\n\n[Install]\nWantedBy=multi-user.target\n")
-	var st unix.Stat_t
+	var (
+		path = "/etc/systemd/system/" + _restartUnit
+		body = []byte("[Unit]\nDescription=casklet automatic container restarts\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=" + strconv.Quote(strings.ReplaceAll(exe, "%", "%%")) + " __restart-manager\nRestart=on-failure\nRestartSec=2s\nTimeoutStopSec=45s\n\n[Install]\nWantedBy=multi-user.target\n")
+		st   unix.Stat_t
+	)
 	if err := unix.Lstat(path, &st); err == nil {
 		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0022 != 0 || st.Nlink != 1 {
 			return errors.New("unsafe restart manager unit file")
@@ -50,7 +52,7 @@ func EnsureRestartManager(ctx context.Context, replace bool) error {
 		if err != nil {
 			return err
 		}
-		defer os.Remove(stage.Name())
+		defer func() { _ = os.Remove(stage.Name()) }()
 		if _, err = stage.Write(body); err == nil {
 			err = stage.Chmod(0644)
 		}
@@ -71,14 +73,14 @@ func EnsureRestartManager(ctx context.Context, replace bool) error {
 			return err
 		}
 	}
-	if _, err := systemdCommand(ctx, "systemctl", "enable", restartUnit); err != nil {
+	if _, err := systemdCommand(ctx, "systemctl", "enable", _restartUnit); err != nil {
 		return err
 	}
 	action := "start"
 	if changed || replace {
 		action = "restart"
 	}
-	if _, err := systemdCommand(ctx, "systemctl", action, restartUnit); err != nil {
+	if _, err := systemdCommand(ctx, "systemctl", action, _restartUnit); err != nil {
 		return fmt.Errorf("ensure restart manager: %w", err)
 	}
 	return nil

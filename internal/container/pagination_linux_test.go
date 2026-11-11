@@ -19,22 +19,32 @@ import (
 
 func paginationStore(t *testing.T, count int) (*Store, []Record) {
 	t.Helper()
-	store := testStore(t)
-	records := make([]Record, count)
+	var (
+		store   = testStore(t)
+		records = make([]Record, count)
+	)
 	for i := range records {
-		record := Record{Version: 1, ID: fmt.Sprintf("%032x", i+1), Name: fmt.Sprintf("page-%d", i), State: StateExited,
-			CreatedAt: time.Unix(int64(count-i), 0), Command: []string{"/bin/sh", "-c", strings.Repeat(" ", 32<<10) + "true"}}
-		dir := filepath.Join(store.root, record.ID)
+		var (
+			record = Record{
+				Version:   1,
+				ID:        fmt.Sprintf("%032x", i+1),
+				Name:      fmt.Sprintf("page-%d", i),
+				State:     StateExited,
+				CreatedAt: time.Unix(int64(count-i), 0),
+				Command:   []string{"/bin/sh", "-c", strings.Repeat(" ", 32<<10) + "true"},
+			}
+			dir = filepath.Join(store.root, record.ID)
+		)
 		if err := os.Mkdir(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.writeJSON(dir, "state.json", record, maxRecordBytes); err != nil {
+		if err := store.writeJSON(dir, "state.json", record, _maxRecordBytes); err != nil {
 			t.Fatal(err)
 		}
 		cfg := testConfig()
 		cfg.Network = "bridge"
 		cfg.Publish = []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}}
-		if err := store.writeJSON(dir, "config.json", cfg, maxConfigBytes); err != nil {
+		if err := store.writeJSON(dir, "config.json", cfg, _maxConfigBytes); err != nil {
 			t.Fatal(err)
 		}
 		records[i] = record
@@ -55,15 +65,17 @@ func watchContainerFileReads(t *testing.T, store *Store, records []Record, name 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unix.Close(fd) })
+	t.Cleanup(func() { _ = unix.Close(fd) })
 	for _, record := range records {
 		if _, err := unix.InotifyAddWatch(fd, filepath.Join(store.root, record.ID, name), unix.IN_OPEN|unix.IN_CLOSE_NOWRITE); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return func() int {
-		count := 0
-		buffer := make([]byte, 64<<10)
+		var (
+			count  = 0
+			buffer = make([]byte, 64<<10)
+		)
 		for {
 			n, err := unix.Read(fd, buffer)
 			if errors.Is(err, unix.EAGAIN) {
@@ -88,16 +100,18 @@ func watchContainerFileReads(t *testing.T, store *Store, records []Record, name 
 
 func TestRecordPagesReadEachStateOnce(t *testing.T) {
 	store, records := paginationStore(t, 256)
-	reads := watchRecordReads(t, store, records)
-	ctx := context.Background()
-	legacyReads := 0
+	var (
+		reads       = watchRecordReads(t, store, records)
+		ctx         = context.Background()
+		legacyReads = 0
+	)
 	for i := 0; i < 4; i++ {
 		if _, err := store.List(ctx); err != nil {
 			t.Fatal(err)
 		}
 		legacyReads += reads()
 	}
-	options := RecordPageOptions{}
+	var options RecordPageOptions
 	total, pages, pageReads := 0, 0, 0
 	for {
 		page, err := store.ListPage(ctx, options)
@@ -170,13 +184,15 @@ func TestRefreshedPagesFilterBeforeRefreshAndRefillRemovals(t *testing.T) {
 		if i%2 == 0 {
 			record.Labels = map[string]string{"project": "demo"}
 			record.Health = &Health{Status: HealthHealthy}
-			if err := store.writeJSON(filepath.Join(store.root, record.ID), "state.json", record, maxRecordBytes); err != nil {
+			if err := store.writeJSON(filepath.Join(store.root, record.ID), "state.json", record, _maxRecordBytes); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	options := RecordPageOptions{Labels: map[string]string{"project": "demo"}}
-	calls := 0
+	var (
+		options = RecordPageOptions{Labels: map[string]string{"project": "demo"}}
+		calls   = 0
+	)
 	page, err := refreshedPage(ctx, store, options, func(ctx context.Context, record Record) (Record, error) {
 		calls++
 		if record.Labels["project"] != "demo" {

@@ -11,14 +11,15 @@ import (
 )
 
 const (
-	StateCreated        = "created"
-	StateStarting       = "starting"
-	StateRunning        = "running"
-	StateStopping       = "stopping"
-	StateExited         = "exited"
-	StateFailed         = "failed"
-	MaxLogBytes   int64 = 16 * 1024 * 1024
+	StateCreated  = "created"
+	StateStarting = "starting"
+	StateRunning  = "running"
+	StateStopping = "stopping"
+	StateExited   = "exited"
+	StateFailed   = "failed"
 )
+
+const MaxLogBytes int64 = 16 * 1024 * 1024
 
 var (
 	ErrNotFound    = errors.New("container not found")
@@ -26,9 +27,12 @@ var (
 	ErrNameInUse   = errors.New("container name is already in use")
 	ErrBusy        = errors.New("container supervisor is still active")
 	ErrNotTerminal = errors.New("container must be stopped before removal")
-	containerID    = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	bootIDPattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	containerName  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
+)
+
+var (
+	_containerID   = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	_bootIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	_containerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
 )
 
 // Record is the durable lifecycle state of a detached container.
@@ -69,28 +73,39 @@ type Record struct {
 	Publish []config.PortMapping `json:"publish,omitempty"`
 }
 
-// Terminal reports whether a supervisor has finished the container.
-func (record Record) Terminal() bool {
-	return record.State == StateExited || record.State == StateFailed
+// ExecutionResult is a retained completion receipt for one container execution.
+type ExecutionResult struct {
+	ExitReason      string     `json:"exit_reason,omitempty"`
+	OOMKilled       bool       `json:"oom_killed"`
+	CleanupFailures []string   `json:"cleanup_failures,omitempty"`
+	Generation      uint64     `json:"generation"`
+	StartedAt       *time.Time `json:"started_at"`
+	FinishedAt      *time.Time `json:"finished_at"`
+	ExitCode        *int       `json:"exit_code"`
 }
 
 // ValidateName rejects names that could escape the storage directory or confuse references.
 func ValidateName(name string) error {
-	if !containerName.MatchString(name) || containerID.MatchString(name) {
+	if !_containerName.MatchString(name) || _containerID.MatchString(name) {
 		return errors.New("container name must contain 1 to 63 letters, digits, dots, underscores, or hyphens, start with a letter or digit, and differ from a full container ID")
 	}
 	return nil
 }
 
+// Terminal reports whether a supervisor has finished the container.
+func (record Record) Terminal() bool {
+	return record.State == StateExited || record.State == StateFailed
+}
+
 func validateID(id string) error {
-	if !containerID.MatchString(id) {
+	if !_containerID.MatchString(id) {
 		return errors.New("container ID must contain exactly 32 lowercase hexadecimal digits")
 	}
 	return nil
 }
 
 func validateReference(ref string) error {
-	if containerID.MatchString(ref) {
+	if _containerID.MatchString(ref) {
 		return nil
 	}
 	return ValidateName(ref)
@@ -109,13 +124,15 @@ func validateRecord(record Record, id string) error {
 	if record.StopTimeout != nil && (*record.StopTimeout < 0 || *record.StopTimeout > time.Minute) {
 		return errors.New("invalid recorded stop timeout")
 	}
-	if record.RestartCount > 1000000 || record.StoppedBootID != "" && !bootIDPattern.MatchString(record.StoppedBootID) || record.RestartBootID != "" && !bootIDPattern.MatchString(record.RestartBootID) {
+	if record.RestartCount > 1000000 ||
+		record.StoppedBootID != "" && !_bootIDPattern.MatchString(record.StoppedBootID) ||
+		record.RestartBootID != "" && !_bootIDPattern.MatchString(record.RestartBootID) {
 		return errors.New("invalid recorded restart state")
 	}
 	if record.Version != 1 || record.ID != id {
 		return errors.New("invalid container record version or identity")
 	}
-	if record.BootID != "" && !bootIDPattern.MatchString(record.BootID) {
+	if record.BootID != "" && !_bootIDPattern.MatchString(record.BootID) {
 		return errors.New("invalid container boot ID")
 	}
 	if err := ValidateName(record.Name); err != nil {
@@ -162,19 +179,16 @@ func validateCleanupFailures(stages []string) error {
 	return nil
 }
 
-// ExecutionResult is a retained completion receipt for one container execution.
-type ExecutionResult struct {
-	ExitReason      string     `json:"exit_reason,omitempty"`
-	OOMKilled       bool       `json:"oom_killed"`
-	CleanupFailures []string   `json:"cleanup_failures,omitempty"`
-	Generation      uint64     `json:"generation"`
-	StartedAt       *time.Time `json:"started_at"`
-	FinishedAt      *time.Time `json:"finished_at"`
-	ExitCode        *int       `json:"exit_code"`
-}
-
 func executionResult(record Record) ExecutionResult {
-	return ExecutionResult{ExitReason: record.ExitReason, OOMKilled: record.OOMKilled, CleanupFailures: append([]string(nil), record.CleanupFailures...), Generation: record.Generation, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode}
+	return ExecutionResult{
+		ExitReason:      record.ExitReason,
+		OOMKilled:       record.OOMKilled,
+		CleanupFailures: append([]string(nil), record.CleanupFailures...),
+		Generation:      record.Generation,
+		StartedAt:       record.StartedAt,
+		FinishedAt:      record.FinishedAt,
+		ExitCode:        record.ExitCode,
+	}
 }
 
 func validateExitStatus(reason string, oom bool) error {

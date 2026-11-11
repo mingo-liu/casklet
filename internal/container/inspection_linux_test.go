@@ -12,14 +12,18 @@ import (
 )
 
 func TestSnapshotConcurrentRemovalAndNameReuse(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	record := createTestRecord(t, store, "worker")
+	var (
+		store  = testStore(t)
+		ctx    = context.Background()
+		record = createTestRecord(t, store, "worker")
+	)
 	if err := store.Update(ctx, record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	var wg sync.WaitGroup
-	failures := make(chan error, 8)
+	var (
+		wg       sync.WaitGroup
+		failures = make(chan error, 8)
+	)
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
@@ -59,11 +63,13 @@ func TestSnapshotConcurrentRemovalAndNameReuse(t *testing.T) {
 }
 
 func TestSnapshotDoesNotDiscloseInvalidEnvironment(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "worker")
-	cfg := testConfig()
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "worker")
+		cfg    = testConfig()
+	)
 	cfg.Env = []string{"INVALID-KEY=private-invalid-value"}
-	if err := store.writeJSON(filepath.Join(store.root, record.ID), "config.json", cfg, maxConfigBytes); err != nil {
+	if err := store.writeJSON(filepath.Join(store.root, record.ID), "config.json", cfg, _maxConfigBytes); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := store.Snapshot(context.Background(), record.ID)

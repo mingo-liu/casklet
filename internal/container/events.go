@@ -27,9 +27,22 @@ type Event struct {
 	Service         string    `json:"service,omitempty"`
 }
 
-var eventTypes = map[string]bool{"create": true, "starting": true, "start": true, "stopping": true, "exit": true, "restart": true, "stop_requested": true, "restart_scheduled": true, "health": true, "cleanup_failed": true, "remove": true}
+var _eventTypes = map[string]bool{
+	"create":            true,
+	"starting":          true,
+	"start":             true,
+	"stopping":          true,
+	"exit":              true,
+	"restart":           true,
+	"stop_requested":    true,
+	"restart_scheduled": true,
+	"health":            true,
+	"cleanup_failed":    true,
+	"remove":            true,
+}
 
 type EventFilter struct{ Key, Value string }
+
 type EventQuery struct {
 	Follow  bool
 	After   *uint64
@@ -47,7 +60,7 @@ func (query EventQuery) Validate() error {
 		}
 		switch filter.Key {
 		case "event":
-			if !eventTypes[filter.Value] {
+			if !_eventTypes[filter.Value] {
 				return errors.New("unknown lifecycle event type")
 			}
 		case "container", "project", "service":
@@ -57,6 +70,7 @@ func (query EventQuery) Validate() error {
 	}
 	return nil
 }
+
 func (query EventQuery) matches(event Event) bool {
 	if event.Time.Before(query.Since) {
 		return false

@@ -21,19 +21,15 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 	"github.com/mingo-liu/casklet/internal/ipc"
 	"github.com/mingo-liu/casklet/internal/rootfs"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 	"golang.org/x/sys/unix"
 )
 
 type copyControl struct {
-	Path     string
-	Upload   bool
-	Overlay  *rootfs.Overlay
-	Excluded []string
-}
-
-func copyPathsOverlap(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+	Path     string          `json:"Path"`
+	Upload   bool            `json:"Upload"`
+	Overlay  *rootfs.Overlay `json:"Overlay"`
+	Excluded []string        `json:"Excluded"`
 }
 
 // Copy holds the immutable container's lifecycle lock through the stream. Live
@@ -52,7 +48,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 	if err != nil {
 		return err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	record, err = refreshRecord(ctx, store, record, false)
 	if err != nil {
 		return err
@@ -74,7 +70,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 		if err != nil {
 			return err
 		}
-		defer rootFile.Close()
+		defer func() { _ = rootFile.Close() }()
 	} else {
 		if !record.Terminal() {
 			return errors.New("copy requires a running or stopped container")
@@ -93,7 +89,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 			return errors.New("copy cannot access stopped temporary storage; start the container first")
 		}
 		if record.RunPath != "" {
-			if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
+			if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
 				return err
 			}
 		}
@@ -101,7 +97,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 		if err != nil {
 			return err
 		}
-		defer lease.Close()
+		defer func() { _ = lease.Close() }()
 		retained, err := store.RootFS(ctx, record.ID)
 		if err != nil {
 			return err
@@ -114,7 +110,7 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 			if err != nil {
 				return err
 			}
-			defer rootFile.Close()
+			defer func() { _ = rootFile.Close() }()
 		} else if errors.Is(err, os.ErrNotExist) {
 			storage := rootfs.OverlayStoragePath(retained)
 			id, overlay, err := rootfs.ReadOverlayImageID(storage)
@@ -132,12 +128,12 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 			if err != nil {
 				return err
 			}
-			defer lease.Close()
+			defer func() { _ = lease.Close() }()
 			target, err := os.MkdirTemp("", "casklet-copy-*")
 			if err != nil {
 				return err
 			}
-			defer os.Remove(target)
+			defer func() { _ = os.Remove(target) }()
 			control.Overlay = &rootfs.Overlay{Lower: lower, Storage: storage, Target: target}
 		} else {
 			return err
@@ -147,8 +143,8 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 	if err != nil {
 		return err
 	}
-	defer data.Close()
-	defer os.Remove(data.Name())
+	defer func() { _ = data.Close() }()
+	defer func() { _ = os.Remove(data.Name()) }()
 	if err := json.NewEncoder(data).Encode(control); err != nil {
 		return err
 	}
@@ -174,6 +170,21 @@ func Copy(ctx context.Context, ref, name string, upload bool, stdin, stdout, std
 	return nil
 }
 
+// CopyInit runs in a new private mount namespace. A stopped OverlayFS root is
+// mounted only here; process exit also disposes of its namespace on abrupt loss.
+func CopyInit() int {
+	err := copyInit()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
+		return 125
+	}
+	return 0
+}
+
+func copyPathsOverlap(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
 func liveCopyRoot(ctx context.Context, store *Store, record Record) (*os.File, error) {
 	startup, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -184,8 +195,10 @@ func liveCopyRoot(ctx context.Context, store *Store, record Record) (*os.File, e
 	if !status.live() || status.MainPID <= 0 {
 		return nil, errors.New("container supervisor is unavailable")
 	}
-	endpoint := filepath.Join(store.root, record.ID, "exec.sock")
-	var stat unix.Stat_t
+	var (
+		endpoint = filepath.Join(store.root, record.ID, "exec.sock")
+		stat     unix.Stat_t
+	)
 	if err := unix.Lstat(endpoint, &stat); err != nil {
 		return nil, err
 	}
@@ -196,14 +209,20 @@ func liveCopyRoot(ctx context.Context, store *Store, record Record) (*os.File, e
 	if err != nil {
 		return nil, err
 	}
-	conn := connection.(*net.UnixConn)
-	defer conn.Close()
+	conn, ok := connection.(*net.UnixConn)
+	if !ok {
+		_ = connection.Close()
+		return nil, errors.New("container copy requires a Unix connection")
+	}
+	defer func() { _ = conn.Close() }()
 	peer, err := ipc.Peer(conn)
 	if err != nil || peer.Uid != 0 || int(peer.Pid) != status.MainPID {
 		return nil, errors.New("unexpected container copy supervisor")
 	}
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	stop := context.AfterFunc(startup, func() { conn.Close() })
+	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(startup, func() { _ = conn.Close() })
 	defer stop()
 	if err := ipc.Send(conn, execMessage{Version: 1, Kind: "copy-root", Generation: record.Generation}, nil); err != nil {
 		return nil, err
@@ -213,7 +232,13 @@ func liveCopyRoot(ctx context.Context, store *Store, record Record) (*os.File, e
 		return nil, err
 	}
 	var response execMessage
-	if ipc.Decode(data, &response) != nil || response.Version != 1 || response.Kind != "copy-root" || response.Generation != record.Generation || response.Options != nil || response.Signal != 0 || response.Code != 0 || response.Error != "" || len(files) != 1 {
+	if ipc.Decode(data, &response) != nil || response.Version != 1 || response.Kind != "copy-root" ||
+		response.Generation != record.Generation ||
+		response.Options != nil ||
+		response.Signal != 0 ||
+		response.Code != 0 ||
+		response.Error != "" ||
+		len(files) != 1 {
 		ipc.CloseFiles(files)
 		return nil, errors.New("supervisor does not support file copying; restart the container and retry")
 	}
@@ -225,23 +250,12 @@ func liveCopyRoot(ctx context.Context, store *Store, record Record) (*os.File, e
 	return files[0], nil
 }
 
-// CopyInit runs in a new private mount namespace. A stopped OverlayFS root is
-// mounted only here; process exit also disposes of its namespace on abrupt loss.
-func CopyInit() int {
-	err := copyInit()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
-		return 125
-	}
-	return 0
-}
-
 func copyInit() error {
 	if os.Geteuid() != 0 {
 		return errors.New("container copying requires the Linux engine as root")
 	}
 	data := os.NewFile(3, "copy-control")
-	defer data.Close()
+	defer func() { _ = data.Close() }()
 	decoder := json.NewDecoder(data)
 	decoder.DisallowUnknownFields()
 	var control copyControl
@@ -259,7 +273,7 @@ func copyInit() error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer cancel()
 	stream := os.Stdout
@@ -272,12 +286,12 @@ func copyInit() error {
 		return err
 	}
 	if err := unix.SetNonblock(fd, true); err != nil {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return err
 	}
 	file := os.NewFile(uintptr(fd), "copy-stream")
-	defer file.Close()
-	stop := context.AfterFunc(ctx, func() { file.Close() })
+	defer func() { _ = file.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = file.Close() })
 	defer stop()
 	if control.Upload {
 		return copyfs.ImportChecked(ctx, root, control.Path, file, func(target string) error {

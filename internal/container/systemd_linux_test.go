@@ -42,10 +42,12 @@ func TestUnitStatusNeverTreatsLiveSupervisorAsInactive(t *testing.T) {
 }
 
 func TestSchedulingGraceExpiresAcrossBootsAndClockChanges(t *testing.T) {
-	now := time.Now().UTC()
-	boot := "11111111-1111-1111-1111-111111111111"
-	base := Record{State: StateStarting, CreatedAt: now.Add(-time.Second), BootID: boot}
-	missing := unitStatus{LoadState: "not-found", ActiveState: "inactive"}
+	var (
+		now     = time.Now().UTC()
+		boot    = "11111111-1111-1111-1111-111111111111"
+		base    = Record{State: StateStarting, CreatedAt: now.Add(-time.Second), BootID: boot}
+		missing = unitStatus{LoadState: "not-found", ActiveState: "inactive"}
+	)
 	if !schedulingPendingAt(base, missing, boot, now) {
 		t.Fatal("normal concurrent scheduling was treated as abandoned")
 	}
@@ -60,7 +62,7 @@ func TestSchedulingGraceExpiresAcrossBootsAndClockChanges(t *testing.T) {
 	for _, change := range []func(*Record){
 		func(record *Record) { record.BootID = "22222222-2222-2222-2222-222222222222" },
 		func(record *Record) { record.CreatedAt = now.Add(time.Hour) },
-		func(record *Record) { record.CreatedAt = now.Add(-detachedStartupLimit) },
+		func(record *Record) { record.CreatedAt = now.Add(-_detachedStartupLimit) },
 		func(record *Record) { record.State = StateStopping },
 		func(record *Record) { record.StartedAt = &now },
 	} {

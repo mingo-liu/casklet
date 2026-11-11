@@ -33,13 +33,17 @@ func transactionFixture(t *testing.T, store *Store, prefix string) string {
 func TestStoreOperationsRecoverInterruptedTransactions(t *testing.T) {
 	for _, operation := range []string{"create", "list", "remove"} {
 		t.Run(operation, func(t *testing.T) {
-			store := testStore(t)
-			record := createTestRecord(t, store, "retained")
+			var (
+				store  = testStore(t)
+				record = createTestRecord(t, store, "retained")
+			)
 			finishTestExecution(t, store, record, 0)
-			created := transactionFixture(t, store, ".create-")
-			removed := transactionFixture(t, store, ".remove-")
-			outside := t.TempDir()
-			marker := filepath.Join(outside, "keep")
+			var (
+				created = transactionFixture(t, store, ".create-")
+				removed = transactionFixture(t, store, ".remove-")
+				outside = t.TempDir()
+				marker  = filepath.Join(outside, "keep")
+			)
 			if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -79,13 +83,15 @@ func TestStoreOperationsRecoverInterruptedTransactions(t *testing.T) {
 func TestRecoveryPreservesLeasedTransactions(t *testing.T) {
 	for _, name := range []string{".lease", ".operation", ".logs"} {
 		t.Run(name, func(t *testing.T) {
-			store := testStore(t)
-			path := transactionFixture(t, store, ".remove-")
+			var (
+				store = testStore(t)
+				path  = transactionFixture(t, store, ".remove-")
+			)
 			file, err := store.openFile(filepath.Join(path, name), unix.O_RDWR, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +101,7 @@ func TestRecoveryPreservesLeasedTransactions(t *testing.T) {
 			if _, err := os.Stat(path); err != nil {
 				t.Fatal("live transaction removed", err)
 			}
-			file.Close()
+			_ = file.Close()
 			if _, err := store.List(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +118,7 @@ func TestLiveDeletionDoesNotBlockMetadataLogsOrRecoverItsPartialTree(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer deletion.Close()
+	defer func() { _ = deletion.Close() }()
 	// A live RemoveAll may already have removed every internal lease file.
 	partial := transactionFixture(t, store, ".remove-")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -137,7 +143,7 @@ func TestLiveDeletionDoesNotBlockMetadataLogsOrRecoverItsPartialTree(t *testing.
 	if err := store.Remove(short, record.ID); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deletion ignored cancellation: %v", err)
 	}
-	deletion.Close()
+	_ = deletion.Close()
 	if err := store.Remove(ctx, record.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -149,14 +155,18 @@ func TestLiveDeletionDoesNotBlockMetadataLogsOrRecoverItsPartialTree(t *testing.
 func TestTransactionRecoveryRejectsUnsafeArtifacts(t *testing.T) {
 	for _, kind := range []string{"symlink", "public", "lease-symlink", "lease-hardlink", "lease-fifo", "lease-public"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
-			path := transactionFixture(t, store, ".remove-")
-			outside := filepath.Join(t.TempDir(), "outside")
+			var (
+				store   = testStore(t)
+				path    = transactionFixture(t, store, ".remove-")
+				outside = filepath.Join(t.TempDir(), "outside")
+			)
 			if err := os.WriteFile(outside, []byte("keep"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			lease := filepath.Join(path, ".lease")
-			var err error
+			var (
+				lease = filepath.Join(path, ".lease")
+				err   error
+			)
 			switch kind {
 			case "symlink":
 				if err := os.RemoveAll(path); err != nil {
@@ -193,8 +203,10 @@ func TestTransactionRecoveryRejectsUnsafeArtifacts(t *testing.T) {
 }
 
 func TestTransactionRecoveryHonorsCancellation(t *testing.T) {
-	store := testStore(t)
-	path := transactionFixture(t, store, ".create-")
+	var (
+		store = testStore(t)
+		path  = transactionFixture(t, store, ".create-")
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := store.recoverTransactions(ctx); !errors.Is(err, context.Canceled) {
@@ -208,6 +220,7 @@ func TestTransactionRecoveryHonorsCancellation(t *testing.T) {
 // Cancel only after a real unlink, avoiding directory-size and scheduler timing assumptions.
 type removalContext struct {
 	context.Context
+
 	directory string
 	initial   int
 	cancel    context.CancelFunc
@@ -223,12 +236,16 @@ func (ctx removalContext) Err() error {
 func TestContainerDeletionCancellationPreservesRecoverableTransaction(t *testing.T) {
 	for _, operation := range []string{"remove", "recover"} {
 		t.Run(operation, func(t *testing.T) {
-			store := testStore(t)
-			record := createTestRecord(t, store, "removed")
+			var (
+				store  = testStore(t)
+				record = createTestRecord(t, store, "removed")
+			)
 			finishTestExecution(t, store, record, 0)
-			retained := createTestRecord(t, store, "unrelated")
-			path := filepath.Join(store.root, record.ID)
-			tombstone := filepath.Join(store.root, ".remove-"+record.ID)
+			var (
+				retained  = createTestRecord(t, store, "unrelated")
+				path      = filepath.Join(store.root, record.ID)
+				tombstone = filepath.Join(store.root, ".remove-"+record.ID)
+			)
 			if operation == "recover" {
 				if err := os.Rename(path, tombstone); err != nil {
 					t.Fatal(err)
@@ -245,8 +262,10 @@ func TestContainerDeletionCancellationPreservesRecoverableTransaction(t *testing
 			}
 			parent, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			ctx := removalContext{parent, filepath.Join(tombstone, "rootfs"), 300, cancel}
-			var err error
+			var (
+				ctx = removalContext{Context: parent, directory: filepath.Join(tombstone, "rootfs"), initial: 300, cancel: cancel}
+				err error
+			)
 			if operation == "remove" {
 				err = store.Remove(ctx, record.ID)
 			} else {
