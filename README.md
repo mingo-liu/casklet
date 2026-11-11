@@ -43,7 +43,7 @@ Go and Make are unnecessary. Documentation is available in this repository.
 Release binaries are not Developer ID signed or notarized, so macOS may require
 approval in **System Settings > Privacy & Security** after a browser download.
 
-Alternatively, build from the repository directory with **Go 1.27.3+** and Make:
+Alternatively, build from the repository directory with **Go 1.27.4+** and Make:
 
 ```sh
 make build
