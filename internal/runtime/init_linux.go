@@ -32,14 +32,14 @@ func Init() int {
 	unix.CloseOnExec(4)
 	control := os.NewFile(3, "init-control")
 	lock := os.NewFile(4, "run-lock")
-	defer control.Close()
-	defer lock.Close()
+	defer func() { _ = control.Close() }()
+	defer func() { _ = lock.Close() }()
 	encoder := json.NewEncoder(control)
 	fail := func(err error) int {
 		_ = encoder.Encode(message{Kind: "error", Error: err.Error()})
 		return 125
 	}
-	if err := control.SetDeadline(time.Now().Add(startupLimit)); err != nil {
+	if err := control.SetDeadline(time.Now().Add(_startupLimit)); err != nil {
 		return fail(err)
 	}
 	decoder := json.NewDecoder(control)
@@ -59,7 +59,7 @@ func Init() int {
 	for i := range config.VolumeNames(cfg.Mounts) {
 		fd := volumeFD + i
 		unix.CloseOnExec(fd)
-		defer unix.Close(fd)
+		defer func() { _ = unix.Close(fd) }()
 	}
 	if prepare.ImageLease {
 		fd := volumeFD + len(config.VolumeNames(cfg.Mounts))
@@ -73,6 +73,7 @@ func Init() int {
 	if err := cfg.ValidateExecution(); err != nil {
 		return fail(err)
 	}
+	// Retain a short signal burst; Wait4 drains all children after any SIGCHLD wake-up.
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT, syscall.SIGCHLD)
 	defer signal.Stop(signals)
@@ -82,7 +83,7 @@ func Init() int {
 		if cfg.TTY {
 			fd = 6
 		}
-		unix.Close(fd)
+		_ = unix.Close(fd)
 	}
 	if prepare.Overlay != nil {
 		if err := rootfs.MountOverlay(*prepare.Overlay); err != nil {
@@ -120,7 +121,7 @@ func Init() int {
 		}
 		unix.CloseOnExec(5)
 		err := sendExecNamespaces(5)
-		unix.Close(5)
+		_ = unix.Close(5)
 		if err != nil {
 			return fail(fmt.Errorf("share container namespaces: %w", err))
 		}
@@ -134,10 +135,10 @@ func Init() int {
 		}
 		terminal = slave
 		terminalMaster = master
-		defer terminal.Close()
-		defer terminalMaster.Close()
+		defer func() { _ = terminal.Close() }()
+		defer func() { _ = terminalMaster.Close() }()
 		err = sendTerminal(5, master)
-		unix.Close(5)
+		_ = unix.Close(5)
 		if err != nil {
 			return fail(fmt.Errorf("send terminal: %w", err))
 		}
@@ -160,8 +161,12 @@ func Init() int {
 	}
 	// No children exist yet, so only external stop signals can be pending.
 	select {
-	case sig := <-signals:
-		return 128 + int(sig.(syscall.Signal))
+	case incoming := <-signals:
+		sig, ok := incoming.(syscall.Signal)
+		if !ok {
+			return fail(errors.New("unsupported container signal"))
+		}
+		return 128 + int(sig)
 	default:
 	}
 	if err := control.SetDeadline(time.Time{}); err != nil {
@@ -198,14 +203,21 @@ func Init() int {
 	if err != nil {
 		return fail(err)
 	}
-	defer process.Release()
+	defer func() { _ = process.Release() }()
 	if err := encoder.Encode(message{Kind: "started"}); err != nil {
 		_ = unix.Kill(-1, unix.SIGKILL)
 		return 125
 	}
 	orphaned := make(chan struct{})
 	stopRequests := make(chan time.Duration, 1)
+	requestsDone := make(chan struct{})
+	defer func() {
+		// This control socket is nonblocking, so a read deadline interrupts Decode.
+		_ = control.SetReadDeadline(time.Now())
+		<-requestsDone
+	}()
 	go func() {
+		defer close(requestsDone)
 		defer close(orphaned)
 		for {
 			var request message
@@ -274,8 +286,9 @@ func Init() int {
 			}
 		}
 		select {
-		case sig := <-signals:
-			if sig == syscall.SIGCHLD {
+		case incoming := <-signals:
+			sig, ok := incoming.(syscall.Signal)
+			if !ok || sig == syscall.SIGCHLD {
 				continue
 			}
 			group := process.Pid
@@ -286,7 +299,7 @@ func Init() int {
 					group = foreground
 				}
 			}
-			_ = unix.Kill(-group, sig.(syscall.Signal))
+			_ = unix.Kill(-group, sig)
 			beginShutdown()
 		case requested := <-stopRequests:
 			if !stopping {
@@ -310,7 +323,7 @@ func enableLoopback() error {
 	if err != nil {
 		return fmt.Errorf("open loopback control socket: %w", err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	request, err := unix.NewIfreq("lo")
 	if err != nil {
 		return err

@@ -17,11 +17,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const execTerminalStartupLimit = 10 * time.Second
+const _execTerminalStartupLimit = 10 * time.Second
 
-type execTerminalStopped struct{ signal syscall.Signal }
+type execTerminalStoppedError struct{ signal syscall.Signal }
 
-func (e execTerminalStopped) Error() string {
+var _ error = execTerminalStoppedError{}
+
+func (e execTerminalStoppedError) Error() string {
 	return "terminal setup interrupted by " + e.signal.String()
 }
 
@@ -40,11 +42,11 @@ func publishExecTerminal(ctx context.Context, socket *os.File, terminal ExecTerm
 			}
 			master = files[0]
 			if _, err := unix.IoctlGetInt(terminalFD(master), unix.TIOCGPTN); err != nil {
-				master.Close()
+				_ = master.Close()
 				return errors.New("exec terminal descriptor is not a PTY master")
 			}
 			if err := unix.SetNonblock(terminalFD(master), true); err != nil {
-				master.Close()
+				_ = master.Close()
 				return err
 			}
 			break
@@ -56,7 +58,7 @@ func publishExecTerminal(ctx context.Context, socket *os.File, terminal ExecTerm
 			return err
 		}
 	}
-	defer master.Close()
+	defer func() { _ = master.Close() }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -80,29 +82,10 @@ func publishExecTerminal(ctx context.Context, socket *os.File, terminal ExecTerm
 	}
 }
 
-func pollExecTerminal(ctx context.Context, fd int, events int16) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		fds := []unix.PollFd{{Fd: int32(fd), Events: events}}
-		n, err := unix.Poll(fds, 100)
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if n > 0 {
-			return nil
-		}
-	}
-}
-
 // authorizeExecTerminal is synchronous on the helper's locked namespace thread.
 // No user process starts until the terminal client has configured its PTY.
 func authorizeExecTerminal(fd int, master *os.File, signals <-chan os.Signal) error {
-	ctx, cancel := context.WithTimeout(context.Background(), execTerminalStartupLimit)
+	ctx, cancel := context.WithTimeout(context.Background(), _execTerminalStartupLimit)
 	defer cancel()
 	check := func() error {
 		if err := ctx.Err(); err != nil {
@@ -111,7 +94,7 @@ func authorizeExecTerminal(fd int, master *os.File, signals <-chan os.Signal) er
 		select {
 		case signal := <-signals:
 			if sig, ok := signal.(syscall.Signal); ok && execSignal(sig) {
-				return execTerminalStopped{sig}
+				return execTerminalStoppedError{signal: sig}
 			}
 		default:
 		}
@@ -128,7 +111,7 @@ func authorizeExecTerminal(fd int, master *os.File, signals <-chan os.Signal) er
 		if !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EINTR) {
 			return fmt.Errorf("publish exec terminal: %w", err)
 		}
-		if _, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}, 100); err != nil && !errors.Is(err, unix.EINTR) {
+		if _, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}, int(_terminalPollInterval.Milliseconds())); err != nil && !errors.Is(err, unix.EINTR) {
 			return err
 		}
 	}
@@ -138,7 +121,7 @@ func authorizeExecTerminal(fd int, master *os.File, signals <-chan os.Signal) er
 		}
 		data, files, err := ipc.ReceiveFD(fd, 0)
 		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
-			if _, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 100); err != nil && !errors.Is(err, unix.EINTR) {
+			if _, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, int(_terminalPollInterval.Milliseconds())); err != nil && !errors.Is(err, unix.EINTR) {
 				return err
 			}
 			continue
@@ -154,28 +137,23 @@ func authorizeExecTerminal(fd int, master *os.File, signals <-chan os.Signal) er
 	}
 }
 
-// readExecMembers uses the retained host cgroup descriptor; the container root
-// has no path to this cgroup or access to the descriptor.
-func readExecMembers(group int) (map[int]bool, error) {
-	fd, err := unix.Openat(group, "cgroup.procs", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), "exec-cgroup-members")
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
-	if err != nil || len(data) > 1<<20 {
-		return nil, errors.New("cannot read bounded exec cgroup membership")
-	}
-	members := make(map[int]bool)
-	for _, value := range strings.Fields(string(data)) {
-		pid, err := strconv.Atoi(value)
-		if err != nil || pid <= 0 {
-			return nil, errors.New("invalid exec cgroup member")
+func pollExecTerminal(ctx context.Context, fd int, events int16) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		members[pid] = true
+		fds := []unix.PollFd{{Fd: int32(fd), Events: events}}
+		n, err := unix.Poll(fds, int(_terminalPollInterval.Milliseconds()))
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
 	}
-	return members, nil
 }
 
 func forwardExecTerminalSignal(master *os.File, group int, mainGroup int, sig syscall.Signal) {
@@ -210,6 +188,30 @@ func forwardExecTerminalSignal(master *os.File, group int, mainGroup int, sig sy
 				_ = unix.PidfdSendSignal(pidfd, sig, nil, 0)
 			}
 		}
-		unix.Close(pidfd)
+		_ = unix.Close(pidfd)
 	}
+}
+
+// readExecMembers uses the retained host cgroup descriptor; the container root
+// has no path to this cgroup or access to the descriptor.
+func readExecMembers(group int) (map[int]bool, error) {
+	fd, err := unix.Openat(group, "cgroup.procs", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "exec-cgroup-members")
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	if err != nil || len(data) > 1<<20 {
+		return nil, errors.New("cannot read bounded exec cgroup membership")
+	}
+	members := make(map[int]bool)
+	for _, value := range strings.Fields(string(data)) {
+		pid, err := strconv.Atoi(value)
+		if err != nil || pid <= 0 {
+			return nil, errors.New("invalid exec cgroup member")
+		}
+		members[pid] = true
+	}
+	return members, nil
 }

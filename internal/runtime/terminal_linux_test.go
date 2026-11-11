@@ -15,39 +15,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func testPTY(t *testing.T) (*os.File, *os.File) {
-	t.Helper()
-	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NONBLOCK|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	master := os.NewFile(uintptr(fd), "test-pty-master")
-	t.Cleanup(func() { _ = master.Close() })
-	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
-		t.Fatal(err)
-	}
-	number, err := unix.IoctlGetInt(fd, unix.TIOCGPTN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slave, err := os.OpenFile(filepath.Join("/dev/pts", strconv.Itoa(number)), os.O_RDWR|unix.O_NOCTTY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = slave.Close() })
-	return master, slave
-}
-
-func testTerminalSocket(t *testing.T) (int, int) {
-	t.Helper()
-	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = unix.Close(fds[0]); _ = unix.Close(fds[1]) })
-	return fds[0], fds[1]
-}
-
 func TestRawTermiosPreservesUnrelatedSettings(t *testing.T) {
 	original := unix.Termios{
 		Iflag: unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON | unix.IGNPAR,
@@ -78,7 +45,7 @@ func TestTerminalDescriptorTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transferred.Close()
+	defer func() { _ = transferred.Close() }()
 	fd := terminalFD(transferred)
 	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	if err != nil || flags&unix.FD_CLOEXEC == 0 {
@@ -121,9 +88,9 @@ func TestReceiveTerminalRejectsInvalidDescriptorsWithoutLeaks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pipeRead.Close()
-	defer pipeWrite.Close()
-	for _, tt := range []struct {
+	defer func() { _ = pipeRead.Close() }()
+	defer func() { _ = pipeWrite.Close() }()
+	tests := []struct {
 		name string
 		data []byte
 		fds  []int
@@ -135,7 +102,8 @@ func TestReceiveTerminalRejectsInvalidDescriptorsWithoutLeaks(t *testing.T) {
 		{"slave descriptor", []byte{'T'}, []int{terminalFD(slave)}},
 		{"multiple descriptors", []byte{'T'}, []int{terminalFD(master), terminalFD(master)}},
 		{"truncated ancillary", []byte{'T'}, []int{terminalFD(master), terminalFD(master), terminalFD(master), terminalFD(master)}},
-	} {
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			send, receive := testTerminalSocket(t)
 			before, err := os.ReadDir("/proc/self/fd")
@@ -151,7 +119,7 @@ func TestReceiveTerminalRejectsInvalidDescriptorsWithoutLeaks(t *testing.T) {
 			}
 			file, err := receiveTerminal(receive)
 			if err == nil {
-				file.Close()
+				_ = file.Close()
 				t.Fatal("accepted invalid terminal message")
 			}
 			after, err := os.ReadDir("/proc/self/fd")
@@ -176,8 +144,8 @@ func TestTerminalBridgeCancelsBlockedOutputAndRestoresTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader, writer := os.NewFile(uintptr(fds[0]), "blocked-output-reader"), os.NewFile(uintptr(fds[1]), "blocked-output-writer")
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	buffer := make([]byte, 4096)
 	for {
 		_, err := unix.Write(fds[1], buffer)
@@ -224,13 +192,13 @@ func TestTerminalBridgeRejectsPipeInputWithoutLeaks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	output, err := os.CreateTemp(t.TempDir(), "output-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.Close()
+	defer func() { _ = output.Close() }()
 	before, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
 		t.Fatal(err)
@@ -258,12 +226,12 @@ func TestTerminalBridgeRestoresTerminalAfterStartupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer invalidMaster.Close()
+	defer func() { _ = invalidMaster.Close() }()
 	output, err := os.CreateTemp(t.TempDir(), "output-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer output.Close()
+	defer func() { _ = output.Close() }()
 	bridge, err := startTerminalBridge(invalidMaster, hostInput, output, true)
 	if err == nil {
 		_ = bridge.close(output)
@@ -273,4 +241,37 @@ func TestTerminalBridgeRestoresTerminalAfterStartupFailure(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(restored, original) {
 		t.Fatalf("startup failure left raw mode enabled: got=%+v want=%+v error=%v", restored, original, err)
 	}
+}
+
+func testPTY(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NONBLOCK|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := os.NewFile(uintptr(fd), "test-pty-master")
+	t.Cleanup(func() { _ = master.Close() })
+	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
+		t.Fatal(err)
+	}
+	number, err := unix.IoctlGetInt(fd, unix.TIOCGPTN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slave, err := os.OpenFile(filepath.Join("/dev/pts", strconv.Itoa(number)), os.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = slave.Close() })
+	return master, slave
+}
+
+func testTerminalSocket(t *testing.T) (int, int) {
+	t.Helper()
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Close(fds[0]); _ = unix.Close(fds[1]) })
+	return fds[0], fds[1]
 }

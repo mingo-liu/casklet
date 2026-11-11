@@ -81,7 +81,7 @@ func prepareImageOverlay(ctx context.Context, source, image, runPath, retainedRo
 		if err != nil {
 			return nil, err
 		}
-		defer os.RemoveAll(stage)
+		defer func() { _ = os.RemoveAll(stage) }()
 		if err := rootfs.CreateOverlayStorage(ctx, source, stage, image); err != nil {
 			return nil, err
 		}
@@ -135,7 +135,7 @@ func prepareRunRootFS(ctx context.Context, source, runPath, retainedRoot string,
 	if err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }()
 	if err := copyRoot(ctx, source, stage); err != nil {
 		return "", fmt.Errorf("prepare retained rootfs: %w", err)
 	}
