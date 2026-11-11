@@ -51,7 +51,7 @@ jobs:
         run: python3 -B -m unittest discover -s scripts -p '*_test.py' -v
       - name: Validate workflow dependencies and permissions
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-      - run: make fmt-check test vet test-race
+      - run: make fmt-check lint test vet test-race
       - name: Build macOS clients with bundled Linux engines
         if: runner.os == 'macOS'
         run: |

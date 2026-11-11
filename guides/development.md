@@ -44,6 +44,7 @@ CI verifies the internal engine's stamped version too.
 | `sudo make install` | Install the macOS executable in `/usr/local/bin` |
 | `make rootfs` | Export the built-in BusyBox template to `rootfs/busybox` |
 | `make fmt` / `make fmt-check` | Format / check Go sources |
+| `make lint` | Pinned goimports, revive, staticcheck and errcheck checks |
 | `make test vet test-race` | Unit tests, static checks, and race detection |
 | `make vuln` | Reachable vulnerability checks for Darwin/Linux on arm64/amd64 |
 | `make test-macos` | Opt-in macOS end-to-end tests through Lima |
@@ -449,3 +450,24 @@ with the marker to start a new history; prior cursors no longer describe that st
 Use `limactl shell casklet-runtime` for these internal guest diagnostics. Do not
 follow or truncate unexpected links. If recording the marker also failed, only the
 warning is available: the journal is best-effort observation, not an audit log.
+
+## Go style checks
+
+Go changes follow the Uber Go Style Guide. Run `make lint` before submitting a
+change. The runner pins tool versions separately from application dependencies
+and checks both production code and tests; CI runs it on Darwin and Linux.
+
+Revive checks concrete naming, declaration, error and control-flow conventions.
+It does not require boilerplate comments for internal exported APIs. Staticcheck
+checks safety and simplification while unused declarations are reviewed across
+platforms: one build target cannot see references behind another target's build
+tags. Existing diagnostic syntax may require a narrowly documented lint exception.
+Explicitly discarded errors denote deliberate best-effort cleanup or diagnostics;
+setup, publication, transport and other meaningful failures remain handled.
+
+The guide's line-length recommendation is soft. Preserve serialized names,
+empty-collection encoding, resource ownership, lock order and cancellation
+semantics when applying stylistic changes. Test tables with up to three fields
+may use positional entries; wider tables use field names. Existing bounded
+concurrency limits and test probes need their domain-specific rationale rather
+than mechanical replacement.

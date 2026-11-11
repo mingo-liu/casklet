@@ -1,0 +1,21 @@
+ignoreGeneratedHeader = false
+severity = "error"
+errorCode = 1
+warningCode = 1
+
+# Select checks for the adopted Go conventions. Exported/package comment rules
+# are not used to require boilerplate on internal implementation APIs.
+[rule.blank-imports]
+[rule.error-naming]
+[rule.error-return]
+[rule.error-strings]
+[rule.increment-decrement]
+[rule.indent-error-flow]
+[rule.range]
+[rule.receiver-naming]
+[rule.superfluous-else]
+[rule.time-naming]
+[rule.unexported-return]
+[rule.unreachable-code]
+[rule.var-declaration]
+[rule.var-naming]
