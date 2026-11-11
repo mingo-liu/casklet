@@ -100,8 +100,14 @@ func Run(token string, args []string) (int, error) {
 	}
 	control := make(chan syscall.Signal, 8)
 	finished := make(chan struct{})
-	defer close(finished)
+	joined := make(chan struct{})
+	defer func() {
+		close(finished)
+		_ = connection.Close()
+		<-joined
+	}()
 	go func() {
+		defer close(joined)
 		var buffer [32]byte
 		for {
 			n, err := connection.Read(buffer[:])

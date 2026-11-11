@@ -143,6 +143,8 @@ func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credentia
 	case <-ctx.Done():
 		if closer, ok := r.(io.Closer); ok {
 			_ = closer.Close()
+			//lint:ignore S1005 Cancellation takes precedence over the completed decode error.
+			_ = <-done
 		}
 		return Credential{}, ctx.Err()
 	}

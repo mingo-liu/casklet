@@ -86,6 +86,11 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	}()
 	select {
 	case <-ctx.Done():
+		if closer, ok := input.(io.Closer); ok {
+			_ = closer.Close()
+			//lint:ignore S1005 Cancellation takes precedence over the completed handshake error.
+			_ = <-completed
+		}
 		return ctx.Err()
 	case err := <-completed:
 		return err
