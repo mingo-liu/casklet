@@ -150,7 +150,10 @@ func CreateOverlayStorage(ctx context.Context, lower, storage, image string) err
 	if err != nil {
 		return err
 	}
-	uid, gid := Ownership(info)
+	uid, gid, err := Ownership(info)
+	if err != nil {
+		return err
+	}
 	if err := os.Chown(filepath.Join(storage, "upper"), int(uid), int(gid)); err != nil {
 		return err
 	}

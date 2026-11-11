@@ -238,7 +238,10 @@ func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination st
 			return fmt.Errorf("unsupported special file in rootfs: %s", rel)
 		}
 		if ownership {
-			uid, gid := Ownership(info)
+			uid, gid, err := Ownership(info)
+			if err != nil {
+				return err
+			}
 			if err := os.Lchown(target, int(uid), int(gid)); err != nil {
 				return err
 			}
