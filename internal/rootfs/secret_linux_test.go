@@ -24,16 +24,16 @@ func TestSecretSourcesAreBoundedRegularFilesAndIndependentSnapshots(t *testing.T
 	if err != nil || string(data[0]) != string(value) {
 		t.Fatalf("read: %v", err)
 	}
-	os.WriteFile(source, []byte("updated"), 0600)
+	must(t, os.WriteFile(source, []byte("updated"), 0600))
 	if string(data[0]) != string(value) {
 		t.Fatal("snapshot changed")
 	}
 	symlink := filepath.Join(dir, "link")
-	os.Symlink(source, symlink)
+	must(t, os.Symlink(source, symlink))
 	fifo := filepath.Join(dir, "fifo")
-	unix.Mkfifo(fifo, 0600)
+	must(t, unix.Mkfifo(fifo, 0600))
 	oversized := filepath.Join(dir, "large")
-	os.WriteFile(oversized, make([]byte, config.MaxSecretBytes+1), 0600)
+	must(t, os.WriteFile(oversized, make([]byte, config.MaxSecretBytes+1), 0600))
 	for _, path := range []string{dir, symlink, fifo, oversized, filepath.Join(dir, "missing")} {
 		if err := ValidateSecretSources([]config.Secret{{Source: path, Target: "bad"}}); err == nil || strings.Contains(err.Error(), string(value)) {
 			t.Fatalf("unsafe source: %s %v", path, err)

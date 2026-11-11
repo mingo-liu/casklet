@@ -259,7 +259,10 @@ func writeImageLayer(ctx context.Context, tree string, destination io.Writer) er
 		}
 		h.Name = name
 		h.Uname, h.Gname = "", ""
-		uid, gid := rootfs.Ownership(info)
+		uid, gid, err := rootfs.Ownership(info)
+		if err != nil {
+			return err
+		}
 		h.Uid, h.Gid = int(uid), int(gid)
 		if err := writer.WriteHeader(h); err != nil {
 			return err

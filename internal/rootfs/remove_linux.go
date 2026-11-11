@@ -38,7 +38,7 @@ func RemoveTree(ctx context.Context, path string) error {
 		return err
 	}
 	root := os.NewFile(uintptr(fd), "tree-cleanup-root")
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if err := removeTreeEntries(ctx, root); err != nil {
 		return err
 	}

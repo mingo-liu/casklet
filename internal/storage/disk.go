@@ -7,10 +7,12 @@ type Filesystem struct {
 	AvailableBytes uint64 `json:"available_bytes"`
 	LowSpace       bool   `json:"low_space"`
 }
+
 type Category struct {
 	Kind           string `json:"kind"`
 	AllocatedBytes uint64 `json:"allocated_bytes"`
 }
+
 type Report struct {
 	Filesystem Filesystem `json:"filesystem"`
 	Categories []Category `json:"categories"`
