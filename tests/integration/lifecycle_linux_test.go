@@ -195,7 +195,7 @@ func TestLifecycleConcurrentStart(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			c, o, s, e := backgroundCommand(ctx, "start", name)
-			results <- result{c, o, s, e}
+			results <- result{code: c, out: o, stderr: s, err: e}
 		}()
 	}
 	successes := 0

@@ -83,7 +83,7 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 		}
 		result := map[string]deploymentIdentity{}
 		for _, record := range records {
-			result[record.Labels[project.LabelService]] = deploymentIdentity{record.ID, record.Name, record.State, record.Generation, record.Labels}
+			result[record.Labels[project.LabelService]] = deploymentIdentity{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, Labels: record.Labels}
 		}
 		return result
 	}

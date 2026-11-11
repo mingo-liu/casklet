@@ -227,14 +227,14 @@ func TestImageConcurrentCreationAndRemoval(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "run", "--detach", "--name", name, "--image", id, "--", "/bin/sleep", "300")
-			launched <- result{code, out, stderr, err}
+			launched <- result{code: code, out: out, stderr: stderr, err: err}
 		}()
 		go func() {
 			<-ready
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "image", "rm", id)
-			removed <- result{code, out, stderr, err}
+			removed <- result{code: code, out: out, stderr: stderr, err: err}
 		}()
 		close(ready)
 		launch, remove := <-launched, <-removed

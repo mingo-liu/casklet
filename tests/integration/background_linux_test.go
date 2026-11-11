@@ -293,7 +293,7 @@ func TestBackgroundConcurrentNames(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, detachedArguments(name, nil, "/bin/sleep", "30")...)
-			results <- result{name, out, stderr, code, err}
+			results <- result{name: name, stdout: out, stderr: stderr, code: code, err: err}
 		}(name)
 	}
 	ids := make(map[string]bool)
@@ -341,7 +341,7 @@ func TestBackgroundConcurrentManagement(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "stop", reference)
-			results <- result{out, stderr, code, err}
+			results <- result{stdout: out, stderr: stderr, code: code, err: err}
 		}(reference)
 	}
 	for i := 0; i < 5; i++ {
@@ -360,7 +360,7 @@ func TestBackgroundConcurrentManagement(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		code, out, stderr, err := backgroundCommand(ctx, "rm", name)
-		results <- result{out, stderr, code, err}
+		results <- result{stdout: out, stderr: stderr, code: code, err: err}
 	}()
 	for i := 0; i < 10; i++ {
 		backgroundRecords(t, true)
