@@ -34,7 +34,7 @@ func TestVolumeDataSurvivesReuseAndRemovalIsFenced(t *testing.T) {
 	if err := s.Remove(ctx, "data", unused); !errors.Is(err, ErrInUse) {
 		t.Fatalf("active deletion: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	if err := s.Remove(ctx, "data", func(context.Context, string) (bool, error) { return true, nil }); !errors.Is(err, ErrInUse) {
 		t.Fatalf("referenced deletion: %v", err)
 	}
@@ -63,11 +63,15 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 	if _, err := s.Create(ctx, "linked"); err == nil {
 		t.Fatal("accepted symlink")
 	}
-	os.Remove(filepath.Join(s.root, "linked"))
+	if err := os.Remove(filepath.Join(s.root, "linked")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Create(ctx, "data"); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(s.root, "data", "data"))
+	if err := os.Remove(filepath.Join(s.root, "data", "data")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(outside, filepath.Join(s.root, "data", "data")); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +84,9 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(s.root, "data", "data"))
+	if err := os.Remove(filepath.Join(s.root, "data", "data")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(s.root, "data", "data"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +108,7 @@ func TestVolumeRejectsUnsafeArtifactsAndRecoversTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	cancelCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
 	defer cancel()
 	if _, err := s.List(cancelCtx); !errors.Is(err, context.DeadlineExceeded) {

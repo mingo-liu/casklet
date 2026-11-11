@@ -236,7 +236,7 @@ func testRoot(t *testing.T) (*os.Root, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { root.Close() })
+	t.Cleanup(func() { _ = root.Close() })
 	return root, name
 }
 

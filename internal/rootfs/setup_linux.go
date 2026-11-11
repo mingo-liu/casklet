@@ -105,7 +105,7 @@ func Setup(cfg config.Config) error {
 		if err != nil {
 			return err
 		}
-		file.Close()
+		_ = file.Close()
 		if err := unix.Mount(fmt.Sprintf("/proc/self/fd/%d", devices[i].Fd()), target, "", unix.MS_BIND, ""); err != nil {
 			return fmt.Errorf("bind device %s: %w", name, err)
 		}
@@ -143,7 +143,7 @@ func Setup(cfg config.Config) error {
 			return fmt.Errorf("inspect rootfs mount flags: %w", err)
 		}
 		flags, err := readOnlyRootFlags(mountInfo)
-		mountInfo.Close()
+		_ = mountInfo.Close()
 		if err != nil {
 			return fmt.Errorf("inspect rootfs mount flags: %w", err)
 		}

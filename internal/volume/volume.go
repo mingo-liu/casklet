@@ -37,7 +37,7 @@ func AcquireMounts(ctx context.Context, mounts []config.BindMount) (*Leases, err
 	for _, name := range names {
 		file, err := store.Acquire(ctx, name)
 		if err != nil {
-			leases.Close()
+			_ = leases.Close()
 			return nil, err
 		}
 		leases.Files = append(leases.Files, file)

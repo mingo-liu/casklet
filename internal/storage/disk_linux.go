@@ -28,7 +28,7 @@ func AllocatedBytes(ctx context.Context, path string) (uint64, error) {
 		return 0, err
 	}
 	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	seen := make(map[[2]uint64]bool)
 	return walk(ctx, f, seen, 0, "")
 }
@@ -76,7 +76,7 @@ func imageAllocation(ctx context.Context, path string) (uint64, uint64, error) {
 		return 0, 0, err
 	}
 	dir := os.NewFile(uintptr(fd), path)
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	seen := make(map[[2]uint64]bool)
 	images, err := walk(ctx, dir, seen, 0, ".blobs")
 	if err != nil {
@@ -93,7 +93,7 @@ func imageAllocation(ctx context.Context, path string) (uint64, uint64, error) {
 		return 0, 0, err
 	}
 	cache := os.NewFile(uintptr(cacheFD), ".blobs")
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 	blobs, err := walk(ctx, cache, seen, 0, "")
 	return images, blobs, err
 }
@@ -148,7 +148,7 @@ func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int,
 				}
 				f := os.NewFile(uintptr(fd), entry.Name())
 				n, err := walk(ctx, f, seen, depth+1, "")
-				f.Close()
+				_ = f.Close()
 				if err != nil {
 					return 0, err
 				}
@@ -166,7 +166,7 @@ func walk(ctx context.Context, dir *os.File, seen map[[2]uint64]bool, depth int,
 				return 0, err
 			}
 			err = unix.Fstat(fd, &child)
-			unix.Close(fd)
+			_ = unix.Close(fd)
 			if err != nil {
 				return 0, err
 			}

@@ -19,7 +19,7 @@ func ConfigureDNS(path string, servers []string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if err := root.Mkdir("etc", 0755); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
@@ -39,7 +39,7 @@ func ConfigureDNS(path string, servers []string) error {
 	if err != nil {
 		return fmt.Errorf("create container resolver: %w", err)
 	}
-	defer root.Remove("etc/.casklet-resolv")
+	defer func() { _ = root.Remove("etc/.casklet-resolv") }()
 	var contents strings.Builder
 	for _, server := range servers {
 		fmt.Fprintf(&contents, "nameserver %s\n", server)

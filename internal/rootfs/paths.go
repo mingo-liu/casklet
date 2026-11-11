@@ -71,7 +71,7 @@ func PrepareImageWorkdir(tree string, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	name, err := ResolveContainerPath(root, cfg.WorkingDirectory(), true)
 	if err != nil {
 		return err

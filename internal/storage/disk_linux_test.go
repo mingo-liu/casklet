@@ -63,7 +63,9 @@ func TestDiskUsageCountsCategoriesAndSparseAllocation(t *testing.T) {
 		_ = f.Close()
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	r, err := usageAt(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +130,7 @@ func TestImagePartitionExcludesMountedCache(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	defer unix.Unmount(cache, 0)
+	defer func() { _ = unix.Unmount(cache, 0) }()
 	after, blobs, err := imageAllocation(context.Background(), images)
 	if err != nil || after != before || blobs != 0 {
 		t.Fatalf("mounted cache counted: before=%d after=%d blobs=%d %v", before, after, blobs, err)

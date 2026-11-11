@@ -65,7 +65,7 @@ func ValidateBusyBox(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("BusyBox must be an ELF executable: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	machine := map[string]elf.Machine{"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64}[runtime.GOARCH]
 	if machine == elf.EM_NONE || f.Machine != machine || f.Class != elf.ELFCLASS64 ||
 		f.Data != elf.ELFDATA2LSB || (f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN) {
@@ -108,7 +108,7 @@ func Copy(ctx context.Context, source, destination string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	return CopyFromRoot(ctx, root, source, destination)
 }
 
@@ -130,7 +130,7 @@ func CopyOwned(ctx context.Context, source, destination string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	return copyFromRoot(ctx, root, canonical, destination, true /* preserveOwnership */)
 }
 
@@ -286,7 +286,7 @@ func copyFile(ctx context.Context, source, destination string, mode fs.FileMode,
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	return copyOpenedFile(ctx, in, destination, mode, buffer)
 }
 
@@ -295,7 +295,7 @@ func copyFileFromRoot(ctx context.Context, root *os.Root, name, destination stri
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	return copyOpenedFile(ctx, in, destination, mode, buffer)
 }
 

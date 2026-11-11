@@ -51,7 +51,7 @@ func TestArchiveRoundTripAndExclusiveLease(t *testing.T) {
 	if err := s.Export(ctx, "source", &archive); !errors.Is(err, ErrInUse) {
 		t.Fatalf("live export: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	if err := s.Export(ctx, "source", &archive); err != nil {
 		t.Fatal(err)
 	}

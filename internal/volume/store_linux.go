@@ -60,7 +60,7 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := s.recover(ctx); err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	return s.read(name)
 }
 
@@ -99,7 +99,7 @@ func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := s.read(name); err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
 		return nil, err
 	}
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, ErrInUse
 	}
 	return f, nil
@@ -134,7 +134,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := s.recover(ctx); err != nil {
 		return Record{}, err
 	}
@@ -154,7 +154,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	defer os.RemoveAll(stage)
+	defer func() { _ = os.RemoveAll(stage) }()
 	if err := os.Mkdir(filepath.Join(stage, "data"), 0755); err != nil {
 		return Record{}, err
 	}
@@ -162,7 +162,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	f.Close()
+	_ = f.Close()
 	r := Record{Name: name, CreatedAt: time.Now().UTC()}
 	data, _ := json.Marshal(r)
 	if err := os.WriteFile(filepath.Join(stage, "volume.json"), data, 0600); err != nil {
@@ -173,7 +173,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 		return Record{}, err
 	}
 	err = mf.Sync()
-	mf.Close()
+	_ = mf.Close()
 	if err != nil {
 		return Record{}, err
 	}
@@ -191,7 +191,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := s.recover(ctx); err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return ErrInUse
 	}
@@ -256,7 +256,7 @@ func (s *Store) lock(ctx context.Context) (*os.File, error) {
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
 		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
@@ -264,12 +264,12 @@ func (s *Store) lock(ctx context.Context) (*os.File, error) {
 			return f, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			f.Close()
+			_ = f.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
@@ -284,11 +284,11 @@ func (s *Store) openLock(path string) (*os.File, error) {
 	f := os.NewFile(uintptr(fd), path)
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != s.owner || st.Mode&0077 != 0 || st.Nlink != 1 {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("unsafe volume lock")
 	}
 	return f, nil
@@ -310,7 +310,7 @@ func (s *Store) read(name string) (Record, error) {
 		return Record{}, err
 	}
 	f := os.NewFile(uintptr(fd), "volume.json")
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
 		return Record{}, err
@@ -354,14 +354,14 @@ func (s *Store) recover(ctx context.Context) error {
 			}
 			err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 			if errors.Is(err, unix.EWOULDBLOCK) {
-				lease.Close()
+				_ = lease.Close()
 				continue
 			}
 			if err != nil {
-				lease.Close()
+				_ = lease.Close()
 				return err
 			}
-			defer lease.Close()
+			defer func() { _ = lease.Close() }()
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -391,6 +391,6 @@ func syncDir(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.Sync()
 }

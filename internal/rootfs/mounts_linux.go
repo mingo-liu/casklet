@@ -19,7 +19,7 @@ func rejectMounts(source string, includeRoot bool) error {
 	if err != nil {
 		return fmt.Errorf("inspect rootfs mount points: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {

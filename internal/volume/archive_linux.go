@@ -62,27 +62,27 @@ func (s *Store) Export(ctx context.Context, name string, destination io.Writer) 
 			return nil, nil, err
 		}
 		if err := unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-			lease.Close()
+			_ = lease.Close()
 			return nil, nil, ErrInUse
 		}
 		data := filepath.Join(s.root, name, "data")
 		if err := rootfs.CheckUnmounted(data); err != nil {
-			lease.Close()
+			_ = lease.Close()
 			return nil, nil, err
 		}
 		root, err := os.OpenRoot(data)
 		if err != nil {
-			lease.Close()
+			_ = lease.Close()
 			return nil, nil, err
 		}
 		return lease, root, nil
 	}()
-	lock.Close()
+	_ = lock.Close()
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
-	defer root.Close()
+	defer func() { _ = lease.Close() }()
+	defer func() { _ = root.Close() }()
 	writer := tar.NewWriter(&archiveWriter{ctx: ctx, writer: destination})
 	links := make(map[[2]uint64]string)
 	count := 0
@@ -178,18 +178,18 @@ func (s *Store) Restore(ctx context.Context, name string, source io.Reader) (Rec
 		}
 		if err != nil {
 			if lease != nil {
-				lease.Close()
+				_ = lease.Close()
 			}
-			os.RemoveAll(stage)
+			_ = os.RemoveAll(stage)
 			return "", nil, err
 		}
 		return stage, lease, nil
 	}()
-	lock.Close()
+	_ = lock.Close()
 	if err != nil {
 		return Record{}, err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	published := false
 	defer func() {
 		if published {
@@ -201,9 +201,9 @@ func (s *Store) Restore(ctx context.Context, name string, source io.Reader) (Rec
 		if err != nil {
 			return
 		}
-		defer lock.Close()
+		defer func() { _ = lock.Close() }()
 		if rootfs.CheckUnmounted(stage) == nil {
-			os.RemoveAll(stage)
+			_ = os.RemoveAll(stage)
 		}
 	}()
 	data := filepath.Join(stage, "data")
@@ -215,7 +215,7 @@ func (s *Store) Restore(ctx context.Context, name string, source io.Reader) (Rec
 		return Record{}, err
 	}
 	err = restoreArchive(ctx, root, source)
-	root.Close()
+	_ = root.Close()
 	if err != nil {
 		return Record{}, err
 	}
@@ -239,7 +239,7 @@ func (s *Store) Restore(ctx context.Context, name string, source io.Reader) (Rec
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := os.Lstat(filepath.Join(s.root, name)); !errors.Is(err, os.ErrNotExist) {
 		return Record{}, errors.New("restore requires a new volume name")
 	}

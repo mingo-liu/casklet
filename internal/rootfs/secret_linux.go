@@ -71,7 +71,7 @@ func mountSecrets(secrets []config.Secret, values [][]byte) error {
 	if err != nil {
 		return err
 	}
-	target.Close()
+	_ = target.Close()
 	flags := uintptr(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC)
 	if err := unix.Mount("tmpfs", config.SecretDirectory, "tmpfs", flags, "size=9m,mode=0755"); err != nil {
 		return fmt.Errorf("mount secrets: %w", err)

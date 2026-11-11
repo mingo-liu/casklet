@@ -46,7 +46,7 @@ func ReadOverlayImageID(storage string) (string, bool, error) {
 		return "", false, err
 	}
 	file := os.NewFile(uintptr(fd), "overlay-record")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
 		return "", false, err

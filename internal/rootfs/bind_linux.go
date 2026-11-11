@@ -39,7 +39,7 @@ func openMountSources(mounts []config.BindMount, root string) ([]*os.File, error
 
 func closeMountSources(files []*os.File) {
 	for _, file := range files {
-		file.Close()
+		_ = file.Close()
 	}
 }
 
@@ -55,7 +55,7 @@ func openDirectory(path string, create bool) (*os.File, error) {
 	}
 	for _, component := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
 		if component == "" || component == "." || component == ".." {
-			unix.Close(fd)
+			_ = unix.Close(fd)
 			return nil, errors.New("directory path must be clean and absolute")
 		}
 		next, err := unix.Openat(fd, component, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
@@ -65,7 +65,7 @@ func openDirectory(path string, create bool) (*os.File, error) {
 				next, err = unix.Openat(fd, component, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 			}
 		}
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		if err != nil {
 			return nil, fmt.Errorf("open directory %s without symlinks: %w", path, err)
 		}
@@ -85,7 +85,7 @@ func mountDirectories(mounts []config.BindMount, sources []*os.File) error {
 		sourcePath := fmt.Sprintf("/proc/self/fd/%d", sources[i].Fd())
 		targetPath := fmt.Sprintf("/proc/self/fd/%d", target.Fd())
 		err = unix.Mount(sourcePath, targetPath, "", unix.MS_BIND, "")
-		target.Close()
+		_ = target.Close()
 		if err != nil {
 			return fmt.Errorf("bind directory at %s: %w", mount.Target, err)
 		}
@@ -94,7 +94,7 @@ func mountDirectories(mounts []config.BindMount, sources []*os.File) error {
 			return err
 		}
 		flags, err := bindRemountFlags(info, mount.Target, mount.ReadOnly)
-		info.Close()
+		_ = info.Close()
 		if err != nil {
 			return err
 		}

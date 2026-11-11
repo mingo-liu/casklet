@@ -38,7 +38,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 	if err != nil {
 		return err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	root, source = parent, path.Base(source)
 	info, err := root.Lstat(source)
 	if err != nil {
@@ -90,7 +90,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 			if err != nil {
 				return err
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			current, err := file.Stat()
 			if err != nil || !current.Mode().IsRegular() || !os.SameFile(info, current) {
 				return errors.New("copy source changed")
@@ -105,7 +105,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 		if err != nil {
 			return err
 		}
-		defer dir.Close()
+		defer func() { _ = dir.Close() }()
 		current, err := dir.Stat(".")
 		if err != nil || !os.SameFile(info, current) {
 			return errors.New("copy source directory changed")
@@ -114,7 +114,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		for {
 			entries, err := f.ReadDir(128)
 			if err != nil && err != io.EOF {
@@ -222,7 +222,7 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 			return err
 		}
 		err = importEntry(ctx, parent, path.Base(target), header, reader)
-		parent.Close()
+		_ = parent.Close()
 		if err != nil {
 			return fmt.Errorf("copy %s: %w", target, err)
 		}
@@ -268,9 +268,9 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 			if err == nil {
 				err = dir.Chtimes(".", headers[i].ModTime, headers[i].ModTime)
 			}
-			dir.Close()
+			_ = dir.Close()
 		}
-		parent.Close()
+		_ = parent.Close()
 		if err != nil {
 			return err
 		}
@@ -328,11 +328,11 @@ func openParent(root *os.Root, target string) (*os.Root, error) {
 	for _, component := range strings.Split(parent, "/") {
 		info, err := current.Lstat(component)
 		if err != nil || !info.IsDir() {
-			current.Close()
+			_ = current.Close()
 			return nil, errors.New("copy path parent must be an existing directory without symlinks")
 		}
 		next, err := current.OpenRoot(component)
-		current.Close()
+		_ = current.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +375,7 @@ func importEntry(ctx context.Context, parent *os.Root, name string, header *tar.
 		_ = parent.Remove(temporary)
 	}()
 	if header.Typeflag == tar.TypeSymlink {
-		file.Close()
+		_ = file.Close()
 		if err := parent.Remove(temporary); err != nil {
 			return err
 		}
