@@ -16,12 +16,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func operationRecords() []container.Record {
-	return []container.Record{
-		{ID: strings.Repeat("a", 32), Name: "cp-demo-db", CreatedAt: time.Unix(1, 0), Labels: map[string]string{project.LabelName: "demo", project.LabelService: "db", project.LabelSpec: "spec"}},
-		{ID: strings.Repeat("b", 32), Name: "cp-demo-api", CreatedAt: time.Unix(2, 0), Labels: map[string]string{project.LabelName: "demo", project.LabelService: "api", project.LabelSpec: "spec"}},
-	}
-}
 func TestProjectOperationsParsingAndHostEnvironment(t *testing.T) {
 	for _, args := range [][]string{{"project", "start", "demo"}, {"project", "stop", "--timeout", "2s", "demo", "api", "db"}, {"project", "restart", "demo", "api"}, {"project", "exec", "-it", "demo", "api", "--", "sh"}} {
 		if _, err := Parse(args); err != nil {
@@ -34,12 +28,15 @@ func TestProjectOperationsParsingAndHostEnvironment(t *testing.T) {
 		}
 	}
 	filename := filepath.Join(t.TempDir(), "env")
-	os.WriteFile(filename, []byte("VALUE=from-file\n"), 0600)
+	if err := os.WriteFile(filename, []byte("VALUE=from-file\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r, err := Parse([]string{"project", "exec", "--env-file", filename, "--env", "VALUE=explicit", "demo", "api", "--", "printf", "--help"})
 	if err != nil || !reflect.DeepEqual(r.Exec.Command, []string{"printf", "--help"}) || !reflect.DeepEqual(r.Exec.Env, []string{"VALUE=from-file", "VALUE=explicit"}) {
 		t.Fatalf("exec config %+v %v", r, err)
 	}
 }
+
 func TestProjectLifecyclePinsSelectionAndAggregatesFailures(t *testing.T) {
 	records := operationRecords()
 	var calls [][]string
@@ -66,6 +63,7 @@ func TestProjectLifecyclePinsSelectionAndAggregatesFailures(t *testing.T) {
 		t.Fatal("adopted renamed service")
 	}
 }
+
 func TestProjectExecResolvesLogicalServiceAndKeepsWorkloadOperands(t *testing.T) {
 	records := operationRecords()
 	backend := project.CommandBackend{Call: func(context.Context, ...string) ([]byte, error) { return json.Marshal(records) }}
@@ -100,5 +98,12 @@ func TestParsedProjectSelectionsOwnArguments(t *testing.T) {
 				t.Fatalf("caller mutation changed selection: services=%v references=%v", request.Services, request.References)
 			}
 		})
+	}
+}
+
+func operationRecords() []container.Record {
+	return []container.Record{
+		{ID: strings.Repeat("a", 32), Name: "cp-demo-db", CreatedAt: time.Unix(1, 0), Labels: map[string]string{project.LabelName: "demo", project.LabelService: "db", project.LabelSpec: "spec"}},
+		{ID: strings.Repeat("b", 32), Name: "cp-demo-api", CreatedAt: time.Unix(2, 0), Labels: map[string]string{project.LabelName: "demo", project.LabelService: "api", project.LabelSpec: "spec"}},
 	}
 }

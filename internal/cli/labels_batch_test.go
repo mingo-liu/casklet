@@ -15,6 +15,8 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
+type rejectBatchOutput struct{}
+
 func TestRunLabelsMergeConfigAndRemainMetadata(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "run.json")
 	if err := os.WriteFile(filename, []byte(`{"detach":true,"rootfs":"/template","label":["project=config","role=api"],"command":["true"]}`), 0600); err != nil {
@@ -167,7 +169,7 @@ func TestBatchCancellationAndOutputFailureStopFurtherMutations(t *testing.T) {
 					return nil
 				},
 			}
-			var output io.Writer = io.Discard
+			output := io.Discard
 			if failure == "output" {
 				output = rejectBatchOutput{}
 			}
@@ -182,10 +184,6 @@ func TestBatchCancellationAndOutputFailureStopFurtherMutations(t *testing.T) {
 	}
 }
 
-type rejectBatchOutput struct{}
-
-func (rejectBatchOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
-
 func TestBatchEmptySelectionIsSuccessfulAndOutputsNothing(t *testing.T) {
 	r, _ := Parse([]string{"rm", "--filter", "label=project=absent"})
 	var out bytes.Buffer
@@ -194,3 +192,5 @@ func TestBatchEmptySelectionIsSuccessfulAndOutputsNothing(t *testing.T) {
 		t.Fatalf("empty: %q %v", out.String(), err)
 	}
 }
+
+func (rejectBatchOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }

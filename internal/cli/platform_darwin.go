@@ -17,22 +17,67 @@ import (
 	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
-func hostPublishedPorts(records []containerListing) {
-	for i := range records {
-		for j := range records[i].Publish {
-			port := &records[i].Publish[j]
-			port.HostIP = machine.HostPortAddress(port.HostIP)
-		}
+func executeHostCommand(args []string, stdin, stdout, stderr *os.File) (bool, int) {
+	if len(args) == 0 || (args[0] != "machine" && args[0] != "rootfs") {
+		return false, 0
 	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := machine.HostCommand(ctx, args, stdout, stderr); err != nil {
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
+		return true, 125
+	}
+	return true, 0
 }
 
-func platformProjectRecords(data []byte) ([]byte, error) {
-	var page projectRecordPage
-	if err := json.Unmarshal(data, &page); err != nil {
-		return nil, fmt.Errorf("invalid project record response")
+func executePlatform(args []string, request Request, stdin, stdout, stderr *os.File) (bool, int) {
+	if request.Action == "login" || request.Action == "logout" {
+		store, err := registryauth.OpenStore()
+		if err == nil {
+			err = executeRegistryCommand(request, stdin, stdout, store)
+		}
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
+			return true, 125
+		}
+		return true, 0
 	}
-	hostPublishedPorts(page.Records)
-	return json.Marshal(page)
+	// Machine execution owns signals across preparation and remote sessions.
+	ctx := context.Background()
+	if request.Action == "doctor" {
+		return true, executeDarwinDoctor(ctx, args, request, stdin, stdout, stderr)
+	}
+	if request.Action == "ps" {
+		code, err := executeDarwinPS(ctx, args, request, stdin, stdout, stderr)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
+		}
+		return true, code
+	}
+	paths, err := hostPathArguments(args, request.Action)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
+		return true, 125
+	}
+	paths = guestProgressArguments(paths, request, stderr)
+	invocation := machine.Invocation{RequireRunning: os.Getenv(_projectPreviewEnvironment) == "1", Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}
+	if request.Action == "project-start-preflight" {
+		invocation.PreflightPorts = request.Config.Publish
+	}
+	if request.Action == "image-pull" || (request.Action == "run" || request.Action == "project-preflight") && request.Config.Image != "" {
+		invocation.ImageReference, invocation.RefreshImage, invocation.Progress = request.Config.Image, request.Action == "image-pull", progressMode(request.Progress, stderr)
+		if invocation.RefreshImage {
+			invocation.ImageReference = request.Reference
+		}
+	}
+	if request.Action == "image-push" {
+		invocation.ImageReference, invocation.PushSource, invocation.Progress = request.Target, request.Reference, "plain"
+	}
+	code, err := machine.Execute(ctx, invocation, stdin, stdout, stderr)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
+	}
+	return true, code
 }
 
 func executeDarwinPS(ctx context.Context, args []string, r Request, stdin, stdout, stderr *os.File) (int, error) {
@@ -41,10 +86,10 @@ func executeDarwinPS(ctx context.Context, args []string, r Request, stdin, stdou
 	if err != nil {
 		return 125, err
 	}
-	defer os.Remove(file.Name())
-	defer file.Close()
+	defer func() { _ = os.Remove(file.Name()) }()
+	defer func() { _ = file.Close() }()
 	args = append(append([]string(nil), args...), "--json=true")
-	code, err := machine.Execute(ctx, machine.Invocation{Args: args, RequireRunning: os.Getenv(projectPreviewEnvironment) == "1"}, stdin, file, stderr)
+	code, err := machine.Execute(ctx, machine.Invocation{Args: args, RequireRunning: os.Getenv(_projectPreviewEnvironment) == "1"}, stdin, file, stderr)
 	if err != nil || code != 0 {
 		return code, err
 	}
@@ -60,20 +105,6 @@ func executeDarwinPS(ctx context.Context, args []string, r Request, stdin, stdou
 		return 125, err
 	}
 	return 0, nil
-}
-
-func platformProjectReservations(data []byte) ([]byte, error) {
-	var page project.ReservationPage
-	if err := json.Unmarshal(data, &page); err != nil {
-		return nil, fmt.Errorf("invalid project reservation response")
-	}
-	for i := range page.Records {
-		for j := range page.Records[i].Publish {
-			port := &page.Records[i].Publish[j]
-			port.HostIP = machine.HostPortAddress(port.HostIP)
-		}
-	}
-	return json.Marshal(page)
 }
 
 func platformArguments(args []string) []string {
@@ -95,68 +126,37 @@ func platformUsage(topic string) (string, error) {
 	if hostHelpTopic(topic) {
 		return machine.Help(topic)
 	}
-	return scopedUsage(topic, true)
+	return scopedUsage(topic, true /* macOS */)
 }
 
-func executeHostCommand(args []string, stdin, stdout, stderr *os.File) (bool, int) {
-	if len(args) == 0 || (args[0] != "machine" && args[0] != "rootfs") {
-		return false, 0
+func platformProjectReservations(data []byte) ([]byte, error) {
+	var page project.ReservationPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, fmt.Errorf("invalid project reservation response")
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	if err := machine.HostCommand(ctx, args, stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
-		return true, 125
+	for i := range page.Records {
+		for j := range page.Records[i].Publish {
+			port := &page.Records[i].Publish[j]
+			port.HostIP = machine.HostPortAddress(port.HostIP)
+		}
 	}
-	return true, 0
+	return json.Marshal(page)
 }
 
-func executePlatform(args []string, request Request, stdin, stdout, stderr *os.File) (bool, int) {
-	if request.Action == "login" || request.Action == "logout" {
-		store, err := registryauth.OpenStore()
-		if err == nil {
-			err = executeRegistryCommand(request, stdin, stdout, store)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", err)
-			return true, 125
-		}
-		return true, 0
+func platformProjectRecords(data []byte) ([]byte, error) {
+	var page projectRecordPage
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, fmt.Errorf("invalid project record response")
 	}
-	// Machine execution owns signals across preparation and remote sessions.
-	ctx := context.Background()
-	if request.Action == "doctor" {
-		return true, executeDarwinDoctor(ctx, args, request, stdin, stdout, stderr)
-	}
-	if request.Action == "ps" {
-		code, err := executeDarwinPS(ctx, args, request, stdin, stdout, stderr)
-		if err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", err)
-		}
-		return true, code
-	}
-	paths, err := hostPathArguments(args, request.Action)
-	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
-		return true, 125
-	}
-	paths = guestProgressArguments(paths, request, stderr)
-	invocation := machine.Invocation{RequireRunning: os.Getenv(projectPreviewEnvironment) == "1", Args: paths, TTY: request.Config.TTY || request.Exec.TTY, Interactive: request.Config.Interactive || request.Exec.Interactive, Rootless: request.Config.Rootless}
-	if request.Action == "project-start-preflight" {
-		invocation.PreflightPorts = request.Config.Publish
-	}
-	if request.Action == "image-pull" || (request.Action == "run" || request.Action == "project-preflight") && request.Config.Image != "" {
-		invocation.ImageReference, invocation.RefreshImage, invocation.Progress = request.Config.Image, request.Action == "image-pull", progressMode(request.Progress, stderr)
-		if invocation.RefreshImage {
-			invocation.ImageReference = request.Reference
+	hostPublishedPorts(page.Records)
+	return json.Marshal(page)
+}
+
+func hostPublishedPorts(records []containerListing) {
+	for i := range records {
+		for j := range records[i].Publish {
+			port := &records[i].Publish[j]
+			port.HostIP = machine.HostPortAddress(port.HostIP)
 		}
 	}
-	if request.Action == "image-push" {
-		invocation.ImageReference, invocation.PushSource, invocation.Progress = request.Target, request.Reference, "plain"
-	}
-	code, err := machine.Execute(ctx, invocation, stdin, stdout, stderr)
-	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
-	}
-	return true, code
 }

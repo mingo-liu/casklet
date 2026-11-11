@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/storage"
 	"io"
 	"text/tabwriter"
+
+	"github.com/mingo-liu/casklet/internal/storage"
 )
 
 func executeSystem(ctx context.Context, r Request, out io.Writer) (int, error) {
@@ -19,12 +20,18 @@ func executeSystem(ctx context.Context, r Request, out io.Writer) (int, error) {
 	}
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fs := report.Filesystem
-	fmt.Fprintf(w, "VM FILESYSTEM\tBYTES\nTotal\t%d\nFree\t%d\nAvailable\t%d\n\nTYPE\tALLOCATED BYTES\n", fs.TotalBytes, fs.FreeBytes, fs.AvailableBytes)
+	if _, err := fmt.Fprintf(w, "VM FILESYSTEM\tBYTES\nTotal\t%d\nFree\t%d\nAvailable\t%d\n\nTYPE\tALLOCATED BYTES\n", fs.TotalBytes, fs.FreeBytes, fs.AvailableBytes); err != nil {
+		return 125, err
+	}
 	for _, category := range report.Categories {
-		fmt.Fprintf(w, "%s\t%d\n", category.Kind, category.AllocatedBytes)
+		if _, err := fmt.Fprintf(w, "%s\t%d\n", category.Kind, category.AllocatedBytes); err != nil {
+			return 125, err
+		}
 	}
 	if fs.LowSpace {
-		fmt.Fprintln(w, "\nLow disk space: less than 1 GiB or 10% available. Preview unused images with casklet image prune --dry-run.")
+		if _, err := fmt.Fprintln(w, "\nLow disk space: less than 1 GiB or 10% available. Preview unused images with casklet image prune --dry-run."); err != nil {
+			return 125, err
+		}
 	}
 	return 0, w.Flush()
 }

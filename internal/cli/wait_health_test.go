@@ -12,7 +12,7 @@ import (
 )
 
 func TestParseHealthWait(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		args    []string
 		healthy bool
 		timeout time.Duration
@@ -21,10 +21,11 @@ func TestParseHealthWait(t *testing.T) {
 		{[]string{"wait", "--healthy", "worker"}, true, 30 * time.Second},
 		{[]string{"wait", "--healthy", "--timeout", "2m", "worker"}, true, 2 * time.Minute},
 		{[]string{"wait", "--timeout=0s", "--healthy", "worker"}, true, 0},
-	} {
-		r, err := Parse(test.args)
-		if err != nil || r.Healthy != test.healthy || r.WaitTimeout != test.timeout || r.Reference != "worker" {
-			t.Fatalf("%q: %+v %v", test.args, r, err)
+	}
+	for _, tt := range tests {
+		r, err := Parse(tt.args)
+		if err != nil || r.Healthy != tt.healthy || r.WaitTimeout != tt.timeout || r.Reference != "worker" {
+			t.Fatalf("%q: %+v %v", tt.args, r, err)
 		}
 	}
 	for _, args := range [][]string{

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const commandOverview = `Usage: casklet COMMAND [OPTIONS]
+const _commandOverview = `Usage: casklet COMMAND [OPTIONS]
 
 Commands:
   run       Run a command in a new container
@@ -31,7 +31,7 @@ Commands:
   help      Show command help
 `
 
-const runOptions = `Options:
+const _runOptions = `Options:
   -d, --detach   Run in the background and print the container ID
   -i, --interactive  Forward stdin (default for foreground runs without -t)
   -t, --tty      Allocate a terminal; combine with -i as -it for input
@@ -115,7 +115,7 @@ Notes:
   Rootless runs require a directory rootfs and map only the caller UID/GID.
 `
 
-var commandHelp = map[string]string{
+var _commandHelp = map[string]string{
 	"events": `Usage: casklet events [OPTIONS]
 
 Options:
@@ -1114,7 +1114,7 @@ func helpRequest(topics []string) (Request, error) {
 	if topic == "" && len(topics) == 0 {
 		return Request{Action: "help"}, nil
 	}
-	if _, exists := commandHelp[topic]; exists || topic == "run" || topic == "doctor" || hostHelpTopic(topic) {
+	if _, exists := _commandHelp[topic]; exists || topic == "run" || topic == "doctor" || hostHelpTopic(topic) {
 		return Request{Action: "help", HelpTopic: topic}, nil
 	}
 	return Request{}, fmt.Errorf("unknown help topic %q; choose a command, optionally followed by its subcommands", topic)
@@ -1122,7 +1122,7 @@ func helpRequest(topics []string) (Request, error) {
 
 func scopedUsage(topic string, macOS bool) (string, error) {
 	if topic == "" {
-		text := commandOverview
+		text := _commandOverview
 		if macOS {
 			text += "  machine   Manage the product VM and shared directories\n  rootfs    Export the built-in BusyBox template to a Mac directory\n  login     Save registry credentials in macOS Keychain\n  logout    Remove saved registry credentials\n"
 		}
@@ -1152,7 +1152,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
   casklet run -d --name checked --health-cmd 'test -f /tmp/ready' -- /bin/sleep 300
 `
 		}
-		return "Usage: " + syntax + "\n\n" + runOptions + platformNotes + "\nExamples:\n" + examples, nil
+		return "Usage: " + syntax + "\n\n" + _runOptions + platformNotes + "\nExamples:\n" + examples, nil
 	}
 	if topic == "doctor" {
 		syntax := "casklet doctor --rootfs DIRECTORY"
@@ -1165,7 +1165,7 @@ func scopedUsage(topic string, macOS bool) (string, error) {
 		}
 		return "Usage: " + syntax + " [--json]\n\nOptions:\n  --rootfs  Linux filesystem template for the native architecture\n  --json    Print one diagnostic JSON object (schema_version: 1)\n\nNotes:\n" + notes + "  Reports client/engine versions, VM metadata and guest data filesystem bytes.\n  Checks include template/isolation/cgroups and filesystem availability.\n  Failed checks return 125; low space is advisory. Progress uses stderr.\n\nExamples:\n" + examples + "  " + strings.Replace(syntax, " [--rootfs DIRECTORY]", "", 1) + " --json\n", nil
 	}
-	if text, exists := commandHelp[topic]; exists {
+	if text, exists := _commandHelp[topic]; exists {
 		switch topic {
 		case "exec", "inspect", "stats", "stop", "wait", "start", "restart", "rm", "logs":
 			text = strings.Replace(text, "\nNotes:\n", "\nNotes:\n  ID accepts a unique hexadecimal prefix; exact names take precedence.\n  Ambiguous prefixes fail; use a longer ID or the exact container name.\n", 1)

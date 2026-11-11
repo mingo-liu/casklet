@@ -37,18 +37,20 @@ func TestCopyParsingAndFocusedHelp(t *testing.T) {
 func TestCopyHostUsesStreamsWithoutSharedPaths(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source ' $ file")
-	os.WriteFile(source, []byte("binary\x00value"), 0640)
+	if err := os.WriteFile(source, []byte("binary\x00value"), 0640); err != nil {
+		t.Fatal(err)
+	}
 	guest := t.TempDir()
 	root, err := os.OpenRoot(guest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer null.Close()
+	defer func() { _ = null.Close() }()
 	transport := func(ctx context.Context, args []string, in, out, stderr *os.File) (int, error) {
 		if len(args) != 3 || args[1] != "worker" {
 			t.Fatalf("args %v", args)
@@ -75,15 +77,19 @@ func TestCopyHostUsesStreamsWithoutSharedPaths(t *testing.T) {
 
 func TestCopyHostCancelsBlockedStreamsAndPreparationFailure(t *testing.T) {
 	null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	defer null.Close()
+	defer func() { _ = null.Close() }()
 	dir := t.TempDir()
 	file := filepath.Join(dir, "large")
 	f, err := os.Create(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Truncate(2 << 20)
-	f.Close()
+	if err := f.Truncate(2 << 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 	for _, upload := range []bool{false, true} {
 		t.Run(map[bool]string{false: "download", true: "upload"}[upload], func(t *testing.T) {
 			args := []string{"cp", "worker:/file", filepath.Join(dir, "out")}
@@ -115,7 +121,7 @@ func TestCopyHostCancelsBlockedStreamsAndPreparationFailure(t *testing.T) {
 
 func TestCopyHostOutputFailureCancelsTransport(t *testing.T) {
 	null, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	defer null.Close()
+	defer func() { _ = null.Close() }()
 	r, err := Parse([]string{"cp", "worker:/file", filepath.Join(t.TempDir(), "missing", "out")})
 	if err != nil {
 		t.Fatal(err)

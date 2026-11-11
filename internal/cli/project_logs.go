@@ -18,12 +18,77 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
+type lockedProjectWriter struct {
+	mu      sync.Mutex
+	out     io.Writer
+	onError func(error)
+}
+
+var _ io.Writer = (*lockedProjectWriter)(nil)
+
+// Each stream retains at most one bounded unfinished line. Only complete
+// prefixed lines/chunks hold the shared writer lock, so idle peers cannot block it.
+type projectLineWriter struct {
+	out     io.Writer
+	key     string
+	pending []byte
+}
+
+var _ io.Writer = (*projectLineWriter)(nil)
+
+func streamProjectLogs(ctx context.Context, records []container.Record, out, diagnostic io.Writer, stream func(context.Context, string, io.Writer, io.Writer) error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// Close pollable duplicates on cancellation so a full inherited stdout or
+	// stderr pipe cannot keep a writer, cmd.Wait, or peer readers blocked.
+	writers := []io.Writer{out, diagnostic}
+	for i, writer := range writers {
+		if file, ok := writer.(*os.File); ok {
+			stream, finish, err := cancelableStreamFile(ctx, file)
+			if err != nil {
+				return err
+			}
+			defer finish()
+			writers[i] = stream
+		}
+	}
+	out, diagnostic = writers[0], writers[1]
+	var (
+		wg      sync.WaitGroup
+		once    sync.Once
+		failure error
+	)
+	fail := func(err error) {
+		if err != nil {
+			once.Do(func() { failure = err; cancel() })
+		}
+	}
+	output := &lockedProjectWriter{out: out, onError: func(err error) { fail(fmt.Errorf("write project logs: %w", err)) }}
+	diagnostics := &lockedProjectWriter{out: diagnostic, onError: func(err error) { fail(fmt.Errorf("write project log diagnostics: %w", err)) }}
+	for _, record := range records {
+		wg.Go(func() {
+			key := record.Labels[project.LabelService]
+			lines := &projectLineWriter{out: output, key: key}
+			err := stream(ctx, record.ID, lines, diagnostics)
+			if err != nil {
+				fail(fmt.Errorf("logs for service %q: %w", key, err))
+			}
+			fail(lines.flush())
+		})
+	}
+	wg.Wait()
+	if failure != nil {
+		return failure
+	}
+	return ctx.Err()
+}
+
 func selectProjectLogs(records []container.Record, name string, services []string) ([]container.Record, error) {
-	wanted := map[string]bool{}
+	wanted := make(map[string]bool, len(services))
 	for _, key := range services {
 		wanted[key] = true
 	}
-	seen := map[string]bool{}
+	seen := make(map[string]bool, len(records))
 	selected := []container.Record{}
 	for _, record := range project.Managed(records, name) {
 		key := record.Labels[project.LabelService]
@@ -73,12 +138,6 @@ func projectLogCall(ctx context.Context, id string, tail int, follow bool, out, 
 	return cmd.Run()
 }
 
-type lockedProjectWriter struct {
-	mu      sync.Mutex
-	out     io.Writer
-	onError func(error)
-}
-
 func (w *lockedProjectWriter) Write(data []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -92,29 +151,6 @@ func (w *lockedProjectWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
-// Each stream retains at most one bounded unfinished line. Only complete
-// prefixed lines/chunks hold the shared writer lock, so idle peers cannot block it.
-type projectLineWriter struct {
-	out     io.Writer
-	key     string
-	pending []byte
-}
-
-func (w *projectLineWriter) flush() error {
-	if len(w.pending) == 0 {
-		return nil
-	}
-	data := append([]byte("["+w.key+"] "), w.pending...)
-	if data[len(data)-1] != '\n' {
-		data = append(data, '\n')
-	}
-	n, err := w.out.Write(data)
-	w.pending = w.pending[:0]
-	if err == nil && n != len(data) {
-		err = io.ErrShortWrite
-	}
-	return err
-}
 func (w *projectLineWriter) Write(data []byte) (int, error) {
 	total := len(data)
 	for len(data) > 0 {
@@ -133,45 +169,18 @@ func (w *projectLineWriter) Write(data []byte) (int, error) {
 	return total, nil
 }
 
-func streamProjectLogs(ctx context.Context, records []container.Record, out, diagnostic io.Writer, stream func(context.Context, string, io.Writer, io.Writer) error) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	// Close pollable duplicates on cancellation so a full inherited stdout or
-	// stderr pipe cannot keep a writer, cmd.Wait, or peer readers blocked.
-	for _, writer := range []*io.Writer{&out, &diagnostic} {
-		if file, ok := (*writer).(*os.File); ok {
-			stream, finish, err := cancelableStreamFile(ctx, file)
-			if err != nil {
-				return err
-			}
-			defer finish()
-			*writer = stream
-		}
+func (w *projectLineWriter) flush() error {
+	if len(w.pending) == 0 {
+		return nil
 	}
-	var wg sync.WaitGroup
-	var once sync.Once
-	var failure error
-	fail := func(err error) {
-		if err != nil {
-			once.Do(func() { failure = err; cancel() })
-		}
+	data := append([]byte("["+w.key+"] "), w.pending...)
+	if data[len(data)-1] != '\n' {
+		data = append(data, '\n')
 	}
-	output := &lockedProjectWriter{out: out, onError: func(err error) { fail(fmt.Errorf("write project logs: %w", err)) }}
-	diagnostics := &lockedProjectWriter{out: diagnostic, onError: func(err error) { fail(fmt.Errorf("write project log diagnostics: %w", err)) }}
-	for _, record := range records {
-		wg.Go(func() {
-			key := record.Labels[project.LabelService]
-			lines := &projectLineWriter{out: output, key: key}
-			err := stream(ctx, record.ID, lines, diagnostics)
-			if err != nil {
-				fail(fmt.Errorf("logs for service %q: %w", key, err))
-			}
-			fail(lines.flush())
-		})
+	n, err := w.out.Write(data)
+	w.pending = w.pending[:0]
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
 	}
-	wg.Wait()
-	if failure != nil {
-		return failure
-	}
-	return ctx.Err()
+	return err
 }

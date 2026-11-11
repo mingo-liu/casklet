@@ -35,7 +35,7 @@ func containerBatchOperations() batchOperations {
 func executeBatch(ctx context.Context, r Request, stdout io.Writer, ops batchOperations) error {
 	var ids []string
 	var failures []error
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	add := func(id string) {
 		if !seen[id] {
 			ids = append(ids, id)
@@ -58,7 +58,7 @@ func executeBatch(ctx context.Context, r Request, stdout io.Writer, ops batchOpe
 			add(id)
 		}
 	} else {
-		records, err := ops.list(ctx, true)
+		records, err := ops.list(ctx, true /* all */)
 		if err != nil {
 			return err
 		}

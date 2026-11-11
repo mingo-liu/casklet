@@ -68,7 +68,9 @@ func TestOptionFilesRejectInvalidInputsWithoutLeakingValues(t *testing.T) {
 		}
 	}
 	envfile := filepath.Join(dir, "secrets.env")
-	os.WriteFile(envfile, []byte("BAD-KEY=private-secret\n"), 0600)
+	if err := os.WriteFile(envfile, []byte("BAD-KEY=private-secret\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, err := Parse([]string{"exec", "--env-file", envfile, "worker", "--", "true"})
 	if err == nil || strings.Contains(err.Error(), "private-secret") {
 		t.Fatalf("invalid env: %v", err)

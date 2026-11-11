@@ -136,7 +136,7 @@ func parseProject(r Request, args []string) (Request, error) {
 		if len(r.Services) > 64 {
 			return r, errors.New("project operations support at most 64 services")
 		}
-		seen := map[string]bool{}
+		seen := make(map[string]bool, len(r.Services))
 		for _, key := range r.Services {
 			if project.ValidateName(key) != nil || seen[key] {
 				return r, errors.New("invalid or duplicate project service selection")
@@ -167,13 +167,13 @@ func readProjectPlan(filename string) (project.Plan, error) {
 		return plan, err
 	}
 	plan.Name = doc.Name
-	networks := map[string]string{}
+	networks := make(map[string]string, len(doc.Networks))
 	for _, key := range doc.Networks {
 		name, _ := project.ScopedName(doc.Name, key)
 		networks[key] = name
 		plan.Networks = append(plan.Networks, name)
 	}
-	volumes := map[string]string{}
+	volumes := make(map[string]string, len(doc.Volumes)+len(doc.ExternalVolumes))
 	for _, key := range doc.Volumes {
 		name, _ := project.ScopedName(doc.Name, key)
 		volumes[key] = name
@@ -186,8 +186,8 @@ func readProjectPlan(filename string) (project.Plan, error) {
 	sort.Strings(plan.ExternalVolumes)
 	order, _ := doc.Order()
 	var published []config.PortMapping
-	aliasesInUse := map[string]string{}
-	healthPossible := map[string]bool{}
+	aliasesInUse := make(map[string]string)
+	healthPossible := make(map[string]bool, len(doc.Services))
 	for _, key := range order {
 		service := doc.Services[key]
 		var fields map[string]json.RawMessage
@@ -244,7 +244,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 			fields["mount"], _ = json.Marshal(mounts)
 		}
 		raw, _ := json.Marshal(fields)
-		options, command, err := configDataArguments(raw, filename, map[string]bool{})
+		options, command, err := configDataArguments(raw, filename, make(map[string]bool))
 		if err != nil {
 			return plan, fmt.Errorf("invalid run fields for service %q", key)
 		}
@@ -288,7 +288,7 @@ func readProjectPlan(filename string) (project.Plan, error) {
 			}
 			request.Config.Healthcheck = &config.HealthConfig{Test: []string{"NONE"}}
 			if request.Config.Labels == nil {
-				request.Config.Labels = map[string]string{}
+				request.Config.Labels = make(map[string]string)
 			}
 			request.Config.Labels[project.LabelTask] = "true"
 			end := len(args)
@@ -349,9 +349,9 @@ func readProjectPlan(filename string) (project.Plan, error) {
 
 func projectFingerprint(cfg config.Config, entrypoint *string) string {
 	canonical, _ := json.Marshal(struct {
-		Config     config.Config
-		Entrypoint *string
-	}{cfg, entrypoint})
+		Config     config.Config `json:"Config"`
+		Entrypoint *string       `json:"Entrypoint"`
+	}{Config: cfg, Entrypoint: entrypoint})
 	digest := sha256.Sum256(canonical)
 	return hex.EncodeToString(digest[:])
 }
@@ -366,7 +366,7 @@ func containsProjectAlias(aliases []string, name string) bool {
 }
 
 func canonicalProjectEnvironment(env []string) []string {
-	values := map[string]string{}
+	values := make(map[string]string)
 	for _, assignment := range env {
 		key, _, _ := strings.Cut(assignment, "=")
 		values[key] = assignment

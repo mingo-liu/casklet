@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/container"
-	"github.com/mingo-liu/casklet/internal/volume"
 	"io"
 	"os"
 	"text/tabwriter"
+
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/volume"
 )
 
 func executeVolume(ctx context.Context, r Request, stdout io.Writer, input ...io.Reader) (int, error) {
@@ -77,9 +78,13 @@ func executeVolume(ctx context.Context, r Request, stdout io.Writer, input ...io
 				err = json.NewEncoder(stdout).Encode(records)
 			} else {
 				w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(w, "NAME\tCREATED")
+				if _, err := fmt.Fprintln(w, "NAME\tCREATED"); err != nil {
+					return 125, err
+				}
 				for _, record := range records {
-					fmt.Fprintf(w, "%s\t%s\n", record.Name, record.CreatedAt.Format("2006-01-02T15:04:05Z"))
+					if _, err := fmt.Fprintf(w, "%s\t%s\n", record.Name, record.CreatedAt.Format("2006-01-02T15:04:05Z")); err != nil {
+						return 125, err
+					}
 				}
 				err = w.Flush()
 			}

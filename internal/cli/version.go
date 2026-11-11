@@ -19,6 +19,7 @@ type engineVersionInfo struct {
 
 type versionInfo struct {
 	buildinfo.Info
+
 	Engine      *engineVersionInfo `json:"engine,omitempty"`
 	EngineError string             `json:"engine_error,omitempty"`
 }
@@ -68,7 +69,7 @@ func executeVersion(r Request, stdout, stderr io.Writer) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "casklet: write version information: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "casklet: write version information: %v\n", err)
 		return 125
 	}
 	return 0

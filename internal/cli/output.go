@@ -46,29 +46,6 @@ func writeListings(out io.Writer, records []containerListing, asJSON bool) error
 	return w.Flush()
 }
 
-func displayPorts(ports []config.PortMapping) string {
-	if len(ports) == 0 {
-		return "-"
-	}
-	parts := make([]string, len(ports))
-	for i, port := range ports {
-		parts[i] = fmt.Sprintf("%s:%d->%d/%s", port.HostIP, port.HostPort, port.ContainerPort, port.Protocol)
-	}
-	return strings.Join(parts, ", ")
-}
-
-func displayCommand(command []string) string {
-	parts := make([]string, len(command))
-	for i, arg := range command {
-		if arg == "" || strings.IndexFunc(arg, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-			parts[i] = strconv.Quote(arg)
-		} else {
-			parts[i] = arg
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
 func writeStats(out io.Writer, stats container.Statistics, asJSON bool) error {
 	if asJSON {
 		return json.NewEncoder(out).Encode(stats)
@@ -123,6 +100,29 @@ func writeImages(out io.Writer, records []image.Record, asJSON bool) error {
 		}
 	}
 	return w.Flush()
+}
+
+func displayPorts(ports []config.PortMapping) string {
+	if len(ports) == 0 {
+		return "-"
+	}
+	parts := make([]string, len(ports))
+	for i, port := range ports {
+		parts[i] = fmt.Sprintf("%s:%d->%d/%s", port.HostIP, port.HostPort, port.ContainerPort, port.Protocol)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func displayCommand(command []string) string {
+	parts := make([]string, len(command))
+	for i, arg := range command {
+		if arg == "" || strings.IndexFunc(arg, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+			parts[i] = strconv.Quote(arg)
+		} else {
+			parts[i] = arg
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func displayID(id string) string {

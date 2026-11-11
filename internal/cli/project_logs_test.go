@@ -13,9 +13,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func logRecord(id, key string) container.Record {
-	return container.Record{ID: id, Labels: map[string]string{project.LabelName: "demo", project.LabelService: key, project.LabelSpec: "spec"}}
-}
+type failedLogOutput struct{}
 
 func TestProjectLogsSelectionAndArguments(t *testing.T) {
 	for _, mac := range []bool{false, true} {
@@ -86,10 +84,6 @@ func TestProjectLogsPrefixesFragmentedConcurrentOutput(t *testing.T) {
 	}
 }
 
-type failedLogOutput struct{}
-
-func (failedLogOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
-
 func TestProjectLogsFailureCancelsAndJoinsReaders(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -139,3 +133,9 @@ func TestProjectLogsWriteFailureCancelsBeforeStreamReturns(t *testing.T) {
 		cancel()
 	}
 }
+
+func logRecord(id, key string) container.Record {
+	return container.Record{ID: id, Labels: map[string]string{project.LabelName: "demo", project.LabelService: key, project.LabelSpec: "spec"}}
+}
+
+func (failedLogOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }

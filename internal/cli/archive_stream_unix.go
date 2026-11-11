@@ -36,13 +36,13 @@ func cancelableStreamFile(ctx context.Context, original *os.File) (*os.File, fun
 	}
 	if prepareErr != nil {
 		if duplicate >= 0 {
-			unix.Close(duplicate)
+			_ = unix.Close(duplicate)
 		}
 		return nil, nil, prepareErr
 	}
 	stream := os.NewFile(uintptr(duplicate), original.Name())
 	if stream == nil {
-		unix.Close(duplicate)
+		_ = unix.Close(duplicate)
 		return nil, nil, errors.New("cannot prepare stream descriptor")
 	}
 	done := make(chan struct{})
@@ -51,14 +51,14 @@ func cancelableStreamFile(ctx context.Context, original *os.File) (*os.File, fun
 		defer close(finished)
 		select {
 		case <-ctx.Done():
-			stream.Close()
+			_ = stream.Close()
 		case <-done:
 		}
 	}()
 	return stream, func() {
 		close(done)
 		<-finished
-		stream.Close()
+		_ = stream.Close()
 		_ = raw.Control(func(fd uintptr) { _, _ = unix.FcntlInt(fd, unix.F_SETFL, flags) })
 	}, nil
 }
