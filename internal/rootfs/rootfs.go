@@ -14,6 +14,13 @@ import (
 	"strings"
 )
 
+var _ io.Reader = contextReader{}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
 // Validate resolves a filesystem and checks existing runtime mount targets.
 // The template must remain unchanged until Copy finishes.
 func Validate(path string) (string, error) {
@@ -58,9 +65,10 @@ func ValidateBusyBox(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("BusyBox must be an ELF executable: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	machine := map[string]elf.Machine{"amd64": elf.EM_X86_64, "arm64": elf.EM_AARCH64}[runtime.GOARCH]
-	if machine == elf.EM_NONE || f.Machine != machine || f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB || (f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN) {
+	if machine == elf.EM_NONE || f.Machine != machine || f.Class != elf.ELFCLASS64 ||
+		f.Data != elf.ELFDATA2LSB || (f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN) {
 		return "", fmt.Errorf("BusyBox must be a 64-bit Linux ELF executable for %s", runtime.GOARCH)
 	}
 	if f.OSABI != elf.ELFOSABI_NONE && f.OSABI != elf.ELFOSABI_LINUX {
@@ -79,6 +87,58 @@ func ValidateBusyBox(path string) (string, error) {
 		return "", errors.New("BusyBox must be statically linked (shared libraries found)")
 	}
 	return root, nil
+}
+
+// Copy copies a stable, trusted template without traversing symlinks. Destination
+// must already exist, be empty, and not overlap source. Errors may leave a partial
+// copy, which the caller must remove. Ownership is not copied; special files and
+// mounted descendants are rejected, and setuid/setgid bits are never retained.
+func Copy(ctx context.Context, source, destination string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	source, err := directory(source)
+	if err != nil {
+		return err
+	}
+	if source == string(filepath.Separator) {
+		return errors.New("the host root cannot be copied as a rootfs")
+	}
+	root, err := os.OpenRoot(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return CopyFromRoot(ctx, root, source, destination)
+}
+
+// CopyFromRoot confines source access to an already pinned directory. sourcePath
+// is its canonical host path, used to reject overlap and mounted descendants.
+// The source must remain stable until copying finishes.
+func CopyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string) error {
+	return copyFromRoot(ctx, root, sourcePath, destination, false /* preserveOwnership */)
+}
+
+// CopyOwned preserves numeric image ownership when preparing a privileged root.
+// Directory templates and rootless copies retain the original Copy policy.
+func CopyOwned(ctx context.Context, source, destination string) error {
+	canonical, err := directory(source)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(canonical)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return copyFromRoot(ctx, root, canonical, destination, true /* preserveOwnership */)
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }
 
 func directory(path string) (string, error) {
@@ -115,52 +175,7 @@ func within(parent, child string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// Copy copies a stable, trusted template without traversing symlinks. Destination
-// must already exist, be empty, and not overlap source. Errors may leave a partial
-// copy, which the caller must remove. Ownership is not copied; special files and
-// mounted descendants are rejected, and setuid/setgid bits are never retained.
-func Copy(ctx context.Context, source, destination string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	source, err := directory(source)
-	if err != nil {
-		return err
-	}
-	if source == string(filepath.Separator) {
-		return errors.New("the host root cannot be copied as a rootfs")
-	}
-	root, err := os.OpenRoot(source)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	return CopyFromRoot(ctx, root, source, destination)
-}
-
-// CopyFromRoot confines source access to an already pinned directory. sourcePath
-// is its canonical host path, used to reject overlap and mounted descendants.
-// The source must remain stable until copying finishes.
-func CopyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string) error {
-	return copyFromRoot(ctx, root, sourcePath, destination, false)
-}
-
-// CopyOwned preserves numeric image ownership when preparing a privileged root.
-// Directory templates and rootless copies retain the original Copy policy.
-func CopyOwned(ctx context.Context, source, destination string) error {
-	canonical, err := directory(source)
-	if err != nil {
-		return err
-	}
-	root, err := os.OpenRoot(canonical)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	return copyFromRoot(ctx, root, canonical, destination, true)
-}
-
-func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string, ownership bool) error {
+func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination string, preserveOwnership bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -221,7 +236,7 @@ func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination st
 					return err
 				}
 			}
-			directories = append(directories, copiedDirectory{target, mode})
+			directories = append(directories, copiedDirectory{path: target, mode: mode})
 		case mode.IsRegular():
 			if err := copyFileFromRoot(ctx, root, name, target, mode, buffer); err != nil {
 				return fmt.Errorf("copy %s: %w", rel, err)
@@ -237,8 +252,11 @@ func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination st
 		default:
 			return fmt.Errorf("unsupported special file in rootfs: %s", rel)
 		}
-		if ownership {
-			uid, gid := Ownership(info)
+		if preserveOwnership {
+			uid, gid, err := Ownership(info)
+			if err != nil {
+				return err
+			}
 			if err := os.Lchown(target, int(uid), int(gid)); err != nil {
 				return err
 			}
@@ -263,24 +281,12 @@ func copyFromRoot(ctx context.Context, root *os.Root, sourcePath, destination st
 	return nil
 }
 
-type contextReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (r contextReader) Read(p []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.r.Read(p)
-}
-
 func copyFile(ctx context.Context, source, destination string, mode fs.FileMode, buffer []byte) error {
 	in, err := openSource(source)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	return copyOpenedFile(ctx, in, destination, mode, buffer)
 }
 
@@ -289,7 +295,7 @@ func copyFileFromRoot(ctx context.Context, root *os.Root, name, destination stri
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	return copyOpenedFile(ctx, in, destination, mode, buffer)
 }
 

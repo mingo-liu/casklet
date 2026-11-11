@@ -4,6 +4,7 @@ package volume
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"time"
 
@@ -16,17 +17,13 @@ type Record struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
 type ReferenceCheck func(context.Context, string) (bool, error)
+
 type Leases struct{ Files []*os.File }
 
-func (l *Leases) Close() error {
-	var err error
-	for _, f := range l.Files {
-		err = errors.Join(err, f.Close())
-	}
-	l.Files = nil
-	return err
-}
+var _ io.Closer = (*Leases)(nil)
+
 func AcquireMounts(ctx context.Context, mounts []config.BindMount) (*Leases, error) {
 	leases := &Leases{}
 	names := config.VolumeNames(mounts)
@@ -40,10 +37,19 @@ func AcquireMounts(ctx context.Context, mounts []config.BindMount) (*Leases, err
 	for _, name := range names {
 		file, err := store.Acquire(ctx, name)
 		if err != nil {
-			leases.Close()
+			_ = leases.Close()
 			return nil, err
 		}
 		leases.Files = append(leases.Files, file)
 	}
 	return leases, nil
+}
+
+func (l *Leases) Close() error {
+	var err error
+	for _, f := range l.Files {
+		err = errors.Join(err, f.Close())
+	}
+	l.Files = nil
+	return err
 }

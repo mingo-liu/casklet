@@ -108,7 +108,10 @@ func Identity(ctx context.Context, path, architecture string, launch ...*LaunchC
 			GID     *uint32 `json:",omitempty"`
 		}{Name: filepath.ToSlash(name), Mode: uint32(info.Mode())}
 		if owned {
-			uid, gid := rootfs.Ownership(info)
+			uid, gid, err := rootfs.Ownership(info)
+			if err != nil {
+				return err
+			}
 			item.UID, item.GID = &uid, &gid
 		}
 		switch {
