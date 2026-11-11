@@ -15,13 +15,13 @@ export VERSION
 build:
 	test "$(GOOS)" = darwin
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo.version=$$VERSION" -o internal/machine/assets/casklet-engine ./cmd/casklet
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo.version=$$VERSION" -o bin/casklet ./cmd/casklet
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo._version=$$VERSION" -o internal/machine/assets/casklet-engine ./cmd/casklet
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo._version=$$VERSION" -o bin/casklet ./cmd/casklet
 
 # Internal guest engine, also used by the privileged Linux test suite.
 engine:
 	mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo.version=$$VERSION" -o bin/casklet-engine ./cmd/casklet
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(GOARCH) $(GO) build -trimpath -ldflags "-X github.com/mingo-liu/casklet/internal/buildinfo._version=$$VERSION" -o bin/casklet-engine ./cmd/casklet
 
 install:
 	test "$$(uname -s)" = Darwin

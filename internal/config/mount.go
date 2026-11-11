@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// VolumeRoot is guest-local storage; volume names never refer to Mac paths.
+const VolumeRoot = "/var/lib/casklet/volumes"
+
+var _volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
+
 // BindMount exposes an existing host directory at a container path.
 type BindMount struct {
 	Type     string `json:"type,omitempty"`
@@ -76,10 +81,6 @@ func ParseMountFrom(value, base string) (BindMount, error) {
 	return mount, ValidateMounts([]BindMount{mount}, "")
 }
 
-func pathsOverlap(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
-}
-
 // ValidateMounts checks the mount protocol, including duplicate and nested targets.
 // Existing directories and symlink safety are checked separately on Linux.
 func ValidateMounts(mounts []BindMount, rootfs string) error {
@@ -128,25 +129,22 @@ func ValidateMounts(mounts []BindMount, rootfs string) error {
 	return nil
 }
 
-// VolumeRoot is guest-local storage; volume names never refer to Mac paths.
-const VolumeRoot = "/var/lib/casklet/volumes"
-
-var volumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$`)
-
 func ValidateVolumeName(name string) error {
-	if !volumeName.MatchString(name) {
+	if !_volumeName.MatchString(name) {
 		return errors.New("volume name must contain 1-63 letters, digits, underscores, periods, or hyphens and start alphanumeric")
 	}
 	return nil
 }
+
 func (m BindMount) SourcePath() string {
 	if m.Type == "volume" {
 		return path.Join(VolumeRoot, m.Source, "data")
 	}
 	return m.Source
 }
+
 func VolumeNames(mounts []BindMount) []string {
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	for _, m := range mounts {
 		if m.Type == "volume" {
 			seen[m.Source] = true
@@ -158,4 +156,8 @@ func VolumeNames(mounts []BindMount) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func pathsOverlap(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }

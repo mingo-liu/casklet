@@ -16,7 +16,7 @@ import (
 type dnsServer struct {
 	port     int
 	udp      *net.UDPConn
-	tcp      net.Listener
+	tcp      *net.TCPListener
 	wg       sync.WaitGroup
 	slots    chan struct{}
 	stop     chan struct{}
@@ -32,19 +32,39 @@ type dnsServer struct {
 }
 
 func newDNS(gateway, source string, upstream []string, lookup func(string) (net.IP, bool, error)) (*dnsServer, error) {
-	tcp, err := net.Listen("tcp4", net.JoinHostPort(gateway, "0"))
+	listener, err := net.Listen("tcp4", net.JoinHostPort(gateway, "0"))
 	if err != nil {
 		return nil, err
 	}
-	port := tcp.Addr().(*net.TCPAddr).Port
+	tcp, ok := listener.(*net.TCPListener)
+	if !ok {
+		listener.Close()
+		return nil, errors.New("DNS listener is not TCP")
+	}
+	address, ok := tcp.Addr().(*net.TCPAddr)
+	if !ok {
+		tcp.Close()
+		return nil, errors.New("DNS listener has a non-TCP address")
+	}
+	port := address.Port
 	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(gateway), Port: port})
 	if err != nil {
 		tcp.Close()
 		return nil, err
 	}
-	s := &dnsServer{port: port, udp: udp, tcp: tcp, slots: make(chan struct{}, 32), stop: make(chan struct{}), source: source, upstream: append([]string(nil), upstream...), lookup: lookup}
+	s := &dnsServer{
+		port: port,
+		udp:  udp,
+		tcp:  tcp,
+		// Slots bound active queries; a full pool drops UDP or closes TCP immediately.
+		slots:    make(chan struct{}, 32),
+		stop:     make(chan struct{}),
+		source:   source,
+		upstream: append([]string(nil), upstream...),
+		lookup:   lookup,
+		conns:    make(map[net.Conn]bool),
+	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.conns = map[net.Conn]bool{}
 	s.wg.Add(2)
 	go s.serveUDP()
 	go s.serveTCP()
@@ -57,7 +77,7 @@ func (s *dnsServer) Quiesce() {
 		s.cancel()
 		close(s.stop)
 		s.udp.SetReadDeadline(time.Now())
-		s.tcp.(*net.TCPListener).SetDeadline(time.Now())
+		s.tcp.SetDeadline(time.Now())
 		s.mu.Lock()
 		for c := range s.conns {
 			c.Close()
@@ -66,27 +86,15 @@ func (s *dnsServer) Quiesce() {
 		s.wg.Wait()
 	})
 }
-func (s *dnsServer) Close() { s.once.Do(func() { s.Quiesce(); s.udp.Close(); s.tcp.Close() }) }
-func (s *dnsServer) track(c net.Conn) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ctx.Err() != nil {
-		c.Close()
-		return false
-	}
-	s.conns[c] = true
-	return true
+
+func (s *dnsServer) Close() {
+	s.once.Do(func() {
+		s.Quiesce()
+		s.udp.Close()
+		s.tcp.Close()
+	})
 }
-func (s *dnsServer) release(c net.Conn) { s.mu.Lock(); delete(s.conns, c); s.mu.Unlock(); c.Close() }
-func (s *dnsServer) acquire() bool {
-	select {
-	case s.slots <- struct{}{}:
-		return true
-	default:
-		return false
-	}
-}
-func (s *dnsServer) allowed(ip net.IP) bool { return s.source == "" || ip.String() == s.source }
+
 func (s *dnsServer) serveUDP() {
 	defer s.wg.Done()
 	buf := make([]byte, 4096)
@@ -103,12 +111,13 @@ func (s *dnsServer) serveUDP() {
 		go func() {
 			defer s.wg.Done()
 			defer func() { <-s.slots }()
-			if answer := s.answer(packet, false); answer != nil {
+			if answer := s.answer(packet, false /* tcp */); answer != nil {
 				s.udp.WriteToUDP(answer, peer)
 			}
 		}()
 	}
 }
+
 func (s *dnsServer) serveTCP() {
 	defer s.wg.Done()
 	for {
@@ -116,7 +125,8 @@ func (s *dnsServer) serveTCP() {
 		if err != nil {
 			return
 		}
-		if !s.allowed(c.RemoteAddr().(*net.TCPAddr).IP) || !s.acquire() {
+		peer, ok := c.RemoteAddr().(*net.TCPAddr)
+		if !ok || !s.allowed(peer.IP) || !s.acquire() {
 			c.Close()
 			continue
 		}
@@ -142,7 +152,7 @@ func (s *dnsServer) serveTCP() {
 			if _, err := io.ReadFull(c, packet); err != nil {
 				return
 			}
-			answer := s.answer(packet, true)
+			answer := s.answer(packet, true /* tcp */)
 			if answer == nil {
 				return
 			}
@@ -151,46 +161,7 @@ func (s *dnsServer) serveTCP() {
 		}()
 	}
 }
-func question(packet []byte) (name string, typ uint16, end int, err error) {
-	if len(packet) < 12 || len(packet) > 4096 || packet[2]&0xf8 != 0 || binary.BigEndian.Uint16(packet[4:6]) != 1 {
-		return "", 0, 0, errors.New("invalid DNS question")
-	}
-	var labels []string
-	i := 12
-	size := 0
-	for {
-		if i >= len(packet) {
-			return "", 0, 0, io.ErrUnexpectedEOF
-		}
-		n := int(packet[i])
-		i++
-		if n == 0 {
-			break
-		}
-		if n > 63 || i+n > len(packet) {
-			return "", 0, 0, errors.New("invalid DNS label")
-		}
-		size += n + 1
-		if size > 253 {
-			return "", 0, 0, errors.New("DNS name too long")
-		}
-		labels = append(labels, string(packet[i:i+n]))
-		i += n
-	}
-	if i+4 > len(packet) || binary.BigEndian.Uint16(packet[i+2:i+4]) != 1 {
-		return "", 0, 0, errors.New("unsupported DNS question")
-	}
-	return strings.ToLower(strings.Join(labels, ".")), binary.BigEndian.Uint16(packet[i : i+2]), i + 4, nil
-}
-func response(packet []byte, end int, rcode byte) []byte {
-	out := append([]byte(nil), packet[:end]...)
-	out[2] = 0x80 | packet[2]&1
-	out[3] = 0x80 | rcode
-	for i := 6; i < 12; i++ {
-		out[i] = 0
-	}
-	return out
-}
+
 func (s *dnsServer) answer(packet []byte, tcp bool) []byte {
 	name, typ, end, err := question(packet)
 	if err != nil {
@@ -265,4 +236,79 @@ func (s *dnsServer) answer(packet []byte, tcp bool) []byte {
 		}
 	}
 	return response(packet, end, 2)
+}
+
+func (s *dnsServer) track(c net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ctx.Err() != nil {
+		c.Close()
+		return false
+	}
+	s.conns[c] = true
+	return true
+}
+
+func (s *dnsServer) release(c net.Conn) {
+	defer c.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.conns, c)
+}
+
+func (s *dnsServer) acquire() bool {
+	select {
+	case s.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *dnsServer) allowed(ip net.IP) bool {
+	return s.source == "" || ip.String() == s.source
+}
+
+func question(packet []byte) (name string, typ uint16, end int, err error) {
+	if len(packet) < 12 || len(packet) > 4096 || packet[2]&0xf8 != 0 || binary.BigEndian.Uint16(packet[4:6]) != 1 {
+		return "", 0, 0, errors.New("invalid DNS question")
+	}
+	var (
+		labels []string
+		i      = 12
+		size   int
+	)
+	for {
+		if i >= len(packet) {
+			return "", 0, 0, io.ErrUnexpectedEOF
+		}
+		n := int(packet[i])
+		i++
+		if n == 0 {
+			break
+		}
+		if n > 63 || i+n > len(packet) {
+			return "", 0, 0, errors.New("invalid DNS label")
+		}
+		size += n + 1
+		if size > 253 {
+			return "", 0, 0, errors.New("DNS name too long")
+		}
+		labels = append(labels, string(packet[i:i+n]))
+		i += n
+	}
+	if i+4 > len(packet) || binary.BigEndian.Uint16(packet[i+2:i+4]) != 1 {
+		return "", 0, 0, errors.New("unsupported DNS question")
+	}
+	return strings.ToLower(strings.Join(labels, ".")), binary.BigEndian.Uint16(packet[i : i+2]), i + 4, nil
+}
+
+func response(packet []byte, end int, rcode byte) []byte {
+	out := append([]byte(nil), packet[:end]...)
+	out[2] = 0x80 | packet[2]&1
+	out[3] = 0x80 | rcode
+	for i := 6; i < 12; i++ {
+		out[i] = 0
+	}
+	return out
 }

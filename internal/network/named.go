@@ -3,9 +3,10 @@ package network
 import (
 	"context"
 	"errors"
-	"github.com/mingo-liu/casklet/internal/config"
 	"os"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 const NamedRoot = "/var/lib/casklet/networks"

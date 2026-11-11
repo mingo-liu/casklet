@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var _networkNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
 // PortMapping publishes an IPv4 host port to a container port.
 type PortMapping struct {
 	HostIP        string `json:"host_ip"`
@@ -98,11 +100,9 @@ func (c Config) NetworkMode() string {
 	return c.Network
 }
 
-var networkNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-
 func IsNamedNetwork(mode string) bool { return mode != "" && mode != "none" && mode != "bridge" }
 func ValidateDNSName(name string) error {
-	if !networkNamePattern.MatchString(name) {
+	if !_networkNamePattern.MatchString(name) {
 		return errors.New("network names and aliases require a lowercase DNS label (1-63 letters, digits, or hyphens)")
 	}
 	return nil
@@ -120,7 +120,7 @@ func (c Config) ValidateNetworkAliases() error {
 	if len(c.NetworkAliases) > 0 && !IsNamedNetwork(c.Network) {
 		return errors.New("network aliases require a named network")
 	}
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	for _, name := range c.NetworkAliases {
 		if err := ValidateDNSName(name); err != nil {
 			return err
