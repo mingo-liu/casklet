@@ -9,50 +9,54 @@ import (
 
 	"github.com/mingo-liu/casklet/internal/cli"
 	"github.com/mingo-liu/casklet/internal/container"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 )
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "__copy" {
-		os.Exit(container.CopyInit())
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	if len(args) == 1 && args[0] == "__copy" {
+		return container.CopyInit()
 	}
-	if len(os.Args) == 2 && os.Args[1] == "__restart-manager" {
-		os.Exit(container.RestartManager())
+	if len(args) == 1 && args[0] == "__restart-manager" {
+		return container.RestartManager()
 	}
-	if (len(os.Args) == 2 || len(os.Args) == 3 && os.Args[2] == "replace") && os.Args[1] == "__ensure-restarts" {
+	if (len(args) == 1 || len(args) == 2 && args[1] == "replace") && args[0] == "__ensure-restarts" {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		if err := container.EnsureRestartManager(ctx, len(os.Args) == 3); err != nil {
+		if err := container.EnsureRestartManager(ctx, len(args) == 2); err != nil {
 			fmt.Fprintln(os.Stderr, "casklet:", err)
-			os.Exit(125)
+			return 125
 		}
-		return
+		return 0
 	}
 
-	if handled, code := remoteMode(os.Args[1:]); handled {
-		os.Exit(code)
+	if handled, code := remoteMode(args); handled {
+		return code
 	}
-	if len(os.Args) == 2 && os.Args[1] == "__enter" {
-		os.Exit(containerruntime.EnterExec())
+	if len(args) == 1 && args[0] == "__enter" {
+		return runtime.EnterExec()
 	}
-	if len(os.Args) == 2 && os.Args[1] == "__exec" {
-		os.Exit(containerruntime.ExecInit())
+	if len(args) == 1 && args[0] == "__exec" {
+		return runtime.ExecInit()
 	}
-	if len(os.Args) == 4 && os.Args[1] == "__supervise" {
-		generation, err := strconv.ParseUint(os.Args[3], 10, 64)
+	if len(args) == 3 && args[0] == "__supervise" {
+		generation, err := strconv.ParseUint(args[2], 10, 64)
 		if err != nil {
-			os.Exit(125)
+			return 125
 		}
-		os.Exit(container.Supervisor(os.Args[2], generation))
+		return container.Supervisor(args[1], generation)
 	}
-	if len(os.Args) == 3 && os.Args[1] == "__supervise" {
-		os.Exit(container.Supervisor(os.Args[2]))
+	if len(args) == 2 && args[0] == "__supervise" {
+		return container.Supervisor(args[1])
 	}
-	if len(os.Args) == 2 && os.Args[1] == "__probe" {
-		os.Exit(containerruntime.Probe())
+	if len(args) == 1 && args[0] == "__probe" {
+		return runtime.Probe()
 	}
-	if len(os.Args) == 2 && os.Args[1] == "__init" {
-		os.Exit(containerruntime.Init())
+	if len(args) == 1 && args[0] == "__init" {
+		return runtime.Init()
 	}
-	os.Exit(cli.Execute(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	return cli.Execute(args, os.Stdin, os.Stdout, os.Stderr)
 }

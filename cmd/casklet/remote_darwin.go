@@ -4,8 +4,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/machine"
 	"os"
+
+	"github.com/mingo-liu/casklet/internal/machine"
 )
 
 func remoteMode(args []string) (bool, int) {

@@ -16,23 +16,26 @@ import (
 )
 
 func remoteMode(args []string) (bool, int) {
-	var code int
-	var err error
-	if len(args) >= 1 && args[0] == "__credential-prepare" {
+	var (
+		code int
+		err  error
+	)
+	switch {
+	case len(args) >= 1 && args[0] == "__credential-prepare":
 		return true, cli.ExecuteCredentialPrepare(args[1:], os.Stdin, os.Stdout, os.Stderr)
-	} else if len(args) == 1 && args[0] == "__ensure-template" {
+	case len(args) == 1 && args[0] == "__ensure-template":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stop()
 		ctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		err = machine.EnsureBuiltinTemplate(ctx)
-	} else if len(args) >= 3 && args[0] == "__host-lifecycle" {
+	case len(args) >= 3 && args[0] == "__host-lifecycle":
 		return true, cli.ExecuteHostLifecycle(args[1:], os.Stdin, os.Stdout, os.Stderr)
-	} else if len(args) >= 3 && args[0] == "__remote" {
+	case len(args) >= 3 && args[0] == "__remote":
 		code, err = remote.Run(args[1], args[2:])
-	} else if len(args) == 3 && args[0] == "__signal" {
+	case len(args) == 3 && args[0] == "__signal":
 		err = remote.Send(args[1], args[2])
-	} else {
+	default:
 		return false, 0
 	}
 	if err != nil {
