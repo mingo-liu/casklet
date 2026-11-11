@@ -10,7 +10,7 @@ import (
 // ParseResolvers excludes local stubs that cannot be reached from a container.
 func ParseResolvers(input io.Reader) []string {
 	var servers []string
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(io.LimitReader(input, 65536))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
@@ -22,10 +22,11 @@ func ParseResolvers(input io.Reader) []string {
 			continue
 		}
 		server := ip.String()
-		if !seen[server] {
-			servers = append(servers, server)
-			seen[server] = true
+		if seen[server] {
+			continue
 		}
+		servers = append(servers, server)
+		seen[server] = true
 		if len(servers) == 3 {
 			break
 		}

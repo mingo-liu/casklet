@@ -6,26 +6,27 @@ import (
 )
 
 func TestTmpfsCapacitiesValidatePersistAndInherit(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		name     string
 		tmp, shm int64
 		valid    bool
 	}{
-		{"legacy", 0, 0, true},
-		{"positive bytes", 1, 1, true},
-		{"custom", 32 << 20, 96 << 20, true},
-		{"maximum", 128 << 30, 128 << 30, true},
-		{"negative tmp", -1, 0, false},
-		{"negative shm", 0, -1, false},
-		{"oversized tmp", (128 << 30) + 1, 0, false},
-		{"oversized shm", 0, (128 << 30) + 1, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			cfg := Config{Command: []string{"true"}, Memory: 8 << 20, TmpSize: test.tmp, ShmSize: test.shm}
-			if err := cfg.ValidateExecution(); (err == nil) != test.valid {
+		{name: "legacy", tmp: 0, shm: 0, valid: true},
+		{name: "positive bytes", tmp: 1, shm: 1, valid: true},
+		{name: "custom", tmp: 32 << 20, shm: 96 << 20, valid: true},
+		{name: "maximum", tmp: 128 << 30, shm: 128 << 30, valid: true},
+		{name: "negative tmp", tmp: -1, shm: 0, valid: false},
+		{name: "negative shm", tmp: 0, shm: -1, valid: false},
+		{name: "oversized tmp", tmp: (128 << 30) + 1, shm: 0, valid: false},
+		{name: "oversized shm", tmp: 0, shm: (128 << 30) + 1, valid: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{Command: []string{"true"}, Memory: 8 << 20, TmpSize: tt.tmp, ShmSize: tt.shm}
+			if err := cfg.ValidateExecution(); (err == nil) != tt.valid {
 				t.Fatalf("validation: %v", err)
 			}
-			if !test.valid {
+			if !tt.valid {
 				return
 			}
 			data, err := json.Marshal(cfg)
@@ -37,7 +38,7 @@ func TestTmpfsCapacitiesValidatePersistAndInherit(t *testing.T) {
 				t.Fatal(err)
 			}
 			tmp, shm := saved.TmpfsSizes()
-			wantTmp, wantShm := test.tmp, test.shm
+			wantTmp, wantShm := tt.tmp, tt.shm
 			if wantTmp == 0 {
 				wantTmp = 16 << 20
 			}
