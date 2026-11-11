@@ -13,32 +13,6 @@ import (
 	"testing"
 )
 
-func template(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	for _, name := range []string{"bin", "proc", "dev", "tmp"} {
-		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// A minimal ELF header is sufficient to exercise metadata validation without
-	// downloading or executing a real BusyBox binary on the development host.
-	header := make([]byte, 64)
-	copy(header, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
-	binary.LittleEndian.PutUint16(header[16:], uint16(elf.ET_EXEC))
-	machine := elf.EM_X86_64
-	if runtime.GOARCH == "arm64" {
-		machine = elf.EM_AARCH64
-	}
-	binary.LittleEndian.PutUint16(header[18:], uint16(machine))
-	binary.LittleEndian.PutUint32(header[20:], 1)
-	binary.LittleEndian.PutUint16(header[52:], 64)
-	if err := os.WriteFile(filepath.Join(root, "bin", "busybox"), header, 0755); err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
-
 func TestValidateCanonicalTemplate(t *testing.T) {
 	root := template(t)
 	link := filepath.Join(t.TempDir(), "template")
@@ -55,48 +29,84 @@ func TestValidateCanonicalTemplate(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsInvalidTemplates(t *testing.T) {
-	for _, name := range []string{"missing directory", "symlink mount target", "symlink bin", "nonexecutable BusyBox", "nonELF BusyBox", "wrong architecture", "dynamic BusyBox"} {
-		t.Run(name, func(t *testing.T) {
-			root := template(t)
-			busybox := filepath.Join(root, "bin", "busybox")
-			switch name {
-			case "missing directory":
-				must(t, os.Remove(filepath.Join(root, "proc")))
-			case "symlink mount target":
-				must(t, os.Remove(filepath.Join(root, "dev")))
-				must(t, os.Symlink(t.TempDir(), filepath.Join(root, "dev")))
-			case "symlink bin":
-				must(t, os.Rename(filepath.Join(root, "bin"), filepath.Join(root, "real-bin")))
-				must(t, os.Symlink("real-bin", filepath.Join(root, "bin")))
-			case "nonexecutable BusyBox":
-				must(t, os.Chmod(busybox, 0644))
-			case "nonELF BusyBox":
-				must(t, os.WriteFile(busybox, []byte("not ELF"), 0755))
-			case "wrong architecture":
-				data, err := os.ReadFile(busybox)
-				must(t, err)
-				binary.LittleEndian.PutUint16(data[18:], uint16(elf.EM_386))
-				must(t, os.WriteFile(busybox, data, 0755))
-			case "dynamic BusyBox":
-				data, err := os.ReadFile(busybox)
-				must(t, err)
-				binary.LittleEndian.PutUint64(data[32:], 64)
-				binary.LittleEndian.PutUint16(data[54:], 56)
-				binary.LittleEndian.PutUint16(data[56:], 1)
-				program := make([]byte, 56)
-				binary.LittleEndian.PutUint32(program, uint32(elf.PT_INTERP))
-				must(t, os.WriteFile(busybox, append(data, program...), 0755))
-			}
-			if _, err := ValidateBusyBox(root); err == nil {
-				t.Fatal("invalid template was accepted")
+func TestValidateRejectsMissingDirectory(t *testing.T) {
+	root := template(t)
+	must(t, os.Remove(filepath.Join(root, "proc")))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsSymlinkMountTarget(t *testing.T) {
+	root := template(t)
+	must(t, os.Remove(filepath.Join(root, "dev")))
+	must(t, os.Symlink(t.TempDir(), filepath.Join(root, "dev")))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsSymlinkBin(t *testing.T) {
+	root := template(t)
+	must(t, os.Rename(filepath.Join(root, "bin"), filepath.Join(root, "real-bin")))
+	must(t, os.Symlink("real-bin", filepath.Join(root, "bin")))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsNonexecutableBusyBox(t *testing.T) {
+	root := template(t)
+	must(t, os.Chmod(filepath.Join(root, "bin", "busybox"), 0644))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsNonELFBusyBox(t *testing.T) {
+	root := template(t)
+	must(t, os.WriteFile(filepath.Join(root, "bin", "busybox"), []byte("not ELF"), 0755))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsWrongArchitecture(t *testing.T) {
+	root := template(t)
+	busybox := filepath.Join(root, "bin", "busybox")
+	data, err := os.ReadFile(busybox)
+	must(t, err)
+	binary.LittleEndian.PutUint16(data[18:], uint16(elf.EM_386))
+	must(t, os.WriteFile(busybox, data, 0755))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsDynamicBusyBox(t *testing.T) {
+	root := template(t)
+	busybox := filepath.Join(root, "bin", "busybox")
+	data, err := os.ReadFile(busybox)
+	must(t, err)
+	binary.LittleEndian.PutUint64(data[32:], 64)
+	binary.LittleEndian.PutUint16(data[54:], 56)
+	binary.LittleEndian.PutUint16(data[56:], 1)
+	program := make([]byte, 56)
+	binary.LittleEndian.PutUint32(program, uint32(elf.PT_INTERP))
+	must(t, os.WriteFile(busybox, append(data, program...), 0755))
+	if _, err := ValidateBusyBox(root); err == nil {
+		t.Fatal("invalid template was accepted")
+	}
+}
+
+func TestValidateRejectsInvalidPaths(t *testing.T) {
+	tests := []string{"", "/", filepath.Join(t.TempDir(), "missing")}
+	for _, tt := range tests {
+		t.Run(tt, func(t *testing.T) {
+			if _, err := Validate(tt); err == nil {
+				t.Fatalf("invalid root %q was accepted", tt)
 			}
 		})
-	}
-	for _, path := range []string{"", "/", filepath.Join(t.TempDir(), "missing")} {
-		if _, err := Validate(path); err == nil {
-			t.Fatalf("invalid root %q was accepted", path)
-		}
 	}
 }
 
@@ -228,6 +238,25 @@ func TestCopyMultipleChunks(t *testing.T) {
 	}
 }
 
+func TestPinnedCopySurvivesSourceRename(t *testing.T) {
+	source := template(t)
+	pinned, err := os.OpenRoot(source)
+	must(t, err)
+	defer func() { _ = pinned.Close() }()
+	must(t, os.Rename(source, source+"-original"))
+	defer func() { _ = os.RemoveAll(source + "-original") }()
+	must(t, os.Mkdir(source, 0700))
+	must(t, os.WriteFile(filepath.Join(source, "replacement"), []byte("replacement"), 0600))
+	destination := t.TempDir()
+	must(t, CopyFromRoot(context.Background(), pinned, source, destination))
+	if _, err := os.Stat(filepath.Join(destination, "replacement")); !os.IsNotExist(err) {
+		t.Fatal("pinned copy followed replacement")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "bin", "busybox")); err != nil {
+		t.Fatal("pinned copy lost original tree:", err)
+	}
+}
+
 func BenchmarkCopyManyFiles(b *testing.B) {
 	source, parent := b.TempDir(), b.TempDir()
 	data := make([]byte, 1024)
@@ -252,28 +281,35 @@ func BenchmarkCopyManyFiles(b *testing.B) {
 	}
 }
 
+func template(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, name := range []string{"bin", "proc", "dev", "tmp"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A minimal ELF header is sufficient to exercise metadata validation without
+	// downloading or executing a real BusyBox binary on the development host.
+	header := make([]byte, 64)
+	copy(header, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binary.LittleEndian.PutUint16(header[16:], uint16(elf.ET_EXEC))
+	machine := elf.EM_X86_64
+	if runtime.GOARCH == "arm64" {
+		machine = elf.EM_AARCH64
+	}
+	binary.LittleEndian.PutUint16(header[18:], uint16(machine))
+	binary.LittleEndian.PutUint32(header[20:], 1)
+	binary.LittleEndian.PutUint16(header[52:], 64)
+	if err := os.WriteFile(filepath.Join(root, "bin", "busybox"), header, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestPinnedCopySurvivesSourceRename(t *testing.T) {
-	source := template(t)
-	pinned, err := os.OpenRoot(source)
-	must(t, err)
-	defer pinned.Close()
-	must(t, os.Rename(source, source+"-original"))
-	defer os.RemoveAll(source + "-original")
-	must(t, os.Mkdir(source, 0700))
-	must(t, os.WriteFile(filepath.Join(source, "replacement"), []byte("replacement"), 0600))
-	destination := t.TempDir()
-	must(t, CopyFromRoot(context.Background(), pinned, source, destination))
-	if _, err := os.Stat(filepath.Join(destination, "replacement")); !os.IsNotExist(err) {
-		t.Fatal("pinned copy followed replacement")
-	}
-	if _, err := os.Stat(filepath.Join(destination, "bin", "busybox")); err != nil {
-		t.Fatal("pinned copy lost original tree:", err)
 	}
 }

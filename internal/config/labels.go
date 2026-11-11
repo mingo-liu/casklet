@@ -8,11 +8,11 @@ import (
 	"unicode/utf8"
 )
 
-var labelKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
+var _labelKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$`)
 
 // ValidateLabelKey accepts bounded, portable metadata keys, including namespaces.
 func ValidateLabelKey(key string) error {
-	if !labelKey.MatchString(key) {
+	if !_labelKey.MatchString(key) {
 		return errors.New("label key must contain 1-128 ASCII letters, digits, dots, underscores, colons, slashes, or hyphens and start alphanumeric")
 	}
 	return nil

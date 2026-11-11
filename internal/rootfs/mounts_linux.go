@@ -9,17 +9,17 @@ import (
 	"strings"
 )
 
-func checkMounts(source string) error { return rejectMounts(source, false) }
-
 // CheckUnmounted refuses mounted storage before recursive deletion.
 func CheckUnmounted(source string) error { return rejectMounts(source, true) }
+
+func checkMounts(source string) error { return rejectMounts(source, false) }
 
 func rejectMounts(source string, includeRoot bool) error {
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		return fmt.Errorf("inspect rootfs mount points: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	for scanner.Scan() {

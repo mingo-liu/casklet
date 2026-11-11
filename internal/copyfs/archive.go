@@ -14,8 +14,12 @@ import (
 	"strings"
 )
 
-const MaxBytes int64 = 16 << 30
-const maxEntries = 1000000
+const (
+	MaxBytes    int64 = 16 << 30
+	_maxEntries       = 1000000
+)
+
+var _ io.ReadWriter = (*stream)(nil)
 
 type stream struct {
 	ctx  context.Context
@@ -23,43 +27,6 @@ type stream struct {
 	w    io.Writer
 	n    int64
 	tail [1024]byte
-}
-
-func (s *stream) Read(p []byte) (int, error) {
-	if err := s.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if s.n >= MaxBytes {
-		var extra [1]byte
-		n, err := s.r.Read(extra[:])
-		if n == 0 && err == io.EOF {
-			return 0, io.EOF
-		}
-		return 0, errors.New("copy exceeds 16 GiB archive limit")
-	}
-	if int64(len(p)) > MaxBytes-s.n {
-		p = p[:MaxBytes-s.n]
-	}
-	n, err := s.r.Read(p)
-	if n >= len(s.tail) {
-		copy(s.tail[:], p[n-len(s.tail):n])
-	} else {
-		copy(s.tail[:], s.tail[n:])
-		copy(s.tail[len(s.tail)-n:], p[:n])
-	}
-	s.n += int64(n)
-	return n, err
-}
-func (s *stream) Write(p []byte) (int, error) {
-	if err := s.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if int64(len(p)) > MaxBytes-s.n {
-		return 0, errors.New("copy exceeds 16 GiB archive limit")
-	}
-	n, err := s.w.Write(p)
-	s.n += int64(n)
-	return n, err
 }
 
 // Export never dereferences the source's final symlink. A trailing /. copies
@@ -71,7 +38,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 	if err != nil {
 		return err
 	}
-	defer parent.Close()
+	defer func() { _ = parent.Close() }()
 	root, source = parent, path.Base(source)
 	info, err := root.Lstat(source)
 	if err != nil {
@@ -92,7 +59,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 			return err
 		}
 		count++
-		if count > maxEntries || depth >= 256 {
+		if count > _maxEntries || depth >= 256 {
 			return errors.New("copy exceeds entry or depth limit")
 		}
 		info, err := root.Lstat(name)
@@ -123,7 +90,7 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 			if err != nil {
 				return err
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			current, err := file.Stat()
 			if err != nil || !current.Mode().IsRegular() || !os.SameFile(info, current) {
 				return errors.New("copy source changed")
@@ -131,34 +98,35 @@ func Export(ctx context.Context, root *os.Root, source string, destination io.Wr
 			_, err = io.CopyN(writer, file, info.Size())
 			return err
 		}
-		if info.IsDir() {
-			dir, err := root.OpenRoot(name)
-			if err != nil {
+		if !info.IsDir() {
+			return nil
+		}
+		dir, err := root.OpenRoot(name)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = dir.Close() }()
+		current, err := dir.Stat(".")
+		if err != nil || !os.SameFile(info, current) {
+			return errors.New("copy source directory changed")
+		}
+		f, err := dir.Open(".")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+		for {
+			entries, err := f.ReadDir(128)
+			if err != nil && err != io.EOF {
 				return err
 			}
-			defer dir.Close()
-			current, err := dir.Stat(".")
-			if err != nil || !os.SameFile(info, current) {
-				return errors.New("copy source directory changed")
-			}
-			f, err := dir.Open(".")
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			for {
-				entries, err := f.ReadDir(128)
-				if err != nil && err != io.EOF {
+			for _, entry := range entries {
+				if err := visit(dir, entry.Name(), path.Join(archived, entry.Name()), depth+1); err != nil {
 					return err
 				}
-				for _, entry := range entries {
-					if err := visit(dir, entry.Name(), path.Join(archived, entry.Name()), depth+1); err != nil {
-						return err
-					}
-				}
-				if err == io.EOF {
-					break
-				}
+			}
+			if err == io.EOF {
+				break
 			}
 		}
 		return nil
@@ -204,9 +172,11 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 	} else if statErr == nil && info.IsDir() {
 		destination = path.Join(destination, top)
 	}
-	seen := map[string]bool{}
-	var directories []string
-	var headers []*tar.Header
+	seen := make(map[string]bool)
+	var (
+		directories []string
+		headers     []*tar.Header
+	)
 	for header, count := first, 0; ; count++ {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -217,7 +187,7 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 				return errors.New("copy rejects sparse archive metadata")
 			}
 		}
-		if count >= maxEntries || len(strings.Split(name, "/")) > 256 || (name != "." && !fs.ValidPath(name)) || seen[name] {
+		if count >= _maxEntries || len(strings.Split(name, "/")) > 256 || (name != "." && !fs.ValidPath(name)) || seen[name] {
 			return errors.New("invalid, duplicate, or excessive copy entries")
 		}
 		seen[name] = true
@@ -252,7 +222,7 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 			return err
 		}
 		err = importEntry(ctx, parent, path.Base(target), header, reader)
-		parent.Close()
+		_ = parent.Close()
 		if err != nil {
 			return fmt.Errorf("copy %s: %w", target, err)
 		}
@@ -298,14 +268,52 @@ func ImportChecked(ctx context.Context, root *os.Root, destination string, sourc
 			if err == nil {
 				err = dir.Chtimes(".", headers[i].ModTime, headers[i].ModTime)
 			}
-			dir.Close()
+			_ = dir.Close()
 		}
-		parent.Close()
+		_ = parent.Close()
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *stream) Read(p []byte) (int, error) {
+	if err := s.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if s.n >= MaxBytes {
+		var extra [1]byte
+		n, err := s.r.Read(extra[:])
+		if n == 0 && err == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, errors.New("copy exceeds 16 GiB archive limit")
+	}
+	if int64(len(p)) > MaxBytes-s.n {
+		p = p[:MaxBytes-s.n]
+	}
+	n, err := s.r.Read(p)
+	if n >= len(s.tail) {
+		copy(s.tail[:], p[n-len(s.tail):n])
+	} else {
+		copy(s.tail[:], s.tail[n:])
+		copy(s.tail[len(s.tail)-n:], p[:n])
+	}
+	s.n += int64(n)
+	return n, err
+}
+
+func (s *stream) Write(p []byte) (int, error) {
+	if err := s.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if int64(len(p)) > MaxBytes-s.n {
+		return 0, errors.New("copy exceeds 16 GiB archive limit")
+	}
+	n, err := s.w.Write(p)
+	s.n += int64(n)
+	return n, err
 }
 
 func openParent(root *os.Root, target string) (*os.Root, error) {
@@ -320,11 +328,11 @@ func openParent(root *os.Root, target string) (*os.Root, error) {
 	for _, component := range strings.Split(parent, "/") {
 		info, err := current.Lstat(component)
 		if err != nil || !info.IsDir() {
-			current.Close()
+			_ = current.Close()
 			return nil, errors.New("copy path parent must be an existing directory without symlinks")
 		}
 		next, err := current.OpenRoot(component)
-		current.Close()
+		_ = current.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -362,9 +370,12 @@ func importEntry(ctx context.Context, parent *os.Root, name string, header *tar.
 		return err
 	}
 	temporary := path.Base(file.Name())
-	defer func() { file.Close(); parent.Remove(temporary) }()
+	defer func() {
+		_ = file.Close()
+		_ = parent.Remove(temporary)
+	}()
 	if header.Typeflag == tar.TypeSymlink {
-		file.Close()
+		_ = file.Close()
 		if err := parent.Remove(temporary); err != nil {
 			return err
 		}

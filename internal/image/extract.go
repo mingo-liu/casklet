@@ -267,7 +267,10 @@ func setOwnership(root *os.Root, name string, uid, gid int) error {
 	if err != nil {
 		return err
 	}
-	currentUID, currentGID := rootfs.Ownership(info)
+	currentUID, currentGID, err := rootfs.Ownership(info)
+	if err != nil {
+		return err
+	}
 	if currentUID == uint32(uid) && currentGID == uint32(gid) {
 		return nil
 	}

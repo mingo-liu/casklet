@@ -7,55 +7,78 @@ import (
 	"testing"
 )
 
-func TestConfigureDNSConfinesWrites(t *testing.T) {
-	for _, kind := range []string{"regular", "symlink", "hardlink", "escaping-etc", "directory", "stale-stage"} {
-		t.Run(kind, func(t *testing.T) {
-			root, outside := t.TempDir(), t.TempDir()
-			secret := filepath.Join(outside, "secret")
-			if err := os.WriteFile(secret, []byte("unchanged"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			if kind == "escaping-etc" {
-				if err := os.Symlink(outside, filepath.Join(root, "etc")); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := os.Mkdir(filepath.Join(root, "etc"), 0755); err != nil {
-					t.Fatal(err)
-				}
-				resolver := filepath.Join(root, "etc/resolv.conf")
-				var err error
-				switch kind {
-				case "symlink":
-					err = os.Symlink(secret, resolver)
-				case "hardlink":
-					err = os.Link(secret, resolver)
-				case "directory":
-					err = os.Mkdir(resolver, 0755)
-				case "stale-stage":
-					err = os.Symlink(secret, filepath.Join(root, "etc/.casklet-resolv"))
-				default:
-					err = os.WriteFile(resolver, []byte("old"), 0644)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			err := ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"})
-			shouldFail := kind == "escaping-etc" || kind == "directory"
-			if (err != nil) != shouldFail {
-				t.Fatalf("configure: %v", err)
-			}
-			if !shouldFail {
-				contents, err := os.ReadFile(filepath.Join(root, "etc/resolv.conf"))
-				if err != nil || !strings.Contains(string(contents), "nameserver 8.8.8.8\nnameserver 1.1.1.1\n") {
-					t.Fatalf("contents=%q error=%v", contents, err)
-				}
-			}
-			contents, err := os.ReadFile(secret)
-			if err != nil || string(contents) != "unchanged" {
-				t.Fatalf("outside changed: %q %v", contents, err)
-			}
-		})
+func TestConfigureDNSReplacesRegularResolver(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.WriteFile(filepath.Join(root, "etc/resolv.conf"), []byte("old"), 0644))
+	must(t, ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}))
+	assertResolver(t, root)
+	assertSecretUnchanged(t, secret)
+}
+
+func TestConfigureDNSReplacesResolverSymlink(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.Symlink(secret, filepath.Join(root, "etc/resolv.conf")))
+	must(t, ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}))
+	assertResolver(t, root)
+	assertSecretUnchanged(t, secret)
+}
+
+func TestConfigureDNSReplacesResolverHardlink(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.Link(secret, filepath.Join(root, "etc/resolv.conf")))
+	must(t, ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}))
+	assertResolver(t, root)
+	assertSecretUnchanged(t, secret)
+}
+
+func TestConfigureDNSReclaimsStaleResolverStaging(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.Symlink(secret, filepath.Join(root, "etc/.casklet-resolv")))
+	must(t, ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}))
+	assertResolver(t, root)
+	assertSecretUnchanged(t, secret)
+}
+
+func TestConfigureDNSRejectsEscapingDirectory(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.Remove(filepath.Join(root, "etc")))
+	must(t, os.Symlink(filepath.Dir(secret), filepath.Join(root, "etc")))
+	if err := ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}); err == nil {
+		t.Fatal("accepted escaping resolver directory")
+	}
+	assertSecretUnchanged(t, secret)
+}
+
+func TestConfigureDNSRejectsResolverDirectory(t *testing.T) {
+	root, secret := resolverFixture(t)
+	must(t, os.Mkdir(filepath.Join(root, "etc/resolv.conf"), 0755))
+	if err := ConfigureDNS(root, []string{"8.8.8.8", "1.1.1.1"}); err == nil {
+		t.Fatal("accepted directory as resolver file")
+	}
+	assertSecretUnchanged(t, secret)
+}
+
+func resolverFixture(t *testing.T) (string, string) {
+	t.Helper()
+	root, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	must(t, os.WriteFile(secret, []byte("unchanged"), 0644))
+	must(t, os.Mkdir(filepath.Join(root, "etc"), 0755))
+	return root, secret
+}
+
+func assertResolver(t *testing.T, root string) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(root, "etc/resolv.conf"))
+	if err != nil || !strings.Contains(string(contents), "nameserver 8.8.8.8\nnameserver 1.1.1.1\n") {
+		t.Fatalf("contents=%q error=%v", contents, err)
+	}
+}
+
+func assertSecretUnchanged(t *testing.T, secret string) {
+	t.Helper()
+	contents, err := os.ReadFile(secret)
+	if err != nil || string(contents) != "unchanged" {
+		t.Fatalf("outside changed: %q %v", contents, err)
 	}
 }

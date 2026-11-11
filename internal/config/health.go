@@ -18,7 +18,10 @@ type HealthConfig struct {
 	Retries       *int           `json:"retries,omitempty"`
 }
 
-func (h *HealthConfig) Enabled() bool { return h != nil && len(h.Test) > 0 && h.Test[0] != "NONE" }
+func (h *HealthConfig) Enabled() bool {
+	return h != nil && len(h.Test) > 0 && h.Test[0] != "NONE"
+}
+
 func (h *HealthConfig) Validate() error {
 	if h == nil {
 		return nil
@@ -80,12 +83,42 @@ func (h *HealthConfig) Validate() error {
 	return nil
 }
 
+func (h *HealthConfig) IntervalValue() time.Duration {
+	return healthDuration(h.Interval, 30*time.Second)
+}
+
+func (h *HealthConfig) TimeoutValue() time.Duration { return healthDuration(h.Timeout, 30*time.Second) }
+
+func (h *HealthConfig) StartPeriodValue() time.Duration { return healthDuration(h.StartPeriod, 0) }
+
+func (h *HealthConfig) StartIntervalValue() time.Duration {
+	return healthDuration(h.StartInterval, 5*time.Second)
+}
+
+func (h *HealthConfig) RetriesValue() int {
+	if h.Retries != nil {
+		return *h.Retries
+	}
+	return 3
+}
+
+func (h *HealthConfig) Command() []string {
+	if h.Test[0] == "CMD-SHELL" {
+		shell := h.Shell
+		if len(shell) == 0 {
+			shell = []string{"/bin/sh", "-c"}
+		}
+		return append(append([]string(nil), shell...), h.Test[1])
+	}
+	return append([]string(nil), h.Test[1:]...)
+}
+
 // MergeHealth copies image defaults and replaces only explicitly supplied fields.
 func MergeHealth(defaults, overrides *HealthConfig) *HealthConfig {
 	if defaults == nil && overrides == nil {
 		return nil
 	}
-	result := HealthConfig{}
+	var result HealthConfig
 	if defaults != nil {
 		result = *defaults
 		result.Test = append([]string(nil), defaults.Test...)
@@ -122,28 +155,4 @@ func healthDuration(value *time.Duration, fallback time.Duration) time.Duration 
 		return *value
 	}
 	return fallback
-}
-func (h *HealthConfig) IntervalValue() time.Duration {
-	return healthDuration(h.Interval, 30*time.Second)
-}
-func (h *HealthConfig) TimeoutValue() time.Duration     { return healthDuration(h.Timeout, 30*time.Second) }
-func (h *HealthConfig) StartPeriodValue() time.Duration { return healthDuration(h.StartPeriod, 0) }
-func (h *HealthConfig) StartIntervalValue() time.Duration {
-	return healthDuration(h.StartInterval, 5*time.Second)
-}
-func (h *HealthConfig) RetriesValue() int {
-	if h.Retries != nil {
-		return *h.Retries
-	}
-	return 3
-}
-func (h *HealthConfig) Command() []string {
-	if h.Test[0] == "CMD-SHELL" {
-		shell := h.Shell
-		if len(shell) == 0 {
-			shell = []string{"/bin/sh", "-c"}
-		}
-		return append(append([]string(nil), shell...), h.Test[1])
-	}
-	return append([]string(nil), h.Test[1:]...)
 }
