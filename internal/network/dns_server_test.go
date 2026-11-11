@@ -11,17 +11,11 @@ import (
 	"time"
 )
 
-func query(name string, typ uint16) []byte {
-	b := []byte{0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
-	for _, part := range strings.Split(name, ".") {
-		b = append(b, byte(len(part)))
-		b = append(b, part...)
-	}
-	return append(b, 0, byte(typ>>8), byte(typ), 0, 1)
-}
 func TestDNSUDPAndTCPRefreshAndMissingNames(t *testing.T) {
-	var mu sync.Mutex
-	ip := net.IPv4(10, 232, 0, 2)
+	var (
+		mu sync.Mutex
+		ip = net.IPv4(10, 232, 0, 2)
+	)
 	s, err := newDNS("127.0.0.1", "", nil, func(name string) (net.IP, bool, error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -83,12 +77,14 @@ func TestDNSUDPAndTCPRefreshAndMissingNames(t *testing.T) {
 		t.Fatalf("missing local suffix: %x", a)
 	}
 }
+
 func TestDNSCloseCancelsIncompleteTCPAndBoundsWorkers(t *testing.T) {
 	s, err := newDNS("127.0.0.1", "", nil, func(string) (net.IP, bool, error) { return nil, false, nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	conns := []net.Conn{}
+	t.Cleanup(s.Close)
+	var conns []net.Conn
 	defer func() {
 		for _, c := range conns {
 			c.Close()
@@ -125,16 +121,17 @@ func TestDNSCloseCancelsIncompleteTCPAndBoundsWorkers(t *testing.T) {
 		t.Fatal("DNS shutdown blocked on incomplete requests")
 	}
 }
+
 func TestDNSRejectsMalformedPacketsAndWrongSources(t *testing.T) {
 	s := &dnsServer{source: "10.232.0.2"}
 	if s.allowed(net.ParseIP("10.232.0.3")) {
 		t.Fatal("accepted another container")
 	}
-	cases := [][]byte{nil, make([]byte, 12), query("redis", 1)[:14], append(query("redis", 1), make([]byte, 4096)...)}
+	tests := [][]byte{nil, make([]byte, 12), query("redis", 1)[:14], append(query("redis", 1), make([]byte, 4096)...)}
 	compressed := query("redis", 1)
 	compressed[12] = 0xc0
-	cases = append(cases, compressed)
-	for _, q := range cases {
+	tests = append(tests, compressed)
+	for _, q := range tests {
 		if _, _, _, err := question(q); err == nil {
 			t.Fatalf("accepted malformed %x", q)
 		}
@@ -142,24 +139,39 @@ func TestDNSRejectsMalformedPacketsAndWrongSources(t *testing.T) {
 }
 
 func TestDNSOnlyLocalNamesReadExecutionState(t *testing.T) {
-	for _, name := range []string{"redis", "redis.casklet", "missing.casklet", "fixture.test", "redis.casklet.example"} {
-		t.Run(name, func(t *testing.T) {
+	tests := []struct {
+		giveName  string
+		wantCalls int
+	}{
+		{giveName: "redis", wantCalls: 1},
+		{giveName: "redis.casklet", wantCalls: 1},
+		{giveName: "missing.casklet", wantCalls: 1},
+		{giveName: "fixture.test", wantCalls: 0},
+		{giveName: "redis.casklet.example", wantCalls: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.giveName, func(t *testing.T) {
 			calls := 0
 			s := &dnsServer{lookup: func(string) (net.IP, bool, error) {
 				calls++
 				return nil, false, errors.New("unrelated execution journal is invalid")
 			}}
-			answer := s.answer(query(name, 1), false)
+			answer := s.answer(query(tt.giveName, 1), false /* tcp */)
 			if len(answer) < 12 || answer[3]&15 != 2 {
 				t.Fatalf("expected SERVFAIL without a usable answer: %x", answer)
 			}
-			want := 0
-			if name == "redis" || strings.HasSuffix(name, ".casklet") {
-				want = 1
-			}
-			if calls != want {
-				t.Fatalf("execution lookups = %d, want %d", calls, want)
+			if calls != tt.wantCalls {
+				t.Fatalf("execution lookups = %d, want %d", calls, tt.wantCalls)
 			}
 		})
 	}
+}
+
+func query(name string, typ uint16) []byte {
+	b := []byte{0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0}
+	for _, part := range strings.Split(name, ".") {
+		b = append(b, byte(len(part)))
+		b = append(b, part...)
+	}
+	return append(b, 0, byte(typ>>8), byte(typ), 0, 1)
 }

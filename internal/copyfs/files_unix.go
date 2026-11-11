@@ -20,9 +20,5 @@ func createTemporary(root *os.Root) (*os.File, error) {
 		return nil, err
 	}
 	name := ".casklet-cp-" + hex.EncodeToString(token[:])
-	file, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return nil, err
-	}
-	return file, nil
+	return root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 }

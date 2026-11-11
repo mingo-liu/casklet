@@ -22,4 +22,8 @@ func ParseRestartPolicy(value string) (string, uint64, error) {
 	}
 	return "", 0, errors.New("restart policy must be no, always, unless-stopped, or on-failure[:1-1000]")
 }
-func (c Config) RestartMode() string { mode, _, _ := ParseRestartPolicy(c.RestartPolicy); return mode }
+
+func (c Config) RestartMode() string {
+	mode, _, _ := ParseRestartPolicy(c.RestartPolicy)
+	return mode
+}

@@ -18,14 +18,14 @@ func TestLabelsPreserveLiteralValuesAndBoundMetadata(t *testing.T) {
 			t.Fatalf("accepted %q", assignment)
 		}
 	}
-	labels := map[string]string{}
+	labels := make(map[string]string)
 	for i := 0; i < 65; i++ {
 		labels[fmt.Sprintf("k%d", i)] = ""
 	}
 	if err := ValidateLabels(labels); err == nil {
 		t.Fatal("accepted too many labels")
 	}
-	labels = map[string]string{}
+	labels = make(map[string]string)
 	for i := 0; i < 5; i++ {
 		labels[fmt.Sprintf("k%d", i)] = strings.Repeat("x", 4096)
 	}

@@ -49,7 +49,7 @@ func SetValue(args []string, index, end int, value string) {
 	if index == end {
 		name, _, _ := strings.Cut(args[index], "=")
 		args[index] = name + "=" + value
-	} else {
-		args[end] = value
+		return
 	}
+	args[end] = value
 }

@@ -6,28 +6,47 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
-func TestNamedRoutesAndCanonicalMetadata(t *testing.T) {
-	for _, test := range []struct {
-		routes   string
-		conflict bool
-	}{{`[{"dst":"default"}]`, false}, {`[{"dst":"10.232.0.0/24"}]`, true}, {`[{"dst":"10.232.0.9"}]`, true}, {`[{"dst":"10.0.0.0/8"}]`, true}, {`[{"dst":"10.232.1.0/24"}]`, false}} {
-		err := checkNamedRoutes([]byte(test.routes), "10.232.0.0/24")
-		if (err != nil) != test.conflict {
-			t.Fatalf("%s conflict=%t err=%v", test.routes, test.conflict, err)
-		}
+func TestNamedRoutes(t *testing.T) {
+	tests := []struct {
+		giveRoutes string
+		wantErr    bool
+	}{
+		{giveRoutes: `[{"dst":"default"}]`, wantErr: false},
+		{giveRoutes: `[{"dst":"10.232.0.0/24"}]`, wantErr: true},
+		{giveRoutes: `[{"dst":"10.232.0.9"}]`, wantErr: true},
+		{giveRoutes: `[{"dst":"10.0.0.0/8"}]`, wantErr: true},
+		{giveRoutes: `[{"dst":"10.232.1.0/24"}]`, wantErr: false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.giveRoutes, func(t *testing.T) {
+			err := checkNamedRoutes([]byte(tt.giveRoutes), "10.232.0.0/24")
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("conflict = %t, want %t: %v", err != nil, tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestNamedCanonicalMetadata(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("metadata ownership regression requires root")
 	}
 	s := &Store{root: t.TempDir()}
-	r := Record{"demo", time.Now().UTC(), namedIdentity("demo"), "10.232.0.0/24", "10.232.0.1"}
+	r := Record{
+		Name:      "demo",
+		CreatedAt: time.Now().UTC(),
+		Bridge:    namedIdentity("demo"),
+		Subnet:    "10.232.0.0/24",
+		Gateway:   "10.232.0.1",
+	}
 	if err := writeJSON(filepath.Join(s.root, "demo.json"), r); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +55,9 @@ func TestNamedRoutesAndCanonicalMetadata(t *testing.T) {
 	}
 	r.Subnet = "10.232.0.2/24"
 	r.Gateway = "10.232.0.3"
-	writeJSON(filepath.Join(s.root, "demo.json"), r)
+	if err := writeJSON(filepath.Join(s.root, "demo.json"), r); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.read("demo"); err == nil {
 		t.Fatal("noncanonical subnet accepted")
 	}
@@ -46,8 +67,16 @@ func TestNamedLeaseReferenceAndCancelledLock(t *testing.T) {
 		t.Skip("network leases require root")
 	}
 	s := &Store{root: t.TempDir()}
-	r := Record{"demo", time.Now().UTC(), namedIdentity("demo"), "10.232.0.0/24", "10.232.0.1"}
-	writeJSON(filepath.Join(s.root, "demo.json"), r)
+	r := Record{
+		Name:      "demo",
+		CreatedAt: time.Now().UTC(),
+		Bridge:    namedIdentity("demo"),
+		Subnet:    "10.232.0.0/24",
+		Gateway:   "10.232.0.1",
+	}
+	if err := writeJSON(filepath.Join(s.root, "demo.json"), r); err != nil {
+		t.Fatal(err)
+	}
 	lease, err := s.Acquire(context.Background(), "demo")
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +109,9 @@ func TestNamedJournalPreservesLegacyAllocationSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fields map[string]any
-	json.Unmarshal(data, &fields)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
 	for _, key := range []string{"network", "aliases"} {
 		if _, ok := fields[key]; ok {
 			t.Fatalf("legacy journal gained %q: %s", key, data)
@@ -104,7 +135,9 @@ func TestNamedMetadataRecoveryAndUnsafeArtifacts(t *testing.T) {
 		t.Fatal("interrupted save survived recovery")
 	}
 	outside := filepath.Join(t.TempDir(), "outside")
-	os.WriteFile(outside, []byte("keep"), 0600)
+	if err := os.WriteFile(outside, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(outside, temp); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +147,12 @@ func TestNamedMetadataRecoveryAndUnsafeArtifacts(t *testing.T) {
 	if b, err := os.ReadFile(outside); err != nil || string(b) != "keep" {
 		t.Fatal("unsafe recovery touched outside file")
 	}
-	os.Remove(temp)
-	os.Symlink(outside, filepath.Join(s.root, "demo.json"))
+	if err := os.Remove(temp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(s.root, "demo.json")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Inspect(context.Background(), "demo"); err == nil {
 		t.Fatal("metadata symlink accepted")
 	}
@@ -139,7 +176,9 @@ func TestAbandonedRunDoesNotRemainInDNS(t *testing.T) {
 	if live, err := activeRun(path); err != nil || !live {
 		t.Fatalf("live lock missing: %t %v", live, err)
 	}
-	unix.Flock(int(f.Fd()), unix.LOCK_UN)
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
 	if live, err := activeRun(path); err != nil || live {
 		t.Fatalf("released lock visible: %t %v", live, err)
 	}
@@ -150,7 +189,13 @@ func TestNamedProjectReceiptRejectsAdoptionAndReplacement(t *testing.T) {
 		t.Skip("network ownership requires root")
 	}
 	store := &Store{root: t.TempDir()}
-	record := Record{"demo", time.Now().UTC(), namedIdentity("demo"), "10.232.0.0/24", "10.232.0.1"}
+	record := Record{
+		Name:      "demo",
+		CreatedAt: time.Now().UTC(),
+		Bridge:    namedIdentity("demo"),
+		Subnet:    "10.232.0.0/24",
+		Gateway:   "10.232.0.1",
+	}
 	if err := writeJSON(filepath.Join(store.root, "demo.json"), record); err != nil {
 		t.Fatal(err)
 	}

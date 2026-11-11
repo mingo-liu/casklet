@@ -2,6 +2,11 @@
 
 package rootfs
 
-import "io/fs"
+import (
+	"errors"
+	"io/fs"
+)
 
-func Ownership(info fs.FileInfo) (uint32, uint32) { return 0, 0 }
+func Ownership(info fs.FileInfo) (uint32, uint32, error) {
+	return 0, 0, errors.New("file ownership requires macOS or Linux")
+}

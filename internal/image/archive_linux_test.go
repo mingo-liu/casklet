@@ -109,7 +109,10 @@ func rootOwnership(t *testing.T, tree, name string) (uint32, uint32) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, gid := rootfs.Ownership(info)
+	uid, gid, err := rootfs.Ownership(info)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return uid, gid
 }
 func TestOCILoadFailuresRollBackWithoutChangingPublishedImageOrCache(t *testing.T) {

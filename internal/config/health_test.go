@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-func ptr[T any](value T) *T { return &value }
-
 func TestHealthValidationAndMerge(t *testing.T) {
 	defaults := &HealthConfig{Test: []string{"CMD", "/check", "argument"}, Interval: ptr(time.Second), StartPeriod: ptr(time.Minute), Retries: ptr(4)}
 	merged := MergeHealth(defaults, &HealthConfig{Timeout: ptr(2 * time.Second), StartPeriod: ptr(time.Duration(0))})
@@ -41,3 +39,5 @@ func TestHealthValidationAndMerge(t *testing.T) {
 		t.Fatal("unresolved health options accepted for execution or rejected for image request")
 	}
 }
+
+func ptr[T any](value T) *T { return &value }
