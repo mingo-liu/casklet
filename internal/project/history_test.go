@@ -78,3 +78,16 @@ func TestDeploymentHistoryRetentionPrivacyAndRecovery(t *testing.T) {
 		t.Fatal("wrong identity accepted")
 	}
 }
+
+func TestDeploymentSummariesOwnImageMaps(t *testing.T) {
+	const imageID = "sha256:original"
+	history := History{Deployments: []Deployment{{Images: map[string]string{"app": imageID}}}}
+	summaries := history.Summaries()
+	summaries[0].Images["app"] = "sha256:replacement"
+	if got := history.Deployments[0].Images["app"]; got != imageID {
+		t.Fatalf("summary mutation changed retained image: %q", got)
+	}
+	if got := history.Summaries()[0].Images["app"]; got != imageID {
+		t.Fatalf("summary mutation changed subsequent history: %q", got)
+	}
+}

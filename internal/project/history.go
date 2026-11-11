@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -46,7 +47,7 @@ type DeploymentSummary struct {
 func (h History) Summaries() []DeploymentSummary {
 	summaries := make([]DeploymentSummary, 0, len(h.Deployments))
 	for _, d := range h.Deployments {
-		summary := DeploymentSummary{Revision: d.Revision, CreatedAt: d.CreatedAt, RestoredFrom: d.RestoredFrom, Images: d.Images, Services: []string{}}
+		summary := DeploymentSummary{Revision: d.Revision, CreatedAt: d.CreatedAt, RestoredFrom: d.RestoredFrom, Images: maps.Clone(d.Images), Services: []string{}}
 		for _, service := range d.Plan.Services {
 			summary.Services = append(summary.Services, service.Key)
 		}
