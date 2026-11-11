@@ -1,3 +1,4 @@
+// Package remote relays macOS client signals to a guest CLI session.
 package remote
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
+// PortCheckLimit bounds each private host port authorization message.
 const PortCheckLimit = 16 << 10
 
 // PortCheckRequest is a private guest-to-host startup handshake. It exposes
@@ -23,26 +25,11 @@ type PortCheckRequest struct {
 	Publish []config.PortMapping `json:"publish"`
 }
 
+// PortCheckResult reports host authorization for a retained container start.
 type PortCheckResult struct {
 	Version int    `json:"version"`
 	Allowed bool   `json:"allowed"`
 	Error   string `json:"error,omitempty"`
-}
-
-func DecodePortCheck(data []byte, target any) error {
-	if len(data) > PortCheckLimit {
-		return errors.New("host port check exceeds its size limit")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("trailing host port check data")
-	}
-	return nil
 }
 
 // CheckHostPorts runs while the guest holds the lifecycle operation lock,
@@ -60,30 +47,7 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	completed := make(chan error, 1)
-	go func() {
-		line, err := bufio.NewReader(io.LimitReader(input, PortCheckLimit+1)).ReadBytes('\n')
-		if len(line) > PortCheckLimit {
-			completed <- errors.New("host port check exceeds its size limit")
-			return
-		}
-		if err != nil {
-			completed <- fmt.Errorf("read host port check: %w", err)
-			return
-		}
-		var result PortCheckResult
-		if err := DecodePortCheck(line, &result); err != nil {
-			completed <- fmt.Errorf("decode host port check: %w", err)
-		} else if result.Version != 1 || result.Allowed && result.Error != "" {
-			completed <- errors.New("invalid host port check response")
-		} else if !result.Allowed {
-			if result.Error == "" {
-				result.Error = "macOS host ports are unavailable"
-			}
-			completed <- errors.New(result.Error)
-		} else {
-			completed <- nil
-		}
-	}()
+	go func() { completed <- readPortCheck(input) }()
 	select {
 	case <-ctx.Done():
 		if closer, ok := input.(io.Closer); ok {
@@ -95,4 +59,45 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	case err := <-completed:
 		return err
 	}
+}
+
+// DecodePortCheck requires one bounded message with no unknown or trailing fields.
+func DecodePortCheck(data []byte, target any) error {
+	if len(data) > PortCheckLimit {
+		return errors.New("host port check exceeds its size limit")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("trailing host port check data")
+	}
+	return nil
+}
+
+func readPortCheck(input io.Reader) error {
+	line, err := bufio.NewReader(io.LimitReader(input, PortCheckLimit+1)).ReadBytes('\n')
+	if len(line) > PortCheckLimit {
+		return errors.New("host port check exceeds its size limit")
+	}
+	if err != nil {
+		return fmt.Errorf("read host port check: %w", err)
+	}
+	var result PortCheckResult
+	if err := DecodePortCheck(line, &result); err != nil {
+		return fmt.Errorf("decode host port check: %w", err)
+	}
+	if result.Version != 1 || result.Allowed && result.Error != "" {
+		return errors.New("invalid host port check response")
+	}
+	if result.Allowed {
+		return nil
+	}
+	if result.Error == "" {
+		result.Error = "macOS host ports are unavailable"
+	}
+	return errors.New(result.Error)
 }

@@ -9,25 +9,6 @@ import (
 	"path/filepath"
 )
 
-func sharedDirectory(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	absolute, err = filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return "", fmt.Errorf("shared directory: %w", err)
-	}
-	info, err := os.Stat(absolute)
-	if err != nil {
-		return "", fmt.Errorf("shared directory: %w", err)
-	}
-	if !info.IsDir() || absolute == "/" {
-		return "", fmt.Errorf("share must be an existing directory other than /: %s", path)
-	}
-	return absolute, nil
-}
-
 // share adds a mount through Lima's editor, preserving the VM disk and all
 // unrelated configuration. It never stops running workloads implicitly.
 func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) error {
@@ -39,7 +20,7 @@ func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) erro
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	instance, err := m.instance(ctx)
 	if err != nil {
 		return err
@@ -68,4 +49,23 @@ func (m *Machine) share(ctx context.Context, path string, stdout io.Writer) erro
 	}
 	_, err = fmt.Fprintf(stdout, "Shared: %s\nStart the runtime machine with: casklet machine start\n", path)
 	return err
+}
+
+func sharedDirectory(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	absolute, err = filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("shared directory: %w", err)
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return "", fmt.Errorf("shared directory: %w", err)
+	}
+	if !info.IsDir() || absolute == "/" {
+		return "", fmt.Errorf("share must be an existing directory other than /: %s", path)
+	}
+	return absolute, nil
 }

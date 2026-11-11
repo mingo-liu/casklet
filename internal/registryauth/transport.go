@@ -8,6 +8,18 @@ import (
 	"strings"
 )
 
+// ScopedTransport strips inherited authorization even on redirects between
+// ports of the same hostname, which net/http otherwise considers trusted. The
+// registry's declared token endpoint is the only additional credential target;
+// token POST redirects outside that endpoint are rejected before sending a body.
+type ScopedTransport struct {
+	Base     http.RoundTripper
+	Registry *url.URL
+	Realm    *url.URL
+}
+
+var _ http.RoundTripper = ScopedTransport{}
+
 // TokenRealm rejects plaintext credential exchanges outside a local development
 // registry. HTTPS registries cannot downgrade authentication through a challenge.
 func TokenRealm(value string, registry *url.URL) (*url.URL, error) {
@@ -24,14 +36,7 @@ func TokenRealm(value string, registry *url.URL) (*url.URL, error) {
 	return nil, errors.New("registry token realm must use HTTPS; HTTP is permitted only for loopback development")
 }
 
-func loopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
+// ValidateRegistryEndpoint rejects insecure authenticated registry endpoints.
 func ValidateRegistryEndpoint(endpoint *url.URL) error {
 	if endpoint.Scheme == "https" || endpoint.Scheme == "http" && loopbackHost(endpoint.Hostname()) {
 		return nil
@@ -39,19 +44,12 @@ func ValidateRegistryEndpoint(endpoint *url.URL) error {
 	return errors.New("authenticated registry endpoints require HTTPS except loopback development")
 }
 
-// ScopedTransport strips inherited authorization even on redirects between
-// ports of the same hostname, which net/http otherwise considers trusted. The
-// registry's declared token endpoint is the only additional credential target;
-// token POST redirects outside that endpoint are rejected before sending a body.
-type ScopedTransport struct {
-	Base     http.RoundTripper
-	Registry *url.URL
-	Realm    *url.URL
-}
-
+// RoundTrip strips credentials or rejects requests outside the authorized scope.
 func (t ScopedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	registry := request.URL.Scheme == t.Registry.Scheme && request.URL.Host == t.Registry.Host
-	realm := t.Realm != nil && request.URL.Scheme == t.Realm.Scheme && request.URL.Host == t.Realm.Host && request.URL.Path == t.Realm.Path
+	var (
+		registry = request.URL.Scheme == t.Registry.Scheme && request.URL.Host == t.Registry.Host
+		realm    = t.Realm != nil && request.URL.Scheme == t.Realm.Scheme && request.URL.Host == t.Realm.Host && request.URL.Path == t.Realm.Path
+	)
 	if !registry && !realm {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			return nil, errors.New("registry authentication redirect outside credential scope")
@@ -61,4 +59,12 @@ func (t ScopedTransport) RoundTrip(request *http.Request) (*http.Response, error
 		request.Header.Del("Proxy-Authorization")
 	}
 	return t.Base.RoundTrip(request)
+}
+
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

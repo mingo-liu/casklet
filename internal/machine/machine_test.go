@@ -16,31 +16,17 @@ import (
 	"testing"
 )
 
-func sharedInstance(t *testing.T) (Instance, string) {
-	t.Helper()
-	directory, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var instance Instance
-	data := `{"config":{"mounts":[{"location":` + quoteJSON(directory) + `,"mountPoint":"/mnt/host","writable":true}]}}`
-	if err := json.Unmarshal([]byte(data), &instance); err != nil {
-		t.Fatal(err)
-	}
-	return instance, directory
-}
-
-func quoteJSON(value string) string { data, _ := json.Marshal(value); return string(data) }
-
 func TestGuestArgumentsMapOnlyHostResources(t *testing.T) {
-	instance, directory := sharedInstance(t)
-	args := []string{"run", "--rootfs", BuiltinRootFS, "--env", "PATH=/custom", "--mount=type=bind,source=" + directory + ",target=/data,readonly", "-p", "127.0.0.1:32123:80", "--publish=32124:53/udp", "--", "sh", "--mount", "literal", "a'b\n$(touch forbidden)"}
-	got, err := guestArguments(instance, args)
+	var (
+		instance, directory = sharedInstance(t)
+		args                = []string{"run", "--rootfs", BuiltinRootFS, "--env", "PATH=/custom", "--mount=type=bind,source=" + directory + ",target=/data,readonly", "-p", "127.0.0.1:32123:80", "--publish=32124:53/udp", "--", "sh", "--mount", "literal", "a'b\n$(touch forbidden)"}
+		got, err            = guestArguments(instance, args)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := append([]string(nil), args...)
-	want[2] = guestRootFS
+	want[2] = _guestRootFS
 	want[5] = "--mount=type=bind,source=/mnt/host,target=/data,readonly"
 	want[7] = "127.0.0.3:32123:80/tcp"
 	want[8] = "--publish=127.0.0.2:32124:53/udp"
@@ -53,9 +39,11 @@ func TestGuestArgumentsMapOnlyHostResources(t *testing.T) {
 }
 
 func TestHostPathRejectsUnsharedAndSymlinkEscapes(t *testing.T) {
-	instance, directory := sharedInstance(t)
-	outside := t.TempDir()
-	link := filepath.Join(directory, "escape")
+	var (
+		instance, directory = sharedInstance(t)
+		outside             = t.TempDir()
+		link                = filepath.Join(directory, "escape")
+	)
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
@@ -71,9 +59,11 @@ func TestHostPathRejectsUnsharedAndSymlinkEscapes(t *testing.T) {
 }
 
 func TestRemoteCommandPreservesShellMetacharacters(t *testing.T) {
-	values := []string{"spaces here", "a'b", "$HOME", "$(printf unexpected)", "`printf unexpected`", "line\nbreak", "", "--flag"}
-	args := append([]string{"printf", "%s\\000"}, values...)
-	output, err := exec.Command("/bin/sh", "-c", remoteCommand(args)).Output()
+	var (
+		values      = []string{"spaces here", "a'b", "$HOME", "$(printf unexpected)", "`printf unexpected`", "line\nbreak", "", "--flag"}
+		args        = append([]string{"printf", "%s\\000"}, values...)
+		output, err = exec.Command("/bin/sh", "-c", remoteCommand(args)).Output()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,13 +77,21 @@ func TestPortPreflightDetectsTCPAndUDPConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tcp.Close()
+	defer func() { _ = tcp.Close() }()
 	udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udp.Close()
-	for _, mapping := range []string{strconv.Itoa(tcp.Addr().(*net.TCPAddr).Port) + ":80/tcp", strconv.Itoa(udp.LocalAddr().(*net.UDPAddr).Port) + ":53/udp"} {
+	defer func() { _ = udp.Close() }()
+	tcpAddress, ok := tcp.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("unexpected TCP address: %T", tcp.Addr())
+	}
+	udpAddress, ok := udp.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		t.Fatalf("unexpected UDP address: %T", udp.LocalAddr())
+	}
+	for _, mapping := range []string{strconv.Itoa(tcpAddress.Port) + ":80/tcp", strconv.Itoa(udpAddress.Port) + ":53/udp"} {
 		for _, hostIP := range []string{"127.0.0.1", "0.0.0.0"} {
 			if err := checkPorts([]string{"run", "-p", hostIP + ":" + mapping, "--", "true"}); err == nil {
 				t.Fatalf("accepted occupied host port for %s", hostIP)
@@ -106,13 +104,17 @@ func TestPortPreflightDetectsTCPAndUDPConflicts(t *testing.T) {
 }
 
 func TestMachineDiscoveryDoesNotAdoptDevelopmentVM(t *testing.T) {
-	stub := filepath.Join(t.TempDir(), "limactl")
-	script := "#!/bin/sh\nprintf '%s\\n' '{\"name\":\"casklet\",\"status\":\"Running\"}'\n"
+	var (
+		stub   = filepath.Join(t.TempDir(), "limactl")
+		script = "#!/bin/sh\nprintf '%s\\n' '{\"name\":\"casklet\",\"status\":\"Running\"}'\n"
+	)
 	if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	m := &Machine{lima: stub, stderr: io.Discard}
-	instance, err := m.instance(context.Background())
+	var (
+		m             = &Machine{lima: stub, stderr: io.Discard}
+		instance, err = m.instance(context.Background())
+	)
 	if err != nil || instance != nil {
 		t.Fatalf("adopted development VM: %+v, %v", instance, err)
 	}
@@ -133,8 +135,10 @@ func TestInstallationCheckRequiresMatchingEngineAndMarker(t *testing.T) {
 			if err := os.MkdirAll(directory, 0755); err != nil {
 				t.Fatal(err)
 			}
-			engine := filepath.Join(directory, "casklet")
-			marker := filepath.Join(directory, "engine.sha256")
+			var (
+				engine = filepath.Join(directory, "casklet")
+				marker = filepath.Join(directory, "engine.sha256")
+			)
 			if err := os.WriteFile(engine, []byte("payload"), 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -163,7 +167,7 @@ func TestInstallationCheckRequiresMatchingEngineAndMarker(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			output, err := exec.Command("/bin/sh", "-c", installationCheckScript, "check-install", engine, marker, hash).Output()
+			output, err := exec.Command("/bin/sh", "-c", _installationCheckScript, "check-install", engine, marker, hash).Output()
 			if failure == "healthy" {
 				if err != nil {
 					t.Fatalf("healthy installation: %q, %v", output, err)
@@ -174,3 +178,21 @@ func TestInstallationCheckRequiresMatchingEngineAndMarker(t *testing.T) {
 		})
 	}
 }
+
+func sharedInstance(t *testing.T) (Instance, string) {
+	t.Helper()
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		instance Instance
+		data     = `{"config":{"mounts":[{"location":` + quoteJSON(directory) + `,"mountPoint":"/mnt/host","writable":true}]}}`
+	)
+	if err := json.Unmarshal([]byte(data), &instance); err != nil {
+		t.Fatal(err)
+	}
+	return instance, directory
+}
+
+func quoteJSON(value string) string { data, _ := json.Marshal(value); return string(data) }

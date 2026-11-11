@@ -17,75 +17,6 @@ type provisionFixture struct {
 	script    string
 }
 
-func newProvisionFixture(t *testing.T) provisionFixture {
-	t.Helper()
-	directory := t.TempDir()
-	for _, name := range []string{"bin", "state", "locks", "apparmor", "systemd"} {
-		if err := os.Mkdir(filepath.Join(directory, name), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"rm", "mkdir", "cat", "touch", "cp"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(path, filepath.Join(directory, "bin", name)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stub := `#!/bin/sh
-name=${0##*/}
-printf '%s %s\n' "$name" "$*" >> "$FIXTURE/calls"
-case "$name" in
-id) echo 501 ;;
-dpkg-query) test -f "$FIXTURE/packages-ready" && printf installed ;;
-dpkg) test ! -f "$FIXTURE/pending-packages" || exit 1 ;;
-apt-get)
-    while [ -f "$FIXTURE/block-apt" ]; do /bin/sleep 0.02; done
-    if [ -f "$FIXTURE/fail-apt" ]; then echo 'simulated package outage' >&2; exit 42; fi
-    if [ -f "$FIXTURE/interrupt-apt" ]; then kill -TERM "$PPID"; exit 1; fi
-    case " $* " in *' --fix-broken '*) rm -f "$FIXTURE/pending-packages" ;; esac
-    case " $* " in *' install '*) touch "$FIXTURE/packages-ready"; cp "$FIXTURE/bin/busybox" "$FIXTURE/bin/readelf" ;; esac
-    ;;
-systemctl)
-    case "$1" in
-    show) if [ -f "$FIXTURE/delegated" ]; then echo 'cpu memory pids'; fi ;;
-    restart) test ! -f "$FIXTURE/fail-service" || exit 43; touch "$FIXTURE/delegated" ;;
-    esac
-    ;;
-esac
-exit 0
-`
-	for _, name := range []string{"busybox", "ip", "nft", "unshare", "conntrack", "apparmor_parser", "dpkg-query", "dpkg", "apt-get", "id", "flock", "loginctl", "systemctl"} {
-		if err := os.WriteFile(filepath.Join(directory, "bin", name), []byte(stub), 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	script := strings.NewReplacer(
-		"export PATH=/usr/sbin:/usr/bin:/sbin:/bin", "export PATH="+quote(filepath.Join(directory, "bin")),
-		"/usr/local/lib/casklet", filepath.Join(directory, "state"),
-		"/run/lock", filepath.Join(directory, "locks"),
-		"/etc/apparmor.d", filepath.Join(directory, "apparmor"),
-		"/etc/systemd/system", filepath.Join(directory, "systemd"),
-	).Replace(guestProvisionScript)
-	return provisionFixture{directory, script}
-}
-
-func (f provisionFixture) run(t *testing.T, args ...string) ([]byte, error) {
-	t.Helper()
-	cmd := exec.Command("/bin/sh", append([]string{"-c", f.script, "casklet-provision"}, args...)...)
-	cmd.Env = []string{"FIXTURE=" + f.directory, "SUDO_USER=guest", "SUDO_UID=501"}
-	return cmd.CombinedOutput()
-}
-
-func (f provisionFixture) flag(t *testing.T, name string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(f.directory, name), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestProvisionRetriesIncompleteAndDamagedDependencies(t *testing.T) {
 	f := newProvisionFixture(t)
 	f.flag(t, "fail-apt")
@@ -172,8 +103,10 @@ func TestProvisionResumesInterruptedPackageConfiguration(t *testing.T) {
 }
 
 func TestProvisionPreviewAndCancellationDoNotRepair(t *testing.T) {
-	m := &Machine{stderr: io.Discard}
-	instance := Instance{SSHConfigFile: filepath.Join(t.TempDir(), "missing")}
+	var (
+		m        = &Machine{stderr: io.Discard}
+		instance = Instance{SSHConfigFile: filepath.Join(t.TempDir(), "missing")}
+	)
 	if err := m.ensureProvisioned(context.Background(), instance, true); err == nil || !strings.Contains(err.Error(), "casklet machine start") {
 		t.Fatalf("preview did not reject incomplete initialization: %v", err)
 	}
@@ -232,5 +165,74 @@ func TestConcurrentProvisioningSharesGuestLock(t *testing.T) {
 	calls, _ := os.ReadFile(filepath.Join(f.directory, "calls"))
 	if strings.Count(string(calls), "apt-get ") != 2 || strings.Count(string(calls), "systemctl restart ") != 1 {
 		t.Fatalf("provisioners repeated package installation or delegation: %s", calls)
+	}
+}
+
+func newProvisionFixture(t *testing.T) provisionFixture {
+	t.Helper()
+	directory := t.TempDir()
+	for _, name := range []string{"bin", "state", "locks", "apparmor", "systemd"} {
+		if err := os.Mkdir(filepath.Join(directory, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"rm", "mkdir", "cat", "touch", "cp"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(path, filepath.Join(directory, "bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stub := `#!/bin/sh
+name=${0##*/}
+printf '%s %s\n' "$name" "$*" >> "$FIXTURE/calls"
+case "$name" in
+id) echo 501 ;;
+dpkg-query) test -f "$FIXTURE/packages-ready" && printf installed ;;
+dpkg) test ! -f "$FIXTURE/pending-packages" || exit 1 ;;
+apt-get)
+    while [ -f "$FIXTURE/block-apt" ]; do /bin/sleep 0.02; done
+    if [ -f "$FIXTURE/fail-apt" ]; then echo 'simulated package outage' >&2; exit 42; fi
+    if [ -f "$FIXTURE/interrupt-apt" ]; then kill -TERM "$PPID"; exit 1; fi
+    case " $* " in *' --fix-broken '*) rm -f "$FIXTURE/pending-packages" ;; esac
+    case " $* " in *' install '*) touch "$FIXTURE/packages-ready"; cp "$FIXTURE/bin/busybox" "$FIXTURE/bin/readelf" ;; esac
+    ;;
+systemctl)
+    case "$1" in
+    show) if [ -f "$FIXTURE/delegated" ]; then echo 'cpu memory pids'; fi ;;
+    restart) test ! -f "$FIXTURE/fail-service" || exit 43; touch "$FIXTURE/delegated" ;;
+    esac
+    ;;
+esac
+exit 0
+`
+	for _, name := range []string{"busybox", "ip", "nft", "unshare", "conntrack", "apparmor_parser", "dpkg-query", "dpkg", "apt-get", "id", "flock", "loginctl", "systemctl"} {
+		if err := os.WriteFile(filepath.Join(directory, "bin", name), []byte(stub), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := strings.NewReplacer(
+		"export PATH=/usr/sbin:/usr/bin:/sbin:/bin", "export PATH="+quote(filepath.Join(directory, "bin")),
+		"/usr/local/lib/casklet", filepath.Join(directory, "state"),
+		"/run/lock", filepath.Join(directory, "locks"),
+		"/etc/apparmor.d", filepath.Join(directory, "apparmor"),
+		"/etc/systemd/system", filepath.Join(directory, "systemd"),
+	).Replace(_guestProvisionScript)
+	return provisionFixture{directory: directory, script: script}
+}
+
+func (f provisionFixture) run(t *testing.T, args ...string) ([]byte, error) {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", append([]string{"-c", f.script, "casklet-provision"}, args...)...)
+	cmd.Env = []string{"FIXTURE=" + f.directory, "SUDO_USER=guest", "SUDO_UID=501"}
+	return cmd.CombinedOutput()
+}
+
+func (f provisionFixture) flag(t *testing.T, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.directory, name), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
 }

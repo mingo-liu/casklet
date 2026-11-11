@@ -18,20 +18,16 @@ type credentialResponse struct {
 	closed bool
 }
 
-func (r *credentialResponse) Close() error { r.closed = true; return nil }
-
 type credentialStore struct {
 	credential registryauth.Credential
 	err        error
 }
 
-func (s credentialStore) Get(string) (registryauth.Credential, error) { return s.credential, s.err }
-func (s credentialStore) Put(registryauth.Credential) error           { return nil }
-func (s credentialStore) Delete(string) error                         { return nil }
-
 func TestCredentialPreparationCachedRunDoesNotOpenKeychain(t *testing.T) {
-	var output bytes.Buffer
-	response := &credentialResponse{}
+	var (
+		output   bytes.Buffer
+		response = &credentialResponse{}
+	)
 	w := &credentialOutput{reference: "ghcr.io/team/app:v1", response: response, output: &output, openStore: func() (registryauth.Store, error) { t.Fatal("cached run read Keychain"); return nil, nil }}
 	id := "sha256:" + strings.Repeat("a", 64) + "\n"
 	for _, fragment := range []string{id[:12], id[12:]} {
@@ -45,7 +41,7 @@ func TestCredentialPreparationCachedRunDoesNotOpenKeychain(t *testing.T) {
 }
 
 func TestCredentialPreparationScopeMissingAndStorageFailure(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name      string
 		store     credentialStore
 		wantError bool
@@ -54,25 +50,28 @@ func TestCredentialPreparationScopeMissingAndStorageFailure(t *testing.T) {
 		{"anonymous", credentialStore{err: registryauth.ErrNotFound}, false},
 		{"locked", credentialStore{err: errors.New("Keychain locked")}, true},
 		{"scope", credentialStore{credential: registryauth.Credential{Registry: "other.io", Username: "alice", Password: "test-token"}}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var output bytes.Buffer
-			response := &credentialResponse{}
-			w := &credentialOutput{reference: "ghcr.io/team/app:v1", response: response, output: &output, openStore: func() (registryauth.Store, error) { return tc.store, nil }}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				output   bytes.Buffer
+				response = &credentialResponse{}
+			)
+			w := &credentialOutput{reference: "ghcr.io/team/app:v1", response: response, output: &output, openStore: func() (registryauth.Store, error) { return tt.store, nil }}
 			for _, fragment := range []string{registryauth.RequestMarker[:7], registryauth.RequestMarker[7:]} {
 				_, _ = io.WriteString(w, fragment)
 			}
-			if (w.err != nil) != tc.wantError || !response.closed || output.Len() != 0 {
+			if (w.err != nil) != tt.wantError || !response.closed || output.Len() != 0 {
 				t.Fatalf("unexpected protocol result: %v", w.err)
 			}
-			if tc.wantError {
+			if tt.wantError {
 				if response.Len() != 0 {
 					t.Fatal("failed lookup sent credentials")
 				}
 				return
 			}
 			credential, err := registryauth.Decode(bytes.NewReader(response.Bytes()), "ghcr.io")
-			if err != nil || credential.Password != tc.store.credential.Password {
+			if err != nil || credential.Password != tt.store.credential.Password {
 				t.Fatal("envelope changed")
 			}
 		})
@@ -80,14 +79,18 @@ func TestCredentialPreparationScopeMissingAndStorageFailure(t *testing.T) {
 }
 
 func TestPreparedImageArgumentsPreserveWorkloadAndOtherValues(t *testing.T) {
-	args := []string{"run", "--env", "OPTION=--image", "--image=ghcr.io/app:v1", "--", "echo", "--image", "workload"}
-	actual := preparedImageArguments(args, "sha256:id")
+	var (
+		args   = []string{"run", "--env", "OPTION=--image", "--image=ghcr.io/app:v1", "--", "echo", "--image", "workload"}
+		actual = preparedImageArguments(args, "sha256:id")
+	)
 	if strings.Join(actual, "|") != "run|--env|OPTION=--image|--image=sha256:id|--|echo|--image|workload" {
 		t.Fatalf("arguments changed: %q", actual)
 	}
 	for _, value := range []string{"--image", "--image=literal"} {
-		args := []string{"run", "--image", "ghcr.io/app:v1", "--entrypoint", value, "--health-cmd", value, "--", "echo", value}
-		actual := preparedImageArguments(args, "sha256:id")
+		var (
+			args   = []string{"run", "--image", "ghcr.io/app:v1", "--entrypoint", value, "--health-cmd", value, "--", "echo", value}
+			actual = preparedImageArguments(args, "sha256:id")
+		)
 		if actual[2] != "sha256:id" || actual[4] != value || actual[6] != value || actual[9] != value {
 			t.Fatalf("literal option value changed: %q", actual)
 		}
@@ -95,8 +98,10 @@ func TestPreparedImageArgumentsPreserveWorkloadAndOtherValues(t *testing.T) {
 }
 
 func TestCredentialPreparationBoundsAndDisconnectedLargeEnvelope(t *testing.T) {
-	response := &credentialResponse{}
-	w := &credentialOutput{response: response, output: io.Discard}
+	var (
+		response = &credentialResponse{}
+		w        = &credentialOutput{response: response, output: io.Discard}
+	)
 	if _, err := io.WriteString(w, strings.Repeat("a", 129)+"\n"); err == nil {
 		t.Fatal("oversized first line accepted")
 	}
@@ -105,7 +110,7 @@ func TestCredentialPreparationBoundsAndDisconnectedLargeEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = reader.Close()
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 	w = &credentialOutput{reference: "ghcr.io/team/app:v1", response: writer, output: io.Discard, openStore: func() (registryauth.Store, error) {
 		return credentialStore{credential: registryauth.Credential{Registry: "ghcr.io", Username: "alice", Password: strings.Repeat("x", 16*1024)}}, nil
 	}}
@@ -142,3 +147,11 @@ func TestCredentialPreparationExactEnvelopeLimit(t *testing.T) {
 		t.Fatalf("guest rejected exact envelope: %v", err)
 	}
 }
+
+func (r *credentialResponse) Close() error { r.closed = true; return nil }
+
+func (s credentialStore) Get(string) (registryauth.Credential, error) { return s.credential, s.err }
+
+func (s credentialStore) Put(registryauth.Credential) error { return nil }
+
+func (s credentialStore) Delete(string) error { return nil }

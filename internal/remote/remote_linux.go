@@ -1,6 +1,5 @@
 //go:build linux
 
-// Package remote relays macOS client signals to a guest CLI session.
 package remote
 
 import (
@@ -17,37 +16,7 @@ import (
 	"time"
 )
 
-var sessionToken = regexp.MustCompile(`^[0-9a-f]{32}$`)
-
-func socketPath(token string) (string, error) {
-	if !sessionToken.MatchString(token) {
-		return "", errors.New("invalid remote session token")
-	}
-	directory := "/run/casklet-remote"
-	if os.Geteuid() != 0 {
-		directory = fmt.Sprintf("/run/user/%d/casklet-remote", os.Geteuid())
-	}
-	if err := os.Mkdir(directory, 0700); err != nil && !errors.Is(err, os.ErrExist) {
-		return "", err
-	}
-	info, err := os.Lstat(directory)
-	if err != nil {
-		return "", err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || int(stat.Uid) != os.Geteuid() {
-		return "", errors.New("unsafe remote session directory")
-	}
-	return filepath.Join(directory, token+".sock"), nil
-}
-
-func validSignal(number int) bool {
-	switch syscall.Signal(number) {
-	case syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT:
-		return true
-	}
-	return false
-}
+var _sessionToken = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 func Send(token, value string) error {
 	number, err := strconv.Atoi(value)
@@ -64,7 +33,7 @@ func Send(token, value string) error {
 	for {
 		connection, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: path, Net: "unixgram"})
 		if err == nil {
-			defer connection.Close()
+			defer func() { _ = connection.Close() }()
 			_, err = connection.Write([]byte(value))
 			return err
 		}
@@ -85,7 +54,7 @@ func Run(token string, args []string) (int, error) {
 		return 125, err
 	}
 	defer os.Remove(path)
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	executable, err := os.Executable()
 	if err != nil {
 		return 125, err
@@ -98,9 +67,11 @@ func Run(token string, args []string) (int, error) {
 	if err := cmd.Start(); err != nil {
 		return 125, err
 	}
-	control := make(chan syscall.Signal, 8)
-	finished := make(chan struct{})
-	joined := make(chan struct{})
+	var (
+		control  = make(chan syscall.Signal, 8)
+		finished = make(chan struct{})
+		joined   = make(chan struct{})
+	)
 	defer func() {
 		close(finished)
 		_ = connection.Close()
@@ -138,8 +109,7 @@ func Run(token string, args []string) (int, error) {
 			}
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {
-				status := exit.Sys().(syscall.WaitStatus)
-				if status.Signaled() {
+				if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 					return 128 + int(status.Signal()), nil
 				}
 				return exit.ExitCode(), nil
@@ -147,4 +117,34 @@ func Run(token string, args []string) (int, error) {
 			return 125, err
 		}
 	}
+}
+
+func socketPath(token string) (string, error) {
+	if !_sessionToken.MatchString(token) {
+		return "", errors.New("invalid remote session token")
+	}
+	directory := "/run/casklet-remote"
+	if os.Geteuid() != 0 {
+		directory = fmt.Sprintf("/run/user/%d/casklet-remote", os.Geteuid())
+	}
+	if err := os.Mkdir(directory, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return "", err
+	}
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return "", err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.IsDir() || info.Mode().Perm() != 0700 || int(stat.Uid) != os.Geteuid() {
+		return "", errors.New("unsafe remote session directory")
+	}
+	return filepath.Join(directory, token+".sock"), nil
+}
+
+func validSignal(number int) bool {
+	switch syscall.Signal(number) {
+	case syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT:
+		return true
+	}
+	return false
 }

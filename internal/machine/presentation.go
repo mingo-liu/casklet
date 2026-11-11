@@ -10,7 +10,16 @@ import (
 	"path/filepath"
 )
 
-const maxInspectionBytes = 4 << 20
+const _maxInspectionBytes = 4 << 20
+
+// inspectionOutput bounds a nonstreaming response while continuing to drain SSH.
+// A guest failure must retain its exit status even if its output is oversized.
+type inspectionOutput struct {
+	data     bytes.Buffer
+	overflow bool
+}
+
+var _ io.Writer = (*inspectionOutput)(nil)
 
 // HostPortAddress translates Lima's dedicated guest forwarding addresses.
 func HostPortAddress(address string) string {
@@ -23,16 +32,11 @@ func HostPortAddress(address string) string {
 	return address
 }
 
-// inspectionOutput bounds a nonstreaming response while continuing to drain SSH.
-// A guest failure must retain its exit status even if its output is oversized.
-type inspectionOutput struct {
-	data     bytes.Buffer
-	overflow bool
-}
-
 func (output *inspectionOutput) Write(data []byte) (int, error) {
-	length := len(data)
-	remaining := maxInspectionBytes - output.data.Len()
+	var (
+		length    = len(data)
+		remaining = _maxInspectionBytes - output.data.Len()
+	)
 	if length > remaining {
 		output.overflow = true
 		data = data[:remaining]
@@ -41,29 +45,10 @@ func (output *inspectionOutput) Write(data []byte) (int, error) {
 	return length, nil
 }
 
-func guestResult(instance Instance, inspection *inspectionOutput, stdout io.Writer, err error) (int, error) {
-	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() >= 0 {
-			return exit.ExitCode(), nil
-		}
-		return 125, err
-	}
-	if inspection != nil {
-		if inspection.overflow {
-			return 125, errors.New("guest inspection exceeds the 4 MiB response limit")
-		}
-		if err := presentInspection(instance, inspection.data.Bytes(), stdout); err != nil {
-			return 125, err
-		}
-	}
-	return 0, nil
-}
-
 // macPath reverses shared-path translation without accessing source directories:
 // retained containers remain inspectable after their original sources disappear.
 func (instance Instance) macPath(guestPath string) string {
-	if guestPath == guestRootFS {
+	if guestPath == _guestRootFS {
 		return BuiltinRootFS
 	}
 	if !filepath.IsAbs(guestPath) {
@@ -88,6 +73,25 @@ func (instance Instance) macPath(guestPath string) string {
 	return result
 }
 
+func guestResult(instance Instance, inspection *inspectionOutput, stdout io.Writer, err error) (int, error) {
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() >= 0 {
+			return exit.ExitCode(), nil
+		}
+		return 125, err
+	}
+	if inspection != nil {
+		if inspection.overflow {
+			return 125, errors.New("guest inspection exceeds the 4 MiB response limit")
+		}
+		if err := presentInspection(instance, inspection.data.Bytes(), stdout); err != nil {
+			return 125, err
+		}
+	}
+	return 0, nil
+}
+
 func presentInspection(instance Instance, data []byte, stdout io.Writer) error {
 	var inspection map[string]json.RawMessage
 	if err := json.Unmarshal(data, &inspection); err != nil || inspection == nil {
@@ -97,7 +101,7 @@ func presentInspection(instance Instance, data []byte, stdout io.Writer) error {
 	if err := json.Unmarshal(inspection["config"], &cfg); err != nil || cfg == nil {
 		return errors.New("invalid guest inspection: expected a configuration object")
 	}
-	guestResources := map[string]json.RawMessage{}
+	guestResources := make(map[string]json.RawMessage, 3)
 	for _, field := range []string{"rootfs", "mounts", "publish"} {
 		value, exists := cfg[field]
 		if !exists {

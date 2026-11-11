@@ -18,8 +18,10 @@ func TestSharePreservesMachineAndRejectsUnsafeChanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record := map[string]any{"name": Name, "status": "Stopped", "config": map[string]any{"mounts": []any{}}}
-			cfg := record["config"].(map[string]any)
+			var (
+				cfg    = map[string]any{"mounts": []any{}}
+				record = map[string]any{"name": Name, "status": "Stopped", "config": cfg}
+			)
 			if state == "Running" {
 				record["status"] = "Running"
 			}
@@ -33,17 +35,21 @@ func TestSharePreservesMachineAndRejectsUnsafeChanges(t *testing.T) {
 			if state == "missing" {
 				data = nil
 			}
-			log := filepath.Join(t.TempDir(), "calls")
-			stub := filepath.Join(t.TempDir(), "limactl")
-			script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\nif [ \"$2\" = list ]; then printf '%s\\n' " + quote(string(data)) + "; fi\n"
+			var (
+				log    = filepath.Join(t.TempDir(), "calls")
+				stub   = filepath.Join(t.TempDir(), "limactl")
+				script = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\nif [ \"$2\" = list ]; then printf '%s\\n' " + quote(string(data)) + "; fi\n"
+			)
 			if state == "missing" {
 				script = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + quote(log) + "\n"
 			}
 			if err := os.WriteFile(stub, []byte(script), 0700); err != nil {
 				t.Fatal(err)
 			}
-			m := &Machine{lima: stub, directory: t.TempDir(), stderr: io.Discard}
-			var out bytes.Buffer
+			var (
+				m   = &Machine{lima: stub, directory: t.TempDir(), stderr: io.Discard}
+				out bytes.Buffer
+			)
 			err = m.share(context.Background(), directory, &out)
 			calls, _ := os.ReadFile(log)
 			edited := strings.Contains(string(calls), "\nedit\n")

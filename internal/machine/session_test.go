@@ -13,7 +13,26 @@ import (
 	"time"
 )
 
-func TestGuestSessionHelper(t *testing.T) {
+type unknownGuestSignal struct{}
+
+func TestGuestSessionIgnoresUnsupportedSignalValues(t *testing.T) {
+	var (
+		cmd     = guestSessionCommand(t, "responsive")
+		signals = make(chan os.Signal, 2)
+	)
+	signals <- unknownGuestSignal{}
+	signals <- syscall.SIGTERM
+	close(signals)
+	interrupted, err := waitGuest(context.Background(), cmd, signals, time.Second, func(sig syscall.Signal) {
+		_ = cmd.Process.Signal(sig)
+	})
+	var exit *exec.ExitError
+	if interrupted != syscall.SIGTERM || !errors.As(err, &exit) || exit.ExitCode() != 9 {
+		t.Fatalf("unsupported signal changed guest completion: %v %v", interrupted, err)
+	}
+}
+
+func TestGuestSessionHelper(_ *testing.T) {
 	mode := os.Getenv("CASKLET_TEST_GUEST_SESSION")
 	if mode == "" {
 		return
@@ -33,24 +52,6 @@ func TestGuestSessionHelper(t *testing.T) {
 	}
 }
 
-func guestSessionCommand(t *testing.T, mode string) *exec.Cmd {
-	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGuestSessionHelper$")
-	cmd.Env = append(os.Environ(), "CASKLET_TEST_GUEST_SESSION="+mode)
-	output, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); output.Close() })
-	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "ready\n" {
-		t.Fatalf("helper startup: %q, %v", line, err)
-	}
-	return cmd
-}
-
 func TestGuestSessionContextCancellationNotifiesAndReaps(t *testing.T) {
 	for _, responsive := range []bool{true, false} {
 		t.Run(fmt.Sprint(responsive), func(t *testing.T) {
@@ -58,11 +59,15 @@ func TestGuestSessionContextCancellationNotifiesAndReaps(t *testing.T) {
 			if responsive {
 				mode = "responsive"
 			}
-			cmd := guestSessionCommand(t, mode)
-			ctx, cancel := context.WithCancel(context.Background())
+			var (
+				cmd         = guestSessionCommand(t, mode)
+				ctx, cancel = context.WithCancel(context.Background())
+			)
 			cancel()
-			calls := 0
-			started := time.Now()
+			var (
+				calls   = 0
+				started = time.Now()
+			)
 			interrupted, err := waitGuest(ctx, cmd, nil, 100*time.Millisecond, func(sig syscall.Signal) {
 				calls++
 				if sig != syscall.SIGTERM {
@@ -86,8 +91,10 @@ func TestGuestSessionContextCancellationNotifiesAndReaps(t *testing.T) {
 }
 
 func TestGuestSessionDeadlineAndFailedForwardingRemainBounded(t *testing.T) {
-	cmd := guestSessionCommand(t, "unresponsive")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	var (
+		cmd         = guestSessionCommand(t, "unresponsive")
+		ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	)
 	defer cancel()
 	calls := 0
 	_, err := waitGuest(ctx, cmd, nil, 50*time.Millisecond, func(syscall.Signal) { calls++ })
@@ -99,8 +106,10 @@ func TestGuestSessionDeadlineAndFailedForwardingRemainBounded(t *testing.T) {
 func TestGuestSessionSignalsPreserveCommandExitAndArchiveIdentity(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		t.Run(sig.String(), func(t *testing.T) {
-			cmd := guestSessionCommand(t, "responsive")
-			signals := make(chan os.Signal, 2)
+			var (
+				cmd     = guestSessionCommand(t, "responsive")
+				signals = make(chan os.Signal, 2)
+			)
 			signals <- syscall.SIGWINCH
 			signals <- sig
 			close(signals)
@@ -121,8 +130,10 @@ func TestGuestSessionSignalsPreserveCommandExitAndArchiveIdentity(t *testing.T) 
 }
 
 func TestGuestSessionSignalTimeoutReapsTransport(t *testing.T) {
-	cmd := guestSessionCommand(t, "unresponsive")
-	signals := make(chan os.Signal, 1)
+	var (
+		cmd     = guestSessionCommand(t, "unresponsive")
+		signals = make(chan os.Signal, 1)
+	)
 	signals <- syscall.SIGINT
 	interrupted, err := waitGuest(context.Background(), cmd, signals, 20*time.Millisecond, func(syscall.Signal) {})
 	if interrupted != syscall.SIGINT || err == nil || cmd.ProcessState == nil {
@@ -138,3 +149,25 @@ func TestCanceledInvocationStopsBeforeMachinePreparation(t *testing.T) {
 		t.Fatalf("canceled invocation: code=%d err=%v", code, err)
 	}
 }
+
+func guestSessionCommand(t *testing.T, mode string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGuestSessionHelper$")
+	cmd.Env = append(os.Environ(), "CASKLET_TEST_GUEST_SESSION="+mode)
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = output.Close() })
+	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("helper startup: %q, %v", line, err)
+	}
+	return cmd
+}
+
+func (unknownGuestSignal) String() string { return "unsupported guest signal" }
+
+func (unknownGuestSignal) Signal() {}
