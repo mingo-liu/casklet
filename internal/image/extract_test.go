@@ -4,10 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"github.com/mingo-liu/casklet/internal/rootfs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
 type tarEntry struct {
@@ -45,56 +46,6 @@ func TestLayerReassignsDirectoryOwnership(t *testing.T) {
 	}
 }
 
-func layerBytes(t *testing.T, entries ...tarEntry) []byte {
-	t.Helper()
-	var data bytes.Buffer
-	w := tar.NewWriter(&data)
-	for _, entry := range entries {
-		kind := entry.kind
-		if kind == 0 {
-			kind = tar.TypeReg
-		}
-		mode := entry.mode
-		if mode == 0 {
-			mode = 0755
-		}
-		header := &tar.Header{Name: entry.name, Linkname: entry.link, Typeflag: kind, Mode: mode, Uid: os.Geteuid(), Gid: os.Getegid()}
-		if kind == tar.TypeReg {
-			header.Size = int64(len(entry.body))
-		}
-		if err := w.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if header.Size > 0 {
-			if _, err := w.Write([]byte(entry.body)); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return data.Bytes()
-}
-
-func testApply(t *testing.T, tree string, entries ...tarEntry) error {
-	t.Helper()
-	root, err := os.OpenRoot(tree)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.Close()
-	archive, err := os.CreateTemp(t.TempDir(), "layer-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer archive.Close()
-	if _, err := archive.Write(layerBytes(t, entries...)); err != nil {
-		t.Fatal(err)
-	}
-	return applyLayer(context.Background(), root, archive)
-}
-
 func TestLayersReplaceDeleteAndApplyOpaqueWhiteouts(t *testing.T) {
 	tree := t.TempDir()
 	if err := testApply(t, tree, tarEntry{name: "data/old", body: "old"}, tarEntry{name: "remove/sub/file", body: "removed"}, tarEntry{name: "base", body: "base"}, tarEntry{name: "retained-link", kind: tar.TypeLink, link: "base"}); err != nil {
@@ -120,8 +71,10 @@ func TestLayersReplaceDeleteAndApplyOpaqueWhiteouts(t *testing.T) {
 }
 
 func TestLayersPreserveMergedUsrAndConfineAbsoluteLinks(t *testing.T) {
-	tree, outside := t.TempDir(), t.TempDir()
-	sentinel := filepath.Join(outside, "secret")
+	var (
+		tree, outside = t.TempDir(), t.TempDir()
+		sentinel      = filepath.Join(outside, "secret")
+	)
 	if err := os.WriteFile(sentinel, []byte("host"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -185,4 +138,56 @@ func TestLayerStripsPrivilegeBitsAndPreservesStickyMode(t *testing.T) {
 	if info.Mode()&os.ModeSticky == 0 {
 		t.Fatal("sticky bit lost")
 	}
+}
+
+func layerBytes(t *testing.T, entries ...tarEntry) []byte {
+	t.Helper()
+	var (
+		data bytes.Buffer
+		w    = tar.NewWriter(&data)
+	)
+	for _, entry := range entries {
+		kind := entry.kind
+		if kind == 0 {
+			kind = tar.TypeReg
+		}
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0755
+		}
+		header := &tar.Header{Name: entry.name, Linkname: entry.link, Typeflag: kind, Mode: mode, Uid: os.Geteuid(), Gid: os.Getegid()}
+		if kind == tar.TypeReg {
+			header.Size = int64(len(entry.body))
+		}
+		if err := w.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Size > 0 {
+			if _, err := w.Write([]byte(entry.body)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
+}
+
+func testApply(t *testing.T, tree string, entries ...tarEntry) error {
+	t.Helper()
+	root, err := os.OpenRoot(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	archive, err := os.CreateTemp(t.TempDir(), "layer-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = archive.Close() }()
+	if _, err := archive.Write(layerBytes(t, entries...)); err != nil {
+		t.Fatal(err)
+	}
+	return applyLayer(context.Background(), root, archive)
 }

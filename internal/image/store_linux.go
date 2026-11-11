@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,28 +20,36 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const storeRoot = "/var/lib/casklet/images"
+const _storeRoot = "/var/lib/casklet/images"
 
-const recoveryBatchSize = 32
+const _recoveryBatchSize = 32
 
 // Store coordinates publication, readers and deletion across processes.
 type Store struct {
 	root  string
 	owner uint32
+	// A nil transport resolves the registry library's current default.
+	transport http.RoundTripper
 	// Tests can pause one owner while another Store accesses the same storage.
 	removeTreeFn func(context.Context, string) error
 }
 
+type imageDeletion struct {
+	path        string
+	transaction *os.File
+}
+
+// OpenStore opens the private Linux image store as guest root.
 func OpenStore() (*Store, error) {
 	if os.Geteuid() != 0 {
 		return nil, errors.New("local image management requires root privileges")
 	}
-	store := &Store{root: storeRoot, owner: 0}
-	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", storeRoot} {
+	store := &Store{root: _storeRoot, owner: 0}
+	for _, dir := range []string{"/", "/var", "/var/lib", "/var/lib/casklet", _storeRoot} {
 		if err := os.Mkdir(dir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
-		if err := store.checkDirectory(dir, dir == storeRoot); err != nil {
+		if err := store.checkDirectory(dir, dir == _storeRoot); err != nil {
 			return nil, err
 		}
 	}
@@ -53,6 +62,132 @@ func newStoreAt(root string) (*Store, error) {
 		return nil, err
 	}
 	return store, store.checkDirectory(root, true)
+}
+
+// Import requires a stable directory tree, pins it without symlinks and copies
+// through os.Root so replaced descendants cannot read outside the source tree.
+func (store *Store) Import(ctx context.Context, source string) (Record, error) {
+	if source == "" {
+		return Record{}, errors.New("image import requires a rootfs directory")
+	}
+	absolute, err := filepath.Abs(source)
+	if err != nil {
+		return Record{}, err
+	}
+	for _, forbidden := range []string{"/proc", "/dev", "/sys", "/var/lib/casklet", store.root} {
+		if absolute == "/" || overlaps(absolute, forbidden) {
+			return Record{}, errors.New("image source overlaps protected host storage")
+		}
+	}
+	fd, err := unix.Openat2(unix.AT_FDCWD, absolute, &unix.OpenHow{Flags: unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
+	if err != nil {
+		return Record{}, fmt.Errorf("open image source without symlinks: %w", err)
+	}
+	defer func() { _ = unix.Close(fd) }()
+	sourceRoot, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", fd))
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { _ = sourceRoot.Close() }()
+	stage, lease, transaction, err := store.beginImport(ctx)
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { _ = lease.Close() }()
+	defer store.cleanupImport(stage, transaction)
+	tree := filepath.Join(stage, "rootfs")
+	if err := os.Mkdir(tree, 0700); err != nil {
+		return Record{}, err
+	}
+	if err := rootfs.CopyFromRoot(ctx, sourceRoot, absolute, tree); err != nil {
+		return Record{}, fmt.Errorf("import rootfs: %w", err)
+	}
+	if _, err := rootfs.Validate(tree); err != nil {
+		return Record{}, err
+	}
+	id, size, err := Identity(ctx, tree, runtime.GOARCH)
+	if err != nil {
+		return Record{}, err
+	}
+	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size}
+	return store.publish(ctx, stage, record, "")
+}
+
+// List returns immutable image metadata and its current cached references.
+func (store *Store) List(ctx context.Context) ([]Record, error) {
+	lock, err := store.lock(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Close() }()
+	entries, err := os.ReadDir(store.root)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		records    = make([]Record, 0)
+		references = make(map[string][]string)
+	)
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".ref-") || strings.HasPrefix(entry.Name(), ".ref-stage-") {
+			continue
+		}
+		cached, err := store.readReference(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		references[cached.ID] = append(references[cached.ID], cached.Reference)
+	}
+	for _, entry := range entries {
+		id := "sha256:" + entry.Name()
+		if ValidateID(id) != nil {
+			continue
+		}
+		record, err := store.read(id)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+		records[len(records)-1].References = references[record.ID]
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
+	return records, nil
+}
+
+// Acquire prevents deletion until its shared lease is closed. The global lock
+// covers lookup and lease acquisition so removal cannot race between them.
+func (store *Store) Acquire(ctx context.Context, id string) (Record, string, *os.File, error) {
+	record, lease, err := func() (Record, *os.File, error) {
+		lock, err := store.lock(ctx, true)
+		if err != nil {
+			return Record{}, nil, err
+		}
+		defer func() { _ = lock.Close() }()
+		record, err := store.resolveIDLocked(ctx, id)
+		if err != nil {
+			return Record{}, nil, err
+		}
+		if record.Architecture != runtime.GOARCH {
+			return Record{}, nil, errors.New("image architecture does not match the runtime")
+		}
+		lease, err := store.acquireLeaseLocked(record.ID)
+		return record, lease, err
+	}()
+	if err != nil {
+		return Record{}, "", nil, err
+	}
+	// The image lease pins metadata and content while verification walks the
+	// tree without the global store lock.
+	if err := store.verify(ctx, record); err != nil {
+		_ = lease.Close()
+		return Record{}, "", nil, err
+	}
+	return record, filepath.Join(store.path(record.ID), "rootfs"), lease, nil
+}
+
+// Remove deletes an unused image after checking leases and retained references.
+func (store *Store) Remove(ctx context.Context, id string, referenced ReferenceCheck) error {
+	return store.remove(ctx, id, referenced, false)
 }
 
 func (store *Store) checkDirectory(path string, private bool) error {
@@ -75,14 +210,16 @@ func (store *Store) openFile(path string, flags int) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
-	var stat unix.Stat_t
+	var (
+		file = os.NewFile(uintptr(fd), path)
+		stat unix.Stat_t
+	)
 	if err := unix.Fstat(fd, &stat); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != store.owner || stat.Mode&0077 != 0 || stat.Nlink != 1 {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("unsafe image file: %s", path)
 	}
 	return file, nil
@@ -100,44 +237,6 @@ func (store *Store) lock(ctx context.Context, shared bool) (*os.File, error) {
 		return nil, err
 	}
 	return waitFileLock(ctx, file, shared)
-}
-
-func waitFileLock(ctx context.Context, file *os.File, shared bool) (*os.File, error) {
-	operation := unix.LOCK_EX
-	if shared {
-		operation = unix.LOCK_SH
-	}
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			file.Close()
-			return nil, err
-		}
-		err := unix.Flock(int(file.Fd()), operation|unix.LOCK_NB)
-		if err == nil {
-			return file, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			file.Close()
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
-	}
-}
-
-func syncDirectory(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return file.Sync()
 }
 
 func (store *Store) path(id string) string {
@@ -159,7 +258,7 @@ func (store *Store) read(id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
 	if err != nil {
 		return Record{}, err
@@ -185,59 +284,6 @@ func (store *Store) read(id string) (Record, error) {
 	return record, nil
 }
 
-func overlaps(a, b string) bool {
-	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
-}
-
-// Import requires a stable directory tree, pins it without symlinks and copies
-// through os.Root so replaced descendants cannot read outside the source tree.
-func (store *Store) Import(ctx context.Context, source string) (Record, error) {
-	if source == "" {
-		return Record{}, errors.New("image import requires a rootfs directory")
-	}
-	absolute, err := filepath.Abs(source)
-	if err != nil {
-		return Record{}, err
-	}
-	for _, forbidden := range []string{"/proc", "/dev", "/sys", "/var/lib/casklet", store.root} {
-		if absolute == "/" || overlaps(absolute, forbidden) {
-			return Record{}, errors.New("image source overlaps protected host storage")
-		}
-	}
-	fd, err := unix.Openat2(unix.AT_FDCWD, absolute, &unix.OpenHow{Flags: unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
-	if err != nil {
-		return Record{}, fmt.Errorf("open image source without symlinks: %w", err)
-	}
-	defer unix.Close(fd)
-	sourceRoot, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", fd))
-	if err != nil {
-		return Record{}, err
-	}
-	defer sourceRoot.Close()
-	stage, lease, transaction, err := store.beginImport(ctx)
-	if err != nil {
-		return Record{}, err
-	}
-	defer lease.Close()
-	defer store.cleanupImport(stage, transaction)
-	tree := filepath.Join(stage, "rootfs")
-	if err := os.Mkdir(tree, 0700); err != nil {
-		return Record{}, err
-	}
-	if err := rootfs.CopyFromRoot(ctx, sourceRoot, absolute, tree); err != nil {
-		return Record{}, fmt.Errorf("import rootfs: %w", err)
-	}
-	if _, err := rootfs.Validate(tree); err != nil {
-		return Record{}, err
-	}
-	id, size, err := Identity(ctx, tree, runtime.GOARCH)
-	if err != nil {
-		return Record{}, err
-	}
-	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size}
-	return store.publish(ctx, stage, record, "")
-}
-
 // beginImport pins private staging before releasing the metadata lock. Its
 // shared lease moves with publication and also prevents removal until return.
 func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File, error) {
@@ -248,7 +294,7 @@ func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File
 	if err != nil {
 		return "", nil, nil, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	stage, err := os.MkdirTemp(store.root, ".prepare-")
 	if err != nil {
 		return "", nil, nil, err
@@ -259,9 +305,9 @@ func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File
 	}
 	if err != nil {
 		if transaction != nil {
-			transaction.Close()
+			_ = transaction.Close()
 		}
-		os.Remove(stage)
+		_ = os.Remove(stage)
 		return "", nil, nil, err
 	}
 	lease, err := store.openFile(filepath.Join(stage, ".lease"), unix.O_RDWR|unix.O_CREAT|unix.O_EXCL)
@@ -270,12 +316,12 @@ func (store *Store) beginImport(ctx context.Context) (string, *os.File, *os.File
 	}
 	if err != nil {
 		if lease != nil {
-			lease.Close()
+			_ = lease.Close()
 		}
-		os.Remove(filepath.Join(stage, ".lease"))
-		os.Remove(stage)
-		transaction.Close()
-		os.Remove(store.transactionPath(stage))
+		_ = os.Remove(filepath.Join(stage, ".lease"))
+		_ = os.Remove(stage)
+		_ = transaction.Close()
+		_ = os.Remove(store.transactionPath(stage))
 		return "", nil, nil, err
 	}
 	return stage, lease, transaction, nil
@@ -289,7 +335,7 @@ func (store *Store) transactionPath(stage string) string {
 // lease files can disappear before the rest of the tree. Only lock-file removal
 // needs the store lock, after no staging tree remains.
 func (store *Store) cleanupImport(stage string, transaction *os.File) {
-	defer transaction.Close()
+	defer func() { _ = transaction.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := store.removeTree(ctx, stage); err != nil {
@@ -299,9 +345,9 @@ func (store *Store) cleanupImport(stage string, transaction *os.File) {
 	if err != nil {
 		return
 	}
-	defer lock.Close()
-	os.Remove(store.transactionPath(stage))
-	syncDirectory(store.root)
+	defer func() { _ = lock.Close() }()
+	_ = os.Remove(store.transactionPath(stage))
+	_ = syncDirectory(store.root)
 }
 
 // publish flushes staging without the store lock. Only identity and reference
@@ -327,7 +373,7 @@ func (store *Store) publish(ctx context.Context, stage string, record Record, re
 	}
 	defer func() {
 		if lock != nil {
-			lock.Close()
+			_ = lock.Close()
 		}
 	}()
 	existing, err := store.read(record.ID)
@@ -336,8 +382,8 @@ func (store *Store) publish(ctx context.Context, stage string, record Record, re
 		if err != nil {
 			return Record{}, err
 		}
-		defer lease.Close()
-		lock.Close()
+		defer func() { _ = lease.Close() }()
+		_ = lock.Close()
 		lock = nil
 		if err := store.verify(ctx, existing); err != nil {
 			return Record{}, err
@@ -371,11 +417,6 @@ func (store *Store) publish(ctx context.Context, stage string, record Record, re
 	return record, nil
 }
 
-type imageDeletion struct {
-	path        string
-	transaction *os.File
-}
-
 // A tombstone has no published identity. Its stable external lock remains held
 // even after recursive removal unlinks the tree's internal usage lease.
 func (store *Store) newDeletionLocked(ctx context.Context, path string) (*imageDeletion, error) {
@@ -388,12 +429,14 @@ func (store *Store) newDeletionLocked(ctx context.Context, path string) (*imageD
 	if err != nil {
 		return nil, err
 	}
-	tombstone := filepath.Join(store.root, strings.TrimPrefix(filepath.Base(transaction.Name()), ".transaction-"))
-	claimed := false
+	var (
+		tombstone = filepath.Join(store.root, strings.TrimPrefix(filepath.Base(transaction.Name()), ".transaction-"))
+		claimed   = false
+	)
 	defer func() {
 		if !claimed {
-			transaction.Close()
-			os.Remove(transaction.Name())
+			_ = transaction.Close()
+			_ = os.Remove(transaction.Name())
 		}
 	}()
 	if err := unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
@@ -423,11 +466,11 @@ func (store *Store) recover(ctx context.Context) error {
 			return err
 		}
 		deletions, more, claimErr := store.recoverLocked(ctx)
-		lock.Close()
+		_ = lock.Close()
 		for i, deletion := range deletions {
 			if err := store.finishDeletion(ctx, deletion); err != nil {
 				for _, pending := range deletions[i+1:] {
-					pending.transaction.Close()
+					_ = pending.transaction.Close()
 				}
 				return errors.Join(claimErr, err)
 			}
@@ -448,8 +491,10 @@ func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, 
 		if err := ctx.Err(); err != nil {
 			return deletions, false, err
 		}
-		name := entry.Name()
-		path := filepath.Join(store.root, name)
+		var (
+			name = entry.Name()
+			path = filepath.Join(store.root, name)
+		)
 		if strings.HasPrefix(name, ".transaction-.prepare-") || strings.HasPrefix(name, ".transaction-.import-") || strings.HasPrefix(name, ".transaction-.remove-") || strings.HasPrefix(name, ".transaction-.delete-") {
 			stage := filepath.Join(store.root, strings.TrimPrefix(name, ".transaction-"))
 			if _, err := os.Lstat(stage); err == nil {
@@ -466,13 +511,13 @@ func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, 
 			}
 			err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 			if errors.Is(err, unix.EWOULDBLOCK) {
-				file.Close()
+				_ = file.Close()
 				continue
 			}
 			if err == nil {
 				err = os.Remove(path)
 			}
-			file.Close()
+			_ = file.Close()
 			if err != nil {
 				return deletions, false, err
 			}
@@ -483,7 +528,7 @@ func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, 
 			if err != nil {
 				return deletions, false, err
 			}
-			file.Close()
+			_ = file.Close()
 			if err := os.Remove(path); err != nil {
 				return deletions, false, err
 			}
@@ -497,7 +542,7 @@ func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, 
 			if err != nil {
 				return deletions, false, err
 			}
-			if len(deletions) == recoveryBatchSize {
+			if len(deletions) == _recoveryBatchSize {
 				return deletions, true, syncDirectory(store.root)
 			}
 		}
@@ -506,13 +551,15 @@ func (store *Store) recoverLocked(ctx context.Context) ([]*imageDeletion, bool, 
 }
 
 func (store *Store) recoverTransactionLocked(ctx context.Context, path string) (*imageDeletion, error) {
-	isDeletion := strings.HasPrefix(filepath.Base(path), ".delete-")
-	transaction, err := store.openFile(store.transactionPath(path), unix.O_RDONLY)
-	handoff := false
+	var (
+		isDeletion       = strings.HasPrefix(filepath.Base(path), ".delete-")
+		transaction, err = store.openFile(store.transactionPath(path), unix.O_RDONLY)
+		handoff          = false
+	)
 	if err == nil {
 		defer func() {
 			if !handoff {
-				transaction.Close()
+				_ = transaction.Close()
 			}
 		}()
 		err = unix.Flock(int(transaction.Fd()), unix.LOCK_EX|unix.LOCK_NB)
@@ -530,7 +577,7 @@ func (store *Store) recoverTransactionLocked(ctx context.Context, path string) (
 	}
 	lease, err := store.openFile(filepath.Join(path, ".lease"), unix.O_RDONLY)
 	if err == nil {
-		defer lease.Close()
+		defer func() { _ = lease.Close() }()
 		err = unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return nil, nil
@@ -559,7 +606,7 @@ func (store *Store) recoverTransactionLocked(ctx context.Context, path string) (
 }
 
 func (store *Store) finishDeletion(ctx context.Context, deletion *imageDeletion) error {
-	defer deletion.transaction.Close()
+	defer func() { _ = deletion.transaction.Close() }()
 	if err := store.removeTree(ctx, deletion.path); err != nil {
 		return err
 	}
@@ -572,7 +619,7 @@ func (store *Store) finishDeletion(ctx context.Context, deletion *imageDeletion)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := os.Remove(store.transactionPath(deletion.path)); err != nil {
 		return err
 	}
@@ -584,48 +631,6 @@ func (store *Store) removeTree(ctx context.Context, path string) error {
 		return store.removeTreeFn(ctx, path)
 	}
 	return removeImageTree(ctx, path)
-}
-
-func removeImageTree(ctx context.Context, path string) error {
-	return rootfs.RemoveTree(ctx, path)
-}
-
-func (store *Store) List(ctx context.Context) ([]Record, error) {
-	lock, err := store.lock(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	defer lock.Close()
-	entries, err := os.ReadDir(store.root)
-	if err != nil {
-		return nil, err
-	}
-	records := make([]Record, 0)
-	references := map[string][]string{}
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), ".ref-") || strings.HasPrefix(entry.Name(), ".ref-stage-") {
-			continue
-		}
-		cached, err := store.readReference(entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		references[cached.ID] = append(references[cached.ID], cached.Reference)
-	}
-	for _, entry := range entries {
-		id := "sha256:" + entry.Name()
-		if ValidateID(id) != nil {
-			continue
-		}
-		record, err := store.read(id)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-		records[len(records)-1].References = references[record.ID]
-	}
-	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	return records, nil
 }
 
 // resolveIDLocked pins a unique local ID while the caller holds the store lock.
@@ -660,52 +665,23 @@ func (store *Store) resolveIDLocked(ctx context.Context, reference string) (Reco
 	return store.read(id)
 }
 
-// Acquire prevents deletion until its shared lease is closed. The global lock
-// covers lookup and lease acquisition so removal cannot race between them.
-func (store *Store) Acquire(ctx context.Context, id string) (Record, string, *os.File, error) {
-	record, lease, err := func() (Record, *os.File, error) {
-		lock, err := store.lock(ctx, true)
-		if err != nil {
-			return Record{}, nil, err
-		}
-		defer lock.Close()
-		record, err := store.resolveIDLocked(ctx, id)
-		if err != nil {
-			return Record{}, nil, err
-		}
-		if record.Architecture != runtime.GOARCH {
-			return Record{}, nil, errors.New("image architecture does not match the runtime")
-		}
-		lease, err := store.acquireLeaseLocked(record.ID)
-		return record, lease, err
-	}()
-	if err != nil {
-		return Record{}, "", nil, err
-	}
-	// The image lease pins metadata and content while verification walks the
-	// tree without the global store lock.
-	if err := store.verify(ctx, record); err != nil {
-		lease.Close()
-		return Record{}, "", nil, err
-	}
-	return record, filepath.Join(store.path(record.ID), "rootfs"), lease, nil
-}
-
 func (store *Store) acquireLeaseLocked(id string) (*os.File, error) {
 	lease, err := store.openFile(filepath.Join(store.path(id), ".lease"), unix.O_RDONLY)
 	if err != nil {
 		return nil, err
 	}
 	if err := unix.Flock(int(lease.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
-		lease.Close()
+		_ = lease.Close()
 		return nil, err
 	}
 	return lease, nil
 }
 
 func (store *Store) verify(ctx context.Context, record Record) error {
-	tree := filepath.Join(store.path(record.ID), "rootfs")
-	info, err := os.Lstat(tree)
+	var (
+		tree      = filepath.Join(store.path(record.ID), "rootfs")
+		info, err = os.Lstat(tree)
+	)
 	if err != nil {
 		return err
 	}
@@ -726,10 +702,6 @@ func (store *Store) verify(ctx context.Context, record Record) error {
 	return err
 }
 
-func (store *Store) Remove(ctx context.Context, id string, referenced ReferenceCheck) error {
-	return store.remove(ctx, id, referenced, false)
-}
-
 func (store *Store) remove(ctx context.Context, id string, referenced ReferenceCheck, dryRun bool) error {
 	if err := store.recover(ctx); err != nil {
 		return err
@@ -740,7 +712,7 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 	}
 	defer func() {
 		if lock != nil {
-			lock.Close()
+			_ = lock.Close()
 		}
 	}()
 	record, err := store.resolveIDLocked(ctx, id)
@@ -752,7 +724,7 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if err := unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		if errors.Is(err, unix.EWOULDBLOCK) {
 			return ErrInUse
@@ -779,10 +751,56 @@ func (store *Store) remove(ctx context.Context, id string, referenced ReferenceC
 		return nil
 	}
 	deletion, claimErr := store.newDeletionLocked(ctx, store.path(id))
-	lock.Close()
+	_ = lock.Close()
 	lock = nil
 	if deletion == nil {
 		return claimErr
 	}
 	return errors.Join(claimErr, store.finishDeletion(ctx, deletion))
+}
+
+func waitFileLock(ctx context.Context, file *os.File, shared bool) (*os.File, error) {
+	operation := unix.LOCK_EX
+	if shared {
+		operation = unix.LOCK_SH
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
+		err := unix.Flock(int(file.Fd()), operation|unix.LOCK_NB)
+		if err == nil {
+			return file, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			_ = file.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			_ = file.Close()
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func syncDirectory(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	return file.Sync()
+}
+
+func overlaps(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+func removeImageTree(ctx context.Context, path string) error {
+	return rootfs.RemoveTree(ctx, path)
 }

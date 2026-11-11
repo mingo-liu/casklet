@@ -28,10 +28,24 @@ type archiveBlob struct {
 	descriptor v1.Descriptor
 }
 
-func (b archiveBlob) Digest() (v1.Hash, error)            { return b.descriptor.Digest, nil }
-func (b archiveBlob) Size() (int64, error)                { return b.descriptor.Size, nil }
+var _ partial.CompressedLayer = archiveBlob{}
+
+type boundedImageWriter struct {
+	ctx    context.Context
+	writer io.Writer
+	count  int64
+	limit  int64
+}
+
+var _ io.Writer = (*boundedImageWriter)(nil)
+
+func (b archiveBlob) Digest() (v1.Hash, error) { return b.descriptor.Digest, nil }
+
+func (b archiveBlob) Size() (int64, error) { return b.descriptor.Size, nil }
+
 func (b archiveBlob) MediaType() (types.MediaType, error) { return b.descriptor.MediaType, nil }
-func (b archiveBlob) Compressed() (io.ReadCloser, error)  { return os.Open(b.path) }
+
+func (b archiveBlob) Compressed() (io.ReadCloser, error) { return os.Open(b.path) }
 
 // Load imports one native OCI layout image without contacting registries or
 // modifying reference mappings/cache. Every failure leaves publication untouched.
@@ -40,7 +54,7 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	defer store.cleanupImport(stage, transaction)
 	layoutDir := filepath.Join(stage, ".oci")
 	if err := os.Mkdir(layoutDir, 0700); err != nil {
@@ -54,8 +68,10 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
-	cf := img.config
-	launch := &LaunchConfig{Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User, StopSignal: cf.Config.StopSignal, Shell: cf.Config.Shell}
+	var (
+		cf     = img.config
+		launch = &LaunchConfig{Entrypoint: cf.Config.Entrypoint, Cmd: cf.Config.Cmd, Env: cf.Config.Env, Workdir: cf.Config.WorkingDir, User: cf.Config.User, StopSignal: cf.Config.StopSignal, Shell: cf.Config.Shell}
+	)
 	launch.Healthcheck, err = imageHealthcheck(img.rawConfig)
 	if err != nil {
 		return Record{}, err
@@ -71,7 +87,7 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 	if err != nil {
 		return Record{}, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	var total int64
 	for i, d := range img.manifest.Layers {
 		name, _ := layout.blobName(d)
@@ -83,8 +99,10 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 		if err != nil {
 			return Record{}, err
 		}
-		progress := &streamProgress{ctx: ctx, now: time.Now}
-		count, unpackErr := unpackPreparedLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], maxImageBytes-total, progress, false, validateOCILayerArchive)
+		var (
+			progress         = &streamProgress{ctx: ctx, now: time.Now}
+			count, unpackErr = unpackPreparedLayer(ctx, root, archive, layer, cf.RootFS.DiffIDs[i], _maxImageBytes-total, progress, false, validateOCILayerArchive)
+		)
 		if err := errors.Join(unpackErr, archive.Close(), os.Remove(archive.Name())); err != nil {
 			return Record{}, fmt.Errorf("OCI image layer %d: %w", i+1, err)
 		}
@@ -115,25 +133,6 @@ func (store *Store) Load(ctx context.Context, source io.Reader) (Record, error) 
 	return store.publish(ctx, stage, Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC(), SizeBytes: size, Config: launch, ManifestDigest: img.digest}, "")
 }
 
-type boundedImageWriter struct {
-	ctx    context.Context
-	writer io.Writer
-	count  int64
-	limit  int64
-}
-
-func (w *boundedImageWriter) Write(p []byte) (int, error) {
-	if err := w.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if int64(len(p)) > w.limit-w.count {
-		return 0, errors.New("OCI export exceeds 4 GiB flattened layer limit")
-	}
-	n, err := w.writer.Write(p)
-	w.count += int64(n)
-	return n, err
-}
-
 // Save synthesizes a standard OCI layout from the immutable flattened tree.
 // A shared image lease remains held through output; no metadata lock covers I/O.
 func (store *Store) Save(ctx context.Context, id string, destination io.Writer) error {
@@ -145,7 +144,7 @@ func (store *Store) save(ctx context.Context, id string, destination io.Writer, 
 	if err != nil {
 		return err
 	}
-	defer imageLease.Close()
+	defer func() { _ = imageLease.Close() }()
 	if record.Config == nil && !directory {
 		return errors.New("image save requires an OCI image; directory imports have a different ownership and capability policy")
 	}
@@ -153,20 +152,24 @@ func (store *Store) save(ctx context.Context, id string, destination io.Writer, 
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	defer store.cleanupImport(stage, transaction)
 	layer, err := os.CreateTemp(stage, ".export-layer-")
 	if err != nil {
 		return err
 	}
-	defer layer.Close()
-	digest := sha256.New()
-	counter := &boundedImageWriter{ctx: ctx, writer: io.MultiWriter(layer, digest), limit: maxLayerBytes}
+	defer func() { _ = layer.Close() }()
+	var (
+		digest  = sha256.New()
+		counter = &boundedImageWriter{ctx: ctx, writer: io.MultiWriter(layer, digest), limit: _maxLayerBytes}
+	)
 	if err := writeImageLayer(ctx, tree, counter); err != nil {
 		return err
 	}
-	layerHash := v1.Hash{Algorithm: "sha256", Hex: hex.EncodeToString(digest.Sum(nil))}
-	cfg := record.Config
+	var (
+		layerHash = v1.Hash{Algorithm: "sha256", Hex: hex.EncodeToString(digest.Sum(nil))}
+		cfg       = record.Config
+	)
 	if cfg == nil {
 		cfg = &LaunchConfig{}
 	}
@@ -187,8 +190,10 @@ func (store *Store) save(ctx context.Context, id string, destination io.Writer, 
 		hash := sha256.Sum256(raw)
 		return v1.Descriptor{MediaType: media, Size: int64(len(raw)), Digest: v1.Hash{Algorithm: "sha256", Hex: hex.EncodeToString(hash[:])}}
 	}
-	configDesc := descriptor(configBytes, types.OCIConfigJSON)
-	manifest := v1.Manifest{SchemaVersion: 2, MediaType: types.OCIManifestSchema1, Config: configDesc, Layers: []v1.Descriptor{{MediaType: types.OCIUncompressedLayer, Size: counter.count, Digest: layerHash}}}
+	var (
+		configDesc = descriptor(configBytes, types.OCIConfigJSON)
+		manifest   = v1.Manifest{SchemaVersion: 2, MediaType: types.OCIManifestSchema1, Config: configDesc, Layers: []v1.Descriptor{{MediaType: types.OCIUncompressedLayer, Size: counter.count, Digest: layerHash}}}
+	)
 	manifestBytes, err := json.Marshal(manifest)
 	if err != nil {
 		return err
@@ -202,11 +207,18 @@ func (store *Store) save(ctx context.Context, id string, destination io.Writer, 
 	if _, err := layer.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	writer := tar.NewWriter(&boundedImageWriter{ctx: ctx, writer: destination, limit: maxOCIArchiveBytes})
-	files := []struct {
-		name string
-		data []byte
-	}{{"oci-layout", []byte(`{"imageLayoutVersion":"1.0.0"}`)}, {"index.json", indexBytes}, {"blobs/sha256/" + configDesc.Digest.Hex, configBytes}, {"blobs/sha256/" + manifestDesc.Digest.Hex, manifestBytes}}
+	var (
+		writer = tar.NewWriter(&boundedImageWriter{ctx: ctx, writer: destination, limit: _maxOCIArchiveBytes})
+		files  = []struct {
+			name string
+			data []byte
+		}{
+			{name: "oci-layout", data: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+			{name: "index.json", data: indexBytes},
+			{name: "blobs/sha256/" + configDesc.Digest.Hex, data: configBytes},
+			{name: "blobs/sha256/" + manifestDesc.Digest.Hex, data: manifestBytes},
+		}
+	)
 	for _, file := range files {
 		if err := writer.WriteHeader(&tar.Header{Name: file.name, Mode: 0600, Typeflag: tar.TypeReg, Size: int64(len(file.data))}); err != nil {
 			return err
@@ -223,15 +235,30 @@ func (store *Store) save(ctx context.Context, id string, destination io.Writer, 
 	}
 	return writer.Close()
 }
+
+func (w *boundedImageWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	if int64(len(p)) > w.limit-w.count {
+		return 0, errors.New("OCI export exceeds 4 GiB flattened layer limit")
+	}
+	n, err := w.writer.Write(p)
+	w.count += int64(n)
+	return n, err
+}
+
 func writeImageLayer(ctx context.Context, tree string, destination io.Writer) error {
 	root, err := os.OpenRoot(tree)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
-	writer := tar.NewWriter(destination)
-	count := 0
-	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
+	defer func() { _ = root.Close() }()
+	var (
+		writer = tar.NewWriter(destination)
+		count  = 0
+	)
+	err = fs.WalkDir(root.FS(), ".", func(name string, _ fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -239,7 +266,7 @@ func writeImageLayer(ctx context.Context, tree string, destination io.Writer) er
 			return err
 		}
 		count++
-		if count > maxLayerEntries {
+		if count > _maxLayerEntries {
 			return errors.New("OCI export exceeds layer entry limit")
 		}
 		info, err := root.Lstat(name)

@@ -9,10 +9,12 @@ import (
 )
 
 func TestStreamProgressCountsAndThrottlesWithoutLosingCompletion(t *testing.T) {
-	var events []Progress
-	ctx := WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
-	now := time.Unix(1, 0)
-	p := streamProgress{ctx: ctx, event: Progress{Stage: ProgressDownloading, Index: 1, Total: 1000}, now: func() time.Time { return now }}
+	var (
+		events []Progress
+		ctx    = WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
+		now    = time.Unix(1, 0)
+		p      = streamProgress{ctx: ctx, event: Progress{Stage: ProgressDownloading, Index: 1, Total: 1000}, now: func() time.Time { return now }}
+	)
 	p.add(10)
 	for range 100 {
 		p.add(1)
@@ -36,9 +38,11 @@ func TestStreamProgressCountsAndThrottlesWithoutLosingCompletion(t *testing.T) {
 }
 
 func TestProgressObserversSerializeParallelLayerWorkers(t *testing.T) {
-	var events []Progress
-	ctx := WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
-	var workers sync.WaitGroup
+	var (
+		events  []Progress
+		ctx     = WithProgress(context.Background(), func(event Progress) { events = append(events, event) })
+		workers sync.WaitGroup
+	)
 	for index := range 8 {
 		workers.Add(1)
 		go func() {

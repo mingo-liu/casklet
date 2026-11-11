@@ -18,9 +18,14 @@ import (
 	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
-var ErrNotFound = errors.New("image not found")
-var ErrAmbiguousID = errors.New("image ID prefix is ambiguous")
-var ErrInUse = errors.New("image is referenced; remove its containers before deleting it")
+var (
+	// ErrNotFound identifies a missing local image or cached reference.
+	ErrNotFound = errors.New("image not found")
+	// ErrAmbiguousID rejects a prefix matching multiple local images.
+	ErrAmbiguousID = errors.New("image ID prefix is ambiguous")
+	// ErrInUse preserves images with active leases or retained container references.
+	ErrInUse = errors.New("image is referenced; remove its containers before deleting it")
+)
 
 // Record is the public metadata for an imported or pulled image.
 type Record struct {
@@ -36,6 +41,14 @@ type Record struct {
 // ReferenceCheck runs under the image store lock. It must not acquire image locks.
 type ReferenceCheck func(context.Context, string) (bool, error)
 
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+var _ io.Reader = contextReader{}
+
+// ValidateID requires a complete persisted image identity.
 func ValidateID(id string) error { return config.ValidateImageID(id) }
 
 // IsIDReference recognizes local hexadecimal IDs and prefixes, with an optional
@@ -56,6 +69,8 @@ func IsIDReference(value string) bool {
 // ValidateIDReference validates user input without weakening persisted IDs.
 func ValidateIDReference(value string) error {
 	if !IsIDReference(value) {
+		//lint:ignore ST1005 Preserve the exact sha256: prefix example in the CLI diagnostic.
+		//revive:disable-next-line:error-strings Preserve the exact sha256: prefix example.
 		return errors.New("image ID must contain 1 to 64 lowercase hexadecimal digits, optionally prefixed with sha256:")
 	}
 	return nil
@@ -70,24 +85,28 @@ func Identity(ctx context.Context, path, architecture string, launch ...*LaunchC
 	if err != nil {
 		return "", 0, err
 	}
-	defer root.Close()
-	hash := sha256.New()
-	encoder := json.NewEncoder(hash)
-	owned := len(launch) > 0 && launch[0] != nil
+	defer func() { _ = root.Close() }()
+	var (
+		hash    = sha256.New()
+		encoder = json.NewEncoder(hash)
+		owned   = len(launch) > 0 && launch[0] != nil
+	)
 	if owned {
 		if err := encoder.Encode(launch[0]); err != nil {
 			return "", 0, err
 		}
 	}
 	if err := encoder.Encode(struct {
-		Version      int
-		Architecture string
-	}{1, architecture}); err != nil {
+		Version      int    `json:"Version"`
+		Architecture string `json:"Architecture"`
+	}{Version: 1, Architecture: architecture}); err != nil {
 		return "", 0, err
 	}
-	var size int64
-	buffer := make([]byte, 32*1024)
-	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
+	var (
+		size   int64
+		buffer = make([]byte, 32*1024)
+	)
+	err = fs.WalkDir(root.FS(), ".", func(name string, _ fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -99,13 +118,13 @@ func Identity(ctx context.Context, path, architecture string, launch ...*LaunchC
 			return err
 		}
 		item := struct {
-			Name    string
-			Mode    uint32
-			Size    int64
-			Link    string
-			Content string
-			UID     *uint32 `json:",omitempty"`
-			GID     *uint32 `json:",omitempty"`
+			Name    string  `json:"Name"`
+			Mode    uint32  `json:"Mode"`
+			Size    int64   `json:"Size"`
+			Link    string  `json:"Link"`
+			Content string  `json:"Content"`
+			UID     *uint32 `json:"UID,omitempty"`
+			GID     *uint32 `json:"GID,omitempty"`
 		}{Name: filepath.ToSlash(name), Mode: uint32(info.Mode())}
 		if owned {
 			uid, gid, err := rootfs.Ownership(info)
@@ -145,9 +164,10 @@ func Identity(ctx context.Context, path, architecture string, launch ...*LaunchC
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
-type contextReader struct {
-	ctx context.Context
-	r   io.Reader
+// IsStorePath rejects bypassing image leases through a raw rootfs path.
+func IsStorePath(path string) bool {
+	const root = "/var/lib/casklet/images"
+	return path == root || strings.HasPrefix(path, root+"/")
 }
 
 func (r contextReader) Read(p []byte) (int, error) {
@@ -155,10 +175,4 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.r.Read(p)
-}
-
-// IsStorePath rejects bypassing image leases through a raw rootfs path.
-func IsStorePath(path string) bool {
-	const root = "/var/lib/casklet/images"
-	return path == root || strings.HasPrefix(path, root+"/")
 }

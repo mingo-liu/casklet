@@ -32,16 +32,52 @@ type blobHTTPCounts struct {
 	gets  map[string]int
 }
 
-func (counts *blobHTTPCounts) count(digest string) int {
-	counts.mutex.Lock()
-	defer counts.mutex.Unlock()
-	return counts.gets[digest]
+type layerOverrideImage struct {
+	v1.Image
+
+	layers []v1.Layer
+}
+
+type downloadController struct {
+	started      chan int
+	gates        []chan struct{}
+	active       atomic.Int32
+	maximum      atomic.Int32
+	failureIndex int
+	failure      error
+}
+
+type controlledLayer struct {
+	v1.Layer
+
+	control *downloadController
+	index   int
+}
+
+type controlledReader struct {
+	io.ReadCloser
+
+	control   *downloadController
+	index     int
+	closed    chan struct{}
+	readOnce  sync.Once
+	closeOnce sync.Once
+	err       error
+}
+
+type bytesLayer struct {
+	v1.Layer
+
+	data      []byte
+	downloads *atomic.Int32
 }
 
 func TestRegistryPullReusesSharedCompressedLayersAcrossImages(t *testing.T) {
-	store := testStore(t)
-	counts := &blobHTTPCounts{gets: map[string]int{}}
-	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	var (
+		store   = testStore(t)
+		counts  = &blobHTTPCounts{gets: make(map[string]int)}
+		handler = registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/blobs/") {
 			counts.mutex.Lock()
@@ -51,10 +87,12 @@ func TestRegistryPullReusesSharedCompressedLayersAcrossImages(t *testing.T) {
 		handler.ServeHTTP(w, req)
 	}))
 	defer server.Close()
-	base := layerBytes(t, tarEntry{name: "app", body: "base"}, tarEntry{name: "base", body: "shared"})
-	first := fixtureImage(t, runtime.GOARCH, base, layerBytes(t, tarEntry{name: "app", body: "first"}))
-	second := fixtureImage(t, runtime.GOARCH, base, layerBytes(t, tarEntry{name: "app", body: "second"}))
-	firstManifest, err := first.Manifest()
+	var (
+		base               = layerBytes(t, tarEntry{name: "app", body: "base"}, tarEntry{name: "base", body: "shared"})
+		first              = fixtureImage(t, runtime.GOARCH, base, layerBytes(t, tarEntry{name: "app", body: "first"}))
+		second             = fixtureImage(t, runtime.GOARCH, base, layerBytes(t, tarEntry{name: "app", body: "second"}))
+		firstManifest, err = first.Manifest()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +100,7 @@ func TestRegistryPullReusesSharedCompressedLayersAcrossImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refs := []name.Reference{}
+	var refs []name.Reference
 	for i, img := range []v1.Image{first, second, second} {
 		ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + fmt.Sprintf("/test/cache:%d", i))
 		if err != nil {
@@ -114,23 +152,27 @@ func TestRegistryPullReusesSharedCompressedLayersAcrossImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if content, err := os.ReadFile(filepath.Join(tree, "app")); err != nil || string(content) != "second" {
 		t.Fatalf("layer order changed: %q %v", content, err)
 	}
 }
 
 func TestConcurrentRegistryPullsDownloadEachDigestOnce(t *testing.T) {
-	store := testStore(t)
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "shared"}))
-	manifest, err := img.Manifest()
+	var (
+		store         = testStore(t)
+		img           = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "shared"}))
+		manifest, err = img.Manifest()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := manifest.Layers[0].Digest.String()
-	counts := &blobHTTPCounts{gets: map[string]int{}}
-	started, release := make(chan struct{}), make(chan struct{})
-	var releaseOnce, startedOnce sync.Once
+	var (
+		digest                   = manifest.Layers[0].Digest.String()
+		counts                   = &blobHTTPCounts{gets: make(map[string]int)}
+		started, release         = make(chan struct{}), make(chan struct{})
+		releaseOnce, startedOnce sync.Once
+	)
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
 	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
@@ -150,7 +192,7 @@ func TestConcurrentRegistryPullsDownloadEachDigestOnce(t *testing.T) {
 	}))
 	defer server.Close()
 	defer unblock()
-	refs := []name.Reference{}
+	var refs []name.Reference
 	for i := range 2 {
 		ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + fmt.Sprintf("/test/concurrent:%d", i))
 		if err != nil {
@@ -165,7 +207,7 @@ func TestConcurrentRegistryPullsDownloadEachDigestOnce(t *testing.T) {
 	for _, ref := range refs {
 		go func() {
 			record, err := store.Pull(context.Background(), ref.Name())
-			results <- pullResult{record, err}
+			results <- pullResult{record: record, err: err}
 		}()
 	}
 	select {
@@ -191,96 +233,12 @@ func TestConcurrentRegistryPullsDownloadEachDigestOnce(t *testing.T) {
 	assertNoImageStaging(t, store)
 }
 
-type layerOverrideImage struct {
-	v1.Image
-	layers []v1.Layer
-}
-
-func (img layerOverrideImage) Layers() ([]v1.Layer, error) { return img.layers, nil }
-
-type downloadController struct {
-	started      chan int
-	gates        []chan struct{}
-	active       atomic.Int32
-	maximum      atomic.Int32
-	failureIndex int
-	failure      error
-}
-type controlledLayer struct {
-	v1.Layer
-	control *downloadController
-	index   int
-}
-
-func (layer controlledLayer) Compressed() (io.ReadCloser, error) {
-	r, err := layer.Layer.Compressed()
-	if err != nil {
-		return nil, err
-	}
-	active := layer.control.active.Add(1)
-	for maximum := layer.control.maximum.Load(); active > maximum; maximum = layer.control.maximum.Load() {
-		if layer.control.maximum.CompareAndSwap(maximum, active) {
-			break
-		}
-	}
-	return &controlledReader{ReadCloser: r, control: layer.control, index: layer.index, closed: make(chan struct{})}, nil
-}
-
-type controlledReader struct {
-	io.ReadCloser
-	control   *downloadController
-	index     int
-	closed    chan struct{}
-	readOnce  sync.Once
-	closeOnce sync.Once
-	err       error
-}
-
-func (r *controlledReader) Read(p []byte) (int, error) {
-	r.readOnce.Do(func() {
-		r.control.started <- r.index
-		select {
-		case <-r.control.gates[r.index]:
-		case <-r.closed:
-			r.err = context.Canceled
-		}
-		if r.index == r.control.failureIndex && r.control.failure != nil {
-			r.err = r.control.failure
-		}
-	})
-	if r.err != nil {
-		return 0, r.err
-	}
-	return r.ReadCloser.Read(p)
-}
-func (r *controlledReader) Close() error {
-	r.closeOnce.Do(func() { close(r.closed); r.ReadCloser.Close(); r.control.active.Add(-1) })
-	return nil
-}
-
-func controlledImage(t *testing.T, count int) (v1.Image, *downloadController) {
-	t.Helper()
-	archives := make([][]byte, count)
-	for i := range count {
-		archives[i] = layerBytes(t, tarEntry{name: "app", body: fmt.Sprintf("layer-%d", i)})
-	}
-	img := fixtureImage(t, runtime.GOARCH, archives...)
-	layers, err := img.Layers()
-	if err != nil {
-		t.Fatal(err)
-	}
-	control := &downloadController{started: make(chan int, count), gates: make([]chan struct{}, count), failureIndex: -1}
-	for i := range count {
-		control.gates[i] = make(chan struct{})
-		layers[i] = controlledLayer{Layer: layers[i], control: control, index: i}
-	}
-	return layerOverrideImage{Image: img, layers: layers}, control
-}
-
 func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
-	store := testStore(t)
-	img, control := controlledImage(t, 7)
-	var unblockOnce sync.Once
+	var (
+		store        = testStore(t)
+		img, control = controlledImage(t, 7)
+		unblockOnce  sync.Once
+	)
 	unblock := func() {
 		unblockOnce.Do(func() {
 			for _, gate := range control.gates {
@@ -289,8 +247,10 @@ func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
 		})
 	}
 	t.Cleanup(unblock)
-	results := make(chan pullResult, 1)
-	var complete []int
+	var (
+		results  = make(chan pullResult, 1)
+		complete []int
+	)
 	ctx := WithProgress(context.Background(), func(event Progress) {
 		if event.Stage == ProgressLayerComplete {
 			complete = append(complete, event.Index)
@@ -298,9 +258,9 @@ func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
 	})
 	go func() {
 		record, err := store.pullImage(ctx, "localhost/bounded:v1", img)
-		results <- pullResult{record, err}
+		results <- pullResult{record: record, err: err}
 	}()
-	for range blobDownloadWorkers {
+	for range _blobDownloadWorkers {
 		select {
 		case <-control.started:
 		case <-time.After(5 * time.Second):
@@ -317,7 +277,7 @@ func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
 	if outcome.err != nil {
 		t.Fatal(outcome.err)
 	}
-	if control.maximum.Load() != blobDownloadWorkers || control.active.Load() != 0 {
+	if control.maximum.Load() != _blobDownloadWorkers || control.active.Load() != 0 {
 		t.Fatalf("download streams maximum=%d active=%d", control.maximum.Load(), control.active.Load())
 	}
 	for i, index := range complete {
@@ -332,7 +292,7 @@ func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if content, err := os.ReadFile(filepath.Join(tree, "app")); err != nil || string(content) != "layer-6" {
 		t.Fatalf("last layer content=%q %v", content, err)
 	}
@@ -341,9 +301,11 @@ func TestBlobDownloadsAreBoundedAndLayerApplicationStaysOrdered(t *testing.T) {
 func TestFailedOrCanceledBlobDownloadsCloseAndJoinAllWorkers(t *testing.T) {
 	for _, mode := range []string{"canceled", "peer-failure"} {
 		t.Run(mode, func(t *testing.T) {
-			store := testStore(t)
-			img, control := controlledImage(t, 6)
-			failure := errors.New("injected compressed stream failure")
+			var (
+				store        = testStore(t)
+				img, control = controlledImage(t, 6)
+				failure      = errors.New("injected compressed stream failure")
+			)
 			if mode == "peer-failure" {
 				control.failureIndex = 0
 				control.failure = failure
@@ -353,9 +315,9 @@ func TestFailedOrCanceledBlobDownloadsCloseAndJoinAllWorkers(t *testing.T) {
 			results := make(chan pullResult, 1)
 			go func() {
 				record, err := store.pullImage(ctx, "localhost/cancel:v1", img)
-				results <- pullResult{record, err}
+				results <- pullResult{record: record, err: err}
 			}()
-			for range blobDownloadWorkers {
+			for range _blobDownloadWorkers {
 				select {
 				case <-control.started:
 				case <-time.After(5 * time.Second):
@@ -367,8 +329,10 @@ func TestFailedOrCanceledBlobDownloadsCloseAndJoinAllWorkers(t *testing.T) {
 			} else {
 				close(control.gates[0])
 			}
-			outcome := awaitPull(t, results)
-			want := failure
+			var (
+				outcome = awaitPull(t, results)
+				want    = failure
+			)
 			if mode == "canceled" {
 				want = context.Canceled
 			}
@@ -387,31 +351,13 @@ func TestFailedOrCanceledBlobDownloadsCloseAndJoinAllWorkers(t *testing.T) {
 	}
 }
 
-func assertNoBlobStages(t *testing.T, store *Store) {
-	t.Helper()
-	dir, err := store.blobDirectory(false)
-	if errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".stage-") {
-			t.Errorf("compressed staging left: %s", entry.Name())
-		}
-	}
-}
-
 func TestRepeatedManifestLayersReuseOneLeaseWithoutDeadlock(t *testing.T) {
-	store := testStore(t)
-	archive := layerBytes(t, tarEntry{name: "app", body: "repeat"})
-	img := fixtureImage(t, runtime.GOARCH, archive, archive, archive)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	var (
+		store       = testStore(t)
+		archive     = layerBytes(t, tarEntry{name: "app", body: "repeat"})
+		img         = fixtureImage(t, runtime.GOARCH, archive, archive, archive)
+		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	)
 	defer cancel()
 	if _, err := store.pullImage(ctx, "localhost/repeated:v1", img); err != nil {
 		t.Fatal(err)
@@ -420,9 +366,11 @@ func TestRepeatedManifestLayersReuseOneLeaseWithoutDeadlock(t *testing.T) {
 }
 
 func TestBlobPruneRespectsLiveLeasesDryRunAndStagingOwners(t *testing.T) {
-	store := testStore(t)
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "prune"}))
-	layers, err := img.Layers()
+	var (
+		store       = testStore(t)
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "prune"}))
+		layers, err = img.Layers()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,8 +386,10 @@ func TestBlobPruneRespectsLiveLeasesDryRunAndStagingOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := manifest.Layers[0].Digest.Hex
-	path := filepath.Join(dir, digest)
+	var (
+		digest = manifest.Layers[0].Digest.Hex
+		path   = filepath.Join(dir, digest)
+	)
 	if err := store.pruneBlobs(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +417,7 @@ func TestBlobPruneRespectsLiveLeasesDryRunAndStagingOwners(t *testing.T) {
 	if _, err := os.Stat(stage); err != nil {
 		t.Fatalf("prune deleted active download staging: %v", err)
 	}
-	lease.Close()
+	_ = lease.Close()
 	if err := store.pruneBlobs(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -479,24 +429,15 @@ func TestBlobPruneRespectsLiveLeasesDryRunAndStagingOwners(t *testing.T) {
 	if lock, err := store.openFile(filepath.Join(dir, ".lock-"+digest), unix.O_RDONLY); err != nil {
 		t.Fatalf("stable lock removed: %v", err)
 	} else {
-		lock.Close()
+		_ = lock.Close()
 	}
 }
 
-type bytesLayer struct {
-	v1.Layer
-	data      []byte
-	downloads *atomic.Int32
-}
-
-func (layer bytesLayer) Compressed() (io.ReadCloser, error) {
-	layer.downloads.Add(1)
-	return io.NopCloser(bytes.NewReader(layer.data)), nil
-}
-
 func TestCompressedManifestLimitsDigestAndActualSizeAreVerified(t *testing.T) {
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "checked"}))
-	layers, err := img.Layers()
+	var (
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "checked"}))
+		layers, err = img.Layers()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,19 +450,21 @@ func TestCompressedManifestLimitsDigestAndActualSizeAreVerified(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := io.ReadAll(r)
-	r.Close()
+	_ = r.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"single-limit", "total-limit", "short", "long", "digest"} {
 		t.Run(mode, func(t *testing.T) {
-			store := testStore(t)
-			var reads atomic.Int32
-			d := manifest.Layers[0]
-			input := append([]byte(nil), data...)
+			var (
+				store = testStore(t)
+				reads atomic.Int32
+				d     = manifest.Layers[0]
+				input = append([]byte(nil), data...)
+			)
 			switch mode {
 			case "single-limit":
-				d.Size = maxLayerBytes + 1
+				d.Size = _maxLayerBytes + 1
 			case "short":
 				d.Size++
 			case "long":
@@ -529,10 +472,12 @@ func TestCompressedManifestLimitsDigestAndActualSizeAreVerified(t *testing.T) {
 			case "digest":
 				input[0] ^= 1
 			}
-			fake := bytesLayer{Layer: layers[0], data: input, downloads: &reads}
-			descriptors, inputs := []v1.Descriptor{d}, []v1.Layer{fake}
+			var (
+				fake                = bytesLayer{Layer: layers[0], data: input, downloads: &reads}
+				descriptors, inputs = []v1.Descriptor{d}, []v1.Layer{fake}
+			)
 			if mode == "total-limit" {
-				d.Size = maxLayerBytes
+				d.Size = _maxLayerBytes
 				descriptors = make([]v1.Descriptor, 5)
 				inputs = make([]v1.Layer, 5)
 				for i := range 5 {
@@ -552,8 +497,10 @@ func TestCompressedManifestLimitsDigestAndActualSizeAreVerified(t *testing.T) {
 }
 
 func TestBlobCacheRejectsCorruptAndUnsafeArtifacts(t *testing.T) {
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "valid"}))
-	layers, err := img.Layers()
+	var (
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "valid"}))
+		layers, err = img.Layers()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,8 +511,10 @@ func TestBlobCacheRejectsCorruptAndUnsafeArtifacts(t *testing.T) {
 	d := manifest.Layers[0]
 	for _, mode := range []string{"digest", "size", "symlink", "hardlink", "fifo", "public-file", "public-dir", "directory-link", "lock-link"} {
 		t.Run(mode, func(t *testing.T) {
-			store := testStore(t)
-			dir, err := store.blobDirectory(true)
+			var (
+				store    = testStore(t)
+				dir, err = store.blobDirectory(true)
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -626,9 +575,11 @@ func TestBlobCacheRejectsCorruptAndUnsafeArtifacts(t *testing.T) {
 }
 
 func TestBlobMissRecoversOnlyItsOwnAbandonedDownload(t *testing.T) {
-	store := testStore(t)
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "stage"}))
-	layers, err := img.Layers()
+	var (
+		store       = testStore(t)
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "stage"}))
+		layers, err = img.Layers()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,14 +591,16 @@ func TestBlobMissRecoversOnlyItsOwnAbandonedDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	own := filepath.Join(dir, ".stage-"+manifest.Layers[0].Digest.Hex+"-old")
-	otherDigest := strings.Repeat("a", 64)
-	other := filepath.Join(dir, ".stage-"+otherDigest+"-active")
+	var (
+		own         = filepath.Join(dir, ".stage-"+manifest.Layers[0].Digest.Hex+"-old")
+		otherDigest = strings.Repeat("a", 64)
+		other       = filepath.Join(dir, ".stage-"+otherDigest+"-active")
+	)
 	lease, err := store.blobLock(context.Background(), dir, otherDigest, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	for _, path := range []string{own, other} {
 		if err := os.WriteFile(path, []byte("partial"), 0600); err != nil {
 			t.Fatal(err)
@@ -667,22 +620,26 @@ func TestBlobMissRecoversOnlyItsOwnAbandonedDownload(t *testing.T) {
 }
 
 func TestHTTPDownloadFailureCancelsPeersWaitingForResponseHeaders(t *testing.T) {
-	store := testStore(t)
-	img := fixtureImage(t, runtime.GOARCH,
-		layerBytes(t, tarEntry{name: "app", body: "one"}),
-		layerBytes(t, tarEntry{name: "app", body: "two"}),
-		layerBytes(t, tarEntry{name: "app", body: "three"}))
-	manifest, err := img.Manifest()
+	var (
+		store = testStore(t)
+		img   = fixtureImage(t, runtime.GOARCH,
+			layerBytes(t, tarEntry{name: "app", body: "one"}),
+			layerBytes(t, tarEntry{name: "app", body: "two"}),
+			layerBytes(t, tarEntry{name: "app", body: "three"}))
+		manifest, err = img.Manifest()
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexes := map[string]int{}
+	indexes := make(map[string]int)
 	for i, d := range manifest.Layers {
 		indexes[d.Digest.String()] = i
 	}
-	started, peersCanceled := make(chan int, 3), make(chan struct{}, 2)
-	releaseFailure := make(chan struct{})
-	var once sync.Once
+	var (
+		started, peersCanceled = make(chan int, 3), make(chan struct{}, 2)
+		releaseFailure         = make(chan struct{})
+		once                   sync.Once
+	)
 	unblock := func() { once.Do(func() { close(releaseFailure) }) }
 	t.Cleanup(unblock)
 	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
@@ -717,7 +674,7 @@ func TestHTTPDownloadFailureCancelsPeersWaitingForResponseHeaders(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	results := make(chan pullResult, 1)
-	go func() { record, err := store.Pull(ctx, ref.Name()); results <- pullResult{record, err} }()
+	go func() { record, err := store.Pull(ctx, ref.Name()); results <- pullResult{record: record, err: err} }()
 	for range 3 {
 		select {
 		case <-started:
@@ -742,20 +699,24 @@ func TestHTTPDownloadFailureCancelsPeersWaitingForResponseHeaders(t *testing.T) 
 }
 
 func TestConcurrentPullsWithOppositeSharedLayerOrderComplete(t *testing.T) {
-	store := testStore(t)
-	a := layerBytes(t, tarEntry{name: "a", body: "shared-a"})
-	b := layerBytes(t, tarEntry{name: "b", body: "shared-b"})
-	archives := [][][]byte{
-		{a, layerBytes(t, tarEntry{name: "first-c", body: "c"}), layerBytes(t, tarEntry{name: "first-d", body: "d"}), b},
-		{b, layerBytes(t, tarEntry{name: "second-e", body: "e"}), layerBytes(t, tarEntry{name: "second-f", body: "f"}), a},
-	}
-	results := make(chan pullResult, 2)
-	controls := make([]*downloadController, 2)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var (
+		store    = testStore(t)
+		a        = layerBytes(t, tarEntry{name: "a", body: "shared-a"})
+		b        = layerBytes(t, tarEntry{name: "b", body: "shared-b"})
+		archives = [][][]byte{
+			{a, layerBytes(t, tarEntry{name: "first-c", body: "c"}), layerBytes(t, tarEntry{name: "first-d", body: "d"}), b},
+			{b, layerBytes(t, tarEntry{name: "second-e", body: "e"}), layerBytes(t, tarEntry{name: "second-f", body: "f"}), a},
+		}
+		results     = make(chan pullResult, 2)
+		controls    = make([]*downloadController, 2)
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	)
 	defer cancel()
 	for i, data := range archives {
-		img := fixtureImage(t, runtime.GOARCH, data...)
-		layers, err := img.Layers()
+		var (
+			img         = fixtureImage(t, runtime.GOARCH, data...)
+			layers, err = img.Layers()
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -767,7 +728,7 @@ func TestConcurrentPullsWithOppositeSharedLayerOrderComplete(t *testing.T) {
 		controls[i] = control
 		go func() {
 			record, err := store.pullImage(ctx, fmt.Sprintf("localhost/opposite:%d", i), layerOverrideImage{Image: img, layers: layers})
-			results <- pullResult{record, err}
+			results <- pullResult{record: record, err: err}
 		}()
 		// Pin the first three downloads before starting the other image, so
 		// each pull owns a different shared blob while seeking the other's.
@@ -808,4 +769,95 @@ func TestConcurrentPullsWithOppositeSharedLayerOrderComplete(t *testing.T) {
 		}
 	}
 	assertNoBlobStages(t, store)
+}
+
+func (counts *blobHTTPCounts) count(digest string) int {
+	counts.mutex.Lock()
+	defer counts.mutex.Unlock()
+	return counts.gets[digest]
+}
+
+func (img layerOverrideImage) Layers() ([]v1.Layer, error) { return img.layers, nil }
+
+func (layer controlledLayer) Compressed() (io.ReadCloser, error) {
+	r, err := layer.Layer.Compressed()
+	if err != nil {
+		return nil, err
+	}
+	active := layer.control.active.Add(1)
+	for maximum := layer.control.maximum.Load(); active > maximum; maximum = layer.control.maximum.Load() {
+		if layer.control.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	return &controlledReader{ReadCloser: r, control: layer.control, index: layer.index, closed: make(chan struct{})}, nil
+}
+
+func (r *controlledReader) Read(p []byte) (int, error) {
+	r.readOnce.Do(func() {
+		r.control.started <- r.index
+		select {
+		case <-r.control.gates[r.index]:
+		case <-r.closed:
+			r.err = context.Canceled
+		}
+		if r.index == r.control.failureIndex && r.control.failure != nil {
+			r.err = r.control.failure
+		}
+	})
+	if r.err != nil {
+		return 0, r.err
+	}
+	return r.ReadCloser.Read(p)
+}
+
+func (r *controlledReader) Close() error {
+	r.closeOnce.Do(func() { close(r.closed); _ = r.ReadCloser.Close(); r.control.active.Add(-1) })
+	return nil
+}
+
+func (layer bytesLayer) Compressed() (io.ReadCloser, error) {
+	layer.downloads.Add(1)
+	return io.NopCloser(bytes.NewReader(layer.data)), nil
+}
+
+func controlledImage(t *testing.T, count int) (v1.Image, *downloadController) {
+	t.Helper()
+	archives := make([][]byte, count)
+	for i := range count {
+		archives[i] = layerBytes(t, tarEntry{name: "app", body: fmt.Sprintf("layer-%d", i)})
+	}
+	var (
+		img         = fixtureImage(t, runtime.GOARCH, archives...)
+		layers, err = img.Layers()
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := &downloadController{started: make(chan int, count), gates: make([]chan struct{}, count), failureIndex: -1}
+	for i := range count {
+		control.gates[i] = make(chan struct{})
+		layers[i] = controlledLayer{Layer: layers[i], control: control, index: i}
+	}
+	return layerOverrideImage{Image: img, layers: layers}, control
+}
+
+func assertNoBlobStages(t *testing.T, store *Store) {
+	t.Helper()
+	dir, err := store.blobDirectory(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".stage-") {
+			t.Errorf("compressed staging left: %s", entry.Name())
+		}
+	}
 }

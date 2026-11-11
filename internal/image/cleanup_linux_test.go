@@ -17,119 +17,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func cleanupTemplate(t *testing.T, value string) string {
-	t.Helper()
-	source := testTemplate(t)
-	if err := os.WriteFile(filepath.Join(source, "value"), []byte(value), 0644); err != nil {
-		t.Fatal(err)
-	}
-	return source
-}
-
-func cleanupPeer(t *testing.T, store *Store) *Store {
-	t.Helper()
-	peer, err := newStoreAt(store.root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return peer
-}
-
-func awaitImageCleanup(t *testing.T, result <-chan error) error {
-	t.Helper()
-	select {
-	case err := <-result:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("image cleanup did not finish")
-		return nil
-	}
-}
-
-func pauseImageCleanup(t *testing.T, store *Store) (<-chan string, func()) {
-	t.Helper()
-	started, release := make(chan string, 1), make(chan struct{})
-	var once sync.Once
-	unblock := func() { once.Do(func() { close(release) }) }
-	t.Cleanup(unblock)
-	store.removeTreeFn = func(ctx context.Context, path string) error {
-		if strings.HasPrefix(filepath.Base(path), ".delete-") {
-			// Expose the half-removed window: the internal flock file is
-			// already gone while most of the image tree still exists.
-			if err := os.Remove(filepath.Join(path, ".lease")); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			started <- path
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-		return removeImageTree(ctx, path)
-	}
-	return started, unblock
-}
-
-func cleanupStarted(t *testing.T, started <-chan string, finished <-chan error) string {
-	t.Helper()
-	select {
-	case path := <-started:
-		return path
-	case <-time.After(5 * time.Second):
-		select {
-		case err := <-finished:
-			t.Fatalf("image cleanup finished before its barrier: %v", err)
-		default:
-			t.Fatal("image cleanup did not reach its barrier")
-		}
-	}
-	return ""
-}
-
-func assertCleanupAllowsUnrelatedOperations(t *testing.T, peer *Store, cached Record) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := peer.List(ctx); err != nil {
-		t.Fatalf("list blocked by recursive cleanup: %v", err)
-	}
-	if _, _, lease, err := peer.Acquire(ctx, cached.ID); err != nil {
-		t.Fatalf("cached acquire blocked by recursive cleanup: %v", err)
-	} else {
-		lease.Close()
-	}
-	if _, err := peer.Import(ctx, cleanupTemplate(t, "unrelated import")); err != nil {
-		t.Fatalf("import blocked by recursive cleanup: %v", err)
-	}
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "unrelated pull"}))
-	if _, err := peer.pullImage(ctx, "localhost/unrelated-cleanup:v1", img); err != nil {
-		t.Fatalf("pull blocked by recursive cleanup: %v", err)
-	}
-	if err := peer.recover(ctx); err != nil {
-		t.Fatalf("active cleanup confused recovery: %v", err)
-	}
-}
-
-func assertCleanupArtifactsGone(t *testing.T, store *Store) {
-	t.Helper()
-	entries, err := os.ReadDir(store.root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		for _, prefix := range []string{".delete-", ".transaction-", ".prepare-", ".import-", ".remove-"} {
-			if strings.HasPrefix(entry.Name(), prefix) {
-				t.Errorf("abandoned cleanup artifact remains: %s", entry.Name())
-			}
-		}
-	}
-}
-
 func TestImageDeletionOutsideGlobalLockKeepsHalfRemovedTreeLeased(t *testing.T) {
-	store := testStore(t)
-	source := cleanupTemplate(t, "deleted then republished")
-	removed, err := store.Import(context.Background(), source)
+	var (
+		store        = testStore(t)
+		source       = cleanupTemplate(t, "deleted then republished")
+		removed, err = store.Import(context.Background(), source)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,9 +30,11 @@ func TestImageDeletionOutsideGlobalLockKeepsHalfRemovedTreeLeased(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer := cleanupPeer(t, store)
-	started, unblock := pauseImageCleanup(t, store)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var (
+		peer             = cleanupPeer(t, store)
+		started, unblock = pauseImageCleanup(t, store)
+		ctx, cancel      = context.WithTimeout(context.Background(), 5*time.Second)
+	)
 	defer cancel()
 	finished := make(chan error, 1)
 	go func() { finished <- store.Remove(ctx, removed.ID, unused) }()
@@ -168,18 +63,18 @@ func TestImageDeletionOutsideGlobalLockKeepsHalfRemovedTreeLeased(t *testing.T) 
 	}
 	entries, err := os.ReadDir(peer.root)
 	if err != nil {
-		lock.Close()
+		_ = lock.Close()
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), ".import-") || strings.HasPrefix(entry.Name(), ".remove-") {
 			if err := os.RemoveAll(filepath.Join(peer.root, entry.Name())); err != nil {
-				lock.Close()
+				_ = lock.Close()
 				t.Fatal(err)
 			}
 		}
 	}
-	lock.Close()
+	_ = lock.Close()
 	if _, err := os.Stat(tombstone); err != nil {
 		t.Fatalf("legacy recovery removed active deletion: %v", err)
 	}
@@ -190,14 +85,16 @@ func TestImageDeletionOutsideGlobalLockKeepsHalfRemovedTreeLeased(t *testing.T) 
 	if _, _, lease, err := peer.Acquire(context.Background(), replacement.ID); err != nil {
 		t.Fatalf("old cleanup removed replacement image: %v", err)
 	} else {
-		lease.Close()
+		_ = lease.Close()
 	}
 	assertCleanupArtifactsGone(t, peer)
 }
 
 func TestAbandonedLegacyRecoveryRunsOutsideGlobalLock(t *testing.T) {
-	store := testStore(t)
-	cached, err := store.Import(context.Background(), cleanupTemplate(t, "cached during recovery"))
+	var (
+		store       = testStore(t)
+		cached, err = store.Import(context.Background(), cleanupTemplate(t, "cached during recovery"))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,8 +108,10 @@ func TestAbandonedLegacyRecoveryRunsOutsideGlobalLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacy, "remaining"), []byte("preserved until owner finishes"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	started, unblock := pauseImageCleanup(t, store)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var (
+		started, unblock = pauseImageCleanup(t, store)
+		ctx, cancel      = context.WithTimeout(context.Background(), 5*time.Second)
+	)
 	defer cancel()
 	finished := make(chan error, 1)
 	go func() { finished <- store.recover(ctx) }()
@@ -235,14 +134,18 @@ func TestAbandonedLegacyRecoveryRunsOutsideGlobalLock(t *testing.T) {
 func TestCanceledAndFailedImageDeletionCanBeRecovered(t *testing.T) {
 	for _, failure := range []string{"canceled", "deadline", "storage failure"} {
 		t.Run(failure, func(t *testing.T) {
-			store := testStore(t)
-			source := cleanupTemplate(t, "recover canceled deletion")
-			record, err := store.Import(context.Background(), source)
+			var (
+				store       = testStore(t)
+				source      = cleanupTemplate(t, "recover canceled deletion")
+				record, err = store.Import(context.Background(), source)
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
-			started := make(chan string, 1)
-			injected := errors.New("injected image cleanup failure")
+			var (
+				started  = make(chan string, 1)
+				injected = errors.New("injected image cleanup failure")
+			)
 			store.removeTreeFn = func(ctx context.Context, path string) error {
 				if err := os.Remove(filepath.Join(path, ".lease")); err != nil {
 					return err
@@ -254,8 +157,10 @@ func TestCanceledAndFailedImageDeletionCanBeRecovered(t *testing.T) {
 				<-ctx.Done()
 				return ctx.Err()
 			}
-			ctx, cancel := context.WithCancel(context.Background())
-			want := error(context.Canceled)
+			var (
+				ctx, cancel = context.WithCancel(context.Background())
+				want        = error(context.Canceled)
+			)
 			if failure == "deadline" {
 				cancel()
 				ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -291,8 +196,10 @@ func TestCanceledAndFailedImageDeletionCanBeRecovered(t *testing.T) {
 func TestRecoveryClaimsLegacyAndAbandonedPreparationWithoutFollowingLinks(t *testing.T) {
 	for _, prefix := range []string{".import-", ".remove-", ".prepare-"} {
 		t.Run(prefix, func(t *testing.T) {
-			store := testStore(t)
-			stage := filepath.Join(store.root, prefix+"abandoned")
+			var (
+				store = testStore(t)
+				stage = filepath.Join(store.root, prefix+"abandoned")
+			)
 			if err := os.Mkdir(stage, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -320,8 +227,10 @@ func TestRecoveryClaimsLegacyAndAbandonedPreparationWithoutFollowingLinks(t *tes
 func TestRecoveryRejectsUnsafeTransactionsAndLeavesUnknownPaths(t *testing.T) {
 	for _, artifact := range []string{"directory symlink", "public directory", "public external lock", "external lock symlink", "external lock hardlink", "external lock fifo", "delete without external lock"} {
 		t.Run(artifact, func(t *testing.T) {
-			store := testStore(t)
-			stage := filepath.Join(store.root, ".delete-unsafe")
+			var (
+				store = testStore(t)
+				stage = filepath.Join(store.root, ".delete-unsafe")
+			)
 			if err := os.Mkdir(stage, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -372,8 +281,10 @@ func TestRecoveryRejectsUnsafeTransactionsAndLeavesUnknownPaths(t *testing.T) {
 			}
 		})
 	}
-	store := testStore(t)
-	unknown := filepath.Join(store.root, "unrecognized-storage")
+	var (
+		store   = testStore(t)
+		unknown = filepath.Join(store.root, "unrecognized-storage")
+	)
 	if err := os.Mkdir(unknown, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -429,8 +340,10 @@ func TestImageTreeRemovalDrainsMultipleDirectoryBatches(t *testing.T) {
 func TestRecoveryPreservesLeasedLegacyTransactions(t *testing.T) {
 	for _, prefix := range []string{".import-", ".remove-"} {
 		t.Run(prefix, func(t *testing.T) {
-			store := testStore(t)
-			stage := filepath.Join(store.root, prefix+"leased")
+			var (
+				store = testStore(t)
+				stage = filepath.Join(store.root, prefix+"leased")
+			)
 			if err := os.Mkdir(stage, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -438,7 +351,7 @@ func TestRecoveryPreservesLeasedLegacyTransactions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer lease.Close()
+			defer func() { _ = lease.Close() }()
 			if err := unix.Flock(int(lease.Fd()), unix.LOCK_SH|unix.LOCK_NB); err != nil {
 				t.Fatal(err)
 			}
@@ -448,7 +361,7 @@ func TestRecoveryPreservesLeasedLegacyTransactions(t *testing.T) {
 			if _, err := os.Stat(stage); err != nil {
 				t.Fatalf("recovery claimed a leased legacy transaction: %v", err)
 			}
-			lease.Close()
+			_ = lease.Close()
 			if err := store.recover(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -461,9 +374,11 @@ func TestRecoveryPreservesMountedTransactions(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("mounted recovery regression requires root")
 	}
-	store := testStore(t)
-	stage := filepath.Join(store.root, ".import-mounted")
-	target := filepath.Join(stage, "mounted")
+	var (
+		store  = testStore(t)
+		stage  = filepath.Join(store.root, ".import-mounted")
+		target = filepath.Join(stage, "mounted")
+	)
 	if err := os.Mkdir(stage, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +391,7 @@ func TestRecoveryPreservesMountedTransactions(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	defer unix.Unmount(target, 0)
+	defer func() { _ = unix.Unmount(target, 0) }()
 	if err := os.WriteFile(filepath.Join(target, "keep"), []byte("mounted data"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +405,7 @@ func TestRecoveryPreservesMountedTransactions(t *testing.T) {
 
 func TestAbandonedRecoveryBoundsClaimedTransactionDescriptors(t *testing.T) {
 	store := testStore(t)
-	for i := range recoveryBatchSize*2 + 1 {
+	for i := range _recoveryBatchSize*2 + 1 {
 		if err := os.Mkdir(filepath.Join(store.root, fmt.Sprintf(".import-abandoned-%03d", i)), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -511,7 +426,7 @@ func TestAbandonedRecoveryBoundsClaimedTransactionDescriptors(t *testing.T) {
 				return err
 			}
 			err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-			file.Close()
+			_ = file.Close()
 			if errors.Is(err, unix.EWOULDBLOCK) {
 				claimed++
 			} else if err != nil {
@@ -521,7 +436,7 @@ func TestAbandonedRecoveryBoundsClaimedTransactionDescriptors(t *testing.T) {
 		if claimed > peak {
 			peak = claimed
 		}
-		if claimed > recoveryBatchSize {
+		if claimed > _recoveryBatchSize {
 			return fmt.Errorf("claimed %d cleanup descriptors", claimed)
 		}
 		return removeImageTree(ctx, path)
@@ -531,8 +446,119 @@ func TestAbandonedRecoveryBoundsClaimedTransactionDescriptors(t *testing.T) {
 	if err := store.recover(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if peak != recoveryBatchSize {
+	if peak != _recoveryBatchSize {
 		t.Fatalf("recovery did not exercise a complete bounded batch: %d", peak)
 	}
 	assertCleanupArtifactsGone(t, store)
+}
+
+func cleanupTemplate(t *testing.T, value string) string {
+	t.Helper()
+	source := testTemplate(t)
+	if err := os.WriteFile(filepath.Join(source, "value"), []byte(value), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func cleanupPeer(t *testing.T, store *Store) *Store {
+	t.Helper()
+	peer, err := newStoreAt(store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return peer
+}
+
+func awaitImageCleanup(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("image cleanup did not finish")
+		return nil
+	}
+}
+
+func pauseImageCleanup(t *testing.T, store *Store) (<-chan string, func()) {
+	t.Helper()
+	var (
+		started, release = make(chan string, 1), make(chan struct{})
+		once             sync.Once
+	)
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	store.removeTreeFn = func(ctx context.Context, path string) error {
+		if strings.HasPrefix(filepath.Base(path), ".delete-") {
+			// Expose the half-removed window: the internal flock file is
+			// already gone while most of the image tree still exists.
+			if err := os.Remove(filepath.Join(path, ".lease")); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			started <- path
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return removeImageTree(ctx, path)
+	}
+	return started, unblock
+}
+
+func cleanupStarted(t *testing.T, started <-chan string, finished <-chan error) string {
+	t.Helper()
+	select {
+	case path := <-started:
+		return path
+	case <-time.After(5 * time.Second):
+		select {
+		case err := <-finished:
+			t.Fatalf("image cleanup finished before its barrier: %v", err)
+		default:
+			t.Fatal("image cleanup did not reach its barrier")
+		}
+	}
+	return ""
+}
+
+func assertCleanupAllowsUnrelatedOperations(t *testing.T, peer *Store, cached Record) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := peer.List(ctx); err != nil {
+		t.Fatalf("list blocked by recursive cleanup: %v", err)
+	}
+	if _, _, lease, err := peer.Acquire(ctx, cached.ID); err != nil {
+		t.Fatalf("cached acquire blocked by recursive cleanup: %v", err)
+	} else {
+		_ = lease.Close()
+	}
+	if _, err := peer.Import(ctx, cleanupTemplate(t, "unrelated import")); err != nil {
+		t.Fatalf("import blocked by recursive cleanup: %v", err)
+	}
+	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "unrelated pull"}))
+	if _, err := peer.pullImage(ctx, "localhost/unrelated-cleanup:v1", img); err != nil {
+		t.Fatalf("pull blocked by recursive cleanup: %v", err)
+	}
+	if err := peer.recover(ctx); err != nil {
+		t.Fatalf("active cleanup confused recovery: %v", err)
+	}
+}
+
+func assertCleanupArtifactsGone(t *testing.T, store *Store) {
+	t.Helper()
+	entries, err := os.ReadDir(store.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		for _, prefix := range []string{".delete-", ".transaction-", ".prepare-", ".import-", ".remove-"} {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				t.Errorf("abandoned cleanup artifact remains: %s", entry.Name())
+			}
+		}
+	}
 }

@@ -36,8 +36,10 @@ func TestIdentityPreservesPersistedDigestAcrossFileSizes(t *testing.T) {
 }
 
 func TestIdentityTracksCopiedContent(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "file")
+	var (
+		root = t.TempDir()
+		file = filepath.Join(root, "file")
+	)
 	if err := os.WriteFile(file, []byte("original"), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,14 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
+type imageSource interface {
+	Resolve(context.Context, string) (image.Record, error)
+	Pull(context.Context, string) (image.Record, error)
+	Acquire(context.Context, string) (image.Record, string, *os.File, error)
+}
+
+var _ imageSource = (*image.Store)(nil)
+
 // ResolveExecution resolves a name to an immutable identity and applies its
 // startup defaults. The caller holds the lease until runtime source acquisition
 // or durable container creation completes; no tag lookup is needed on restart.
@@ -19,12 +27,6 @@ func ResolveExecution(ctx context.Context, cfg config.Config, entrypoint *string
 		return cfg, nil, err
 	}
 	return resolveExecution(ctx, cfg, entrypoint, store)
-}
-
-type imageSource interface {
-	Resolve(context.Context, string) (image.Record, error)
-	Pull(context.Context, string) (image.Record, error)
-	Acquire(context.Context, string) (image.Record, string, *os.File, error)
 }
 
 func resolveExecution(ctx context.Context, cfg config.Config, entrypoint *string, store imageSource) (config.Config, io.Closer, error) {
@@ -41,17 +43,17 @@ func resolveExecution(ctx context.Context, cfg config.Config, entrypoint *string
 	}
 	cfg.Image = record.ID
 	if record.Config != nil && cfg.UserNS {
-		lease.Close()
+		_ = lease.Close()
 		return cfg, nil, errors.New("OCI images currently require execution without --userns or --rootless")
 	}
-	defaults := image.LaunchConfig{}
+	var defaults image.LaunchConfig
 	if record.Config != nil {
 		defaults = *record.Config
 		cfg.OCI = true
 	}
 	cfg, err = defaults.Apply(cfg, tree, entrypoint)
 	if err != nil {
-		lease.Close()
+		_ = lease.Close()
 		return cfg, nil, err
 	}
 	return cfg, lease, nil

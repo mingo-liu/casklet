@@ -18,9 +18,11 @@ import (
 )
 
 func TestTagReplacementAndPushRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	store := testStore(t)
-	first, err := store.Load(ctx, bytes.NewReader(archiveFixture(t)))
+	var (
+		ctx        = context.Background()
+		store      = testStore(t)
+		first, err = store.Load(ctx, bytes.NewReader(archiveFixture(t)))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

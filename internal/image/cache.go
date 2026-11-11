@@ -5,6 +5,7 @@ import "time"
 // DefaultCacheLimit bounds retained compressed data, excluding active staging.
 const DefaultCacheLimit int64 = 2 << 30
 
+// CacheEntry reports one retained compressed blob and its current lease state.
 type CacheEntry struct {
 	Digest         string    `json:"digest"`
 	SizeBytes      int64     `json:"size_bytes"`
@@ -13,6 +14,7 @@ type CacheEntry struct {
 	InUse          bool      `json:"in_use"`
 }
 
+// CacheReport summarizes retained compressed data and the configured capacity.
 type CacheReport struct {
 	MaxBytes         int64        `json:"max_bytes"`
 	SizeBytes        int64        `json:"size_bytes"`
@@ -21,6 +23,7 @@ type CacheReport struct {
 	Entries          []CacheEntry `json:"entries"`
 }
 
+// CachePruneResult counts cache-only cleanup without changing image snapshots.
 type CachePruneResult struct {
 	DryRun         bool   `json:"dry_run"`
 	Blobs          int    `json:"blobs"`
