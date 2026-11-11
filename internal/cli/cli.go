@@ -3,13 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/image"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 	"github.com/mingo-liu/casklet/internal/template"
 )
 
@@ -20,13 +21,13 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	var err error
 	args, err = expandFileArguments(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	args = platformArguments(args)
 	r, err := Parse(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	if r.Action == "help" {
@@ -35,7 +36,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 			_, err = fmt.Fprint(stdout, text)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 			return 125
 		}
 		return 0
@@ -58,14 +59,14 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 			report.check("engine_preparation", err)
 			return writeDoctor(report, r.JSON, stdout, stderr)
 		}
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	switch r.Action {
 	case "doctor":
 		return executeEngineDoctor(r, stdout, stderr)
 	case "login", "logout":
-		fmt.Fprintln(stderr, "casklet: registry login and logout are available only on macOS")
+		_, _ = fmt.Fprintln(stderr, "casklet: registry login and logout are available only on macOS")
 		return 125
 	case "network-create", "network-ls", "network-inspect", "network-rm":
 		return executeManagement(r, stdout, stderr)
@@ -80,12 +81,13 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 	case "image-tag", "image-push", "image-import", "image-pull", "image-ls", "image-rm", "image-prune", "image-cache-ls", "image-cache-prune", "image-cache-limit", "ps", "stop", "wait", "start", "restart", "logs", "rm", "inspect", "stats":
 		return executeManagement(r, stdout, stderr)
 	case "exec":
+		// Buffer short signal bursts during guest setup; signal.Notify drops overflow.
 		signals := make(chan os.Signal, 16)
 		signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 		defer signal.Stop(signals)
 		code, err := container.Exec(context.Background(), r.Reference, r.Exec, stdin, stdout, stderr, signals)
 		if err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
+			_, _ = fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
 			if code == 0 {
 				return 125
 			}
@@ -93,7 +95,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		return code
 	case "run":
 		if r.Config.Image != "" {
-			var lease interface{ Close() error }
+			var lease io.Closer
 			// Pulls have their own bounded, cancelable preparation period, before
 			// the shorter detached workload startup deadline begins.
 			code := manageOperation(Request{Action: "image-pull", Reference: r.Config.Image}, stderr, func(ctx context.Context) (int, error) {
@@ -104,7 +106,7 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 				return 0, err
 			})
 			if lease != nil {
-				defer lease.Close()
+				defer func() { _ = lease.Close() }()
 			}
 			if code != 0 {
 				return code
@@ -113,16 +115,16 @@ func Execute(args []string, stdin, stdout, stderr *os.File) int {
 		if r.Detach {
 			return executeManagement(r, stdout, stderr)
 		}
-		code, err := containerruntime.Run(r.Config, stdin, stdout, stderr)
+		code, err := runtime.Run(r.Config, stdin, stdout, stderr)
 		if err != nil {
-			fmt.Fprintf(stderr, "casklet: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 			if code == 0 {
 				return 125
 			}
 		}
 		return code
 	default:
-		fmt.Fprintf(stderr, "casklet: unknown command %q\n", r.Action)
+		_, _ = fmt.Fprintf(stderr, "casklet: unknown command %q\n", r.Action)
 		return 125
 	}
 }

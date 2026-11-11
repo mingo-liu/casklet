@@ -12,6 +12,8 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
+type failingWriter struct{}
+
 func TestParseCommandBoundaries(t *testing.T) {
 	r, err := Parse([]string{"run", "--rootfs", "/tmp/rootfs", "--timeout", "2s", "--", "/bin/sh", "-c", "echo '$HOME'; exit 7"})
 	if err != nil {
@@ -125,7 +127,7 @@ func TestExecRejectsInvalidArguments(t *testing.T) {
 }
 
 func TestExecTerminalOptions(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		options     []string
 		interactive bool
 		tty         bool
@@ -141,7 +143,8 @@ func TestExecTerminalOptions(t *testing.T) {
 		{[]string{"--tty=false"}, false, false},
 		{[]string{"-it", "-i=false"}, false, true},
 		{[]string{"-it", "--tty=false"}, true, false},
-	} {
+	}
+	for _, tt := range tests {
 		args := append([]string{"exec"}, tt.options...)
 		args = append(args, "worker", "--", "sh", "-it", "-ti", "--tty")
 		r, err := Parse(args)
@@ -214,19 +217,19 @@ func TestTerminalRunOptions(t *testing.T) {
 		interactive bool
 		tty         bool
 	}{
-		{"legacy stdin", nil, true, false},
-		{"short interactive", []string{"-i"}, true, false},
-		{"long interactive", []string{"--interactive"}, true, false},
-		{"short terminal", []string{"-t"}, false, true},
-		{"long terminal", []string{"--tty"}, false, true},
-		{"combined", []string{"-it"}, true, true},
-		{"reverse combined", []string{"-ti"}, true, true},
-		{"separate", []string{"-i", "-t"}, true, true},
-		{"long combined", []string{"--interactive", "--tty"}, true, true},
-		{"disabled input", []string{"--interactive=false"}, false, false},
-		{"disabled terminal input", []string{"-it", "-i=false"}, false, true},
-		{"disabled terminal", []string{"--tty=false"}, true, false},
-		{"detached", []string{"-d"}, false, false},
+		{name: "legacy stdin", options: nil, interactive: true, tty: false},
+		{name: "short interactive", options: []string{"-i"}, interactive: true, tty: false},
+		{name: "long interactive", options: []string{"--interactive"}, interactive: true, tty: false},
+		{name: "short terminal", options: []string{"-t"}, interactive: false, tty: true},
+		{name: "long terminal", options: []string{"--tty"}, interactive: false, tty: true},
+		{name: "combined", options: []string{"-it"}, interactive: true, tty: true},
+		{name: "reverse combined", options: []string{"-ti"}, interactive: true, tty: true},
+		{name: "separate", options: []string{"-i", "-t"}, interactive: true, tty: true},
+		{name: "long combined", options: []string{"--interactive", "--tty"}, interactive: true, tty: true},
+		{name: "disabled input", options: []string{"--interactive=false"}, interactive: false, tty: false},
+		{name: "disabled terminal input", options: []string{"-it", "-i=false"}, interactive: false, tty: true},
+		{name: "disabled terminal", options: []string{"--tty=false"}, interactive: true, tty: false},
+		{name: "detached", options: []string{"-d"}, interactive: false, tty: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -363,10 +366,6 @@ func TestContainerListingOutput(t *testing.T) {
 	}
 }
 
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
-
 func TestContainerListingPropagatesWriteFailure(t *testing.T) {
 	for _, asJSON := range []bool{false, true} {
 		if err := writeRecords(failingWriter{}, nil, asJSON); err == nil {
@@ -433,13 +432,14 @@ func TestCPUBoundaries(t *testing.T) {
 }
 
 func TestUserBoundaries(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		input string
 		uid   uint32
 		gid   uint32
 	}{
 		{"0", 0, 0}, {"123", 123, 123}, {"123:456", 123, 456}, {"4294967294:0", 4294967294, 0},
-	} {
+	}
+	for _, tt := range tests {
 		got, err := ParseUser(tt.input)
 		if err != nil || got.UID != tt.uid || got.GID != tt.gid {
 			t.Errorf("ParseUser(%q) = %+v, %v", tt.input, got, err)
@@ -586,3 +586,5 @@ func TestLogRetentionOptions(t *testing.T) {
 		t.Fatal("accepted foreground retention option")
 	}
 }
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }

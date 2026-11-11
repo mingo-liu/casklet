@@ -58,7 +58,7 @@ func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	t.Setenv("PATH", t.TempDir())
 	if code := Execute([]string{"help"}, os.Stdin, out, out); code != 0 {
 		t.Fatalf("help requires Lima: %d", code)
@@ -83,7 +83,7 @@ func TestMacHelpAndInvalidArgumentsDoNotStartMachine(t *testing.T) {
 
 func TestMacHostArgumentErrorsDoNotRequireLima(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	for _, tt := range []struct {
+	tests := []struct {
 		args []string
 		want string
 	}{
@@ -98,13 +98,14 @@ func TestMacHostArgumentErrorsDoNotRequireLima(t *testing.T) {
 		{[]string{"rootfs"}, "rootfs requires one destination directory"},
 		{[]string{"rootfs", ""}, "rootfs requires one destination directory"},
 		{[]string{"rootfs", "one", "two"}, "rootfs requires one destination directory"},
-	} {
+	}
+	for _, tt := range tests {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			out, err := os.CreateTemp(t.TempDir(), "output")
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer out.Close()
+			defer func() { _ = out.Close() }()
 			if code := Execute(tt.args, os.Stdin, out, out); code != 125 {
 				t.Fatalf("exit = %d; want 125", code)
 			}
@@ -125,7 +126,7 @@ func TestMacMachineInitHelpAfterOptionsDoesNotRequireLima(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	if code := Execute([]string{"machine", "init", "--cpus", "2", "--help"}, os.Stdin, out, out); code != 0 {
 		t.Fatalf("help exit = %d; want 0", code)
 	}

@@ -12,15 +12,11 @@ type CleanupError struct {
 	Err   error
 }
 
-func (err *CleanupError) Error() string { return fmt.Sprintf("cleanup %s: %v", err.Stage, err.Err) }
-func (err *CleanupError) Unwrap() error { return err.Err }
+var _ error = (*CleanupError)(nil)
 
-func cleanupFailure(stage string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &CleanupError{Stage: stage, Err: err}
-}
+func (err *CleanupError) Error() string { return fmt.Sprintf("cleanup %s: %v", err.Stage, err.Err) }
+
+func (err *CleanupError) Unwrap() error { return err.Err }
 
 // CleanupStages returns unique failure stages, including errors joined by
 // deferred cleanup. Error messages and private resource paths are excluded.
@@ -47,4 +43,11 @@ func CleanupStages(err error) []string {
 	}
 	visit(err)
 	return stages
+}
+
+func cleanupFailure(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &CleanupError{Stage: stage, Err: err}
 }

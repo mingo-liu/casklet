@@ -55,6 +55,8 @@ func argumentError(args []string, err error) error {
 	if topic != "" {
 		command = "casklet " + topic + " --help"
 	}
+	//lint:ignore ST1005 Preserve the rendered CLI help paragraph.
+	//revive:disable-next-line:error-strings
 	return fmt.Errorf("%w\nHint: run %s for usage and examples.", err, command)
 }
 

@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const scopeEnvironment = "CASKLET_SCOPE_LAUNCHED"
+const _scopeEnvironment = "CASKLET_SCOPE_LAUNCHED"
 
 // prepareLaunch replaces the CLI process so terminal descriptors, signals, and
 // workload exit codes pass through the privilege and delegation setup.
@@ -42,7 +42,7 @@ func prepareLaunch(args []string, request Request) error {
 		return nil
 	}
 	// A failed scope must report its prerequisite error rather than recurse.
-	if os.Getenv(scopeEnvironment) == "1" {
+	if os.Getenv(_scopeEnvironment) == "1" {
 		return fmt.Errorf("automatic cgroup delegation failed: %w", delegationErr)
 	}
 	if _, err := os.Stat("/run/systemd/system"); err != nil {
@@ -51,7 +51,7 @@ func prepareLaunch(args []string, request Request) error {
 	if _, err := exec.LookPath("/usr/bin/systemd-run"); err != nil {
 		return errors.New("foreground containers require /usr/bin/systemd-run")
 	}
-	if err := os.Setenv(scopeEnvironment, "1"); err != nil {
+	if err := os.Setenv(_scopeEnvironment, "1"); err != nil {
 		return err
 	}
 	scopeArgs := []string{"systemd-run"}

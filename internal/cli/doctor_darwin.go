@@ -34,8 +34,8 @@ func executeDarwinDoctor(ctx context.Context, args []string, r Request, stdin, s
 		report.check("guest_report", err)
 		return writeDoctor(report, r.JSON, stdout, stderr)
 	}
-	defer os.Remove(file.Name())
-	defer file.Close()
+	defer func() { _ = os.Remove(file.Name()) }()
+	defer func() { _ = file.Close() }()
 	code, guestErr := machine.Execute(ctx, machine.Invocation{Args: paths}, stdin, file, stderr)
 	if _, err = file.Seek(0, io.SeekStart); err == nil {
 		var guest doctorReport

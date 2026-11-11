@@ -5,12 +5,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // exec inherits blocking descriptors even when the parent's os.Pipe files are
@@ -74,8 +75,8 @@ func TestArchiveInheritedPipeCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer reader.Close()
-			defer writer.Close()
+			defer func() { _ = reader.Close() }()
+			defer func() { _ = writer.Close() }()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestArchiveInheritedPipeCancellation$")
@@ -99,8 +100,8 @@ func TestArchiveFileSetupRestoresStatusWithoutIO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	for _, file := range []*os.File{reader, writer} {
 		raw, err := file.SyscallConn()
 		if err != nil {

@@ -14,20 +14,6 @@ type memoryCredentials struct {
 	err        error
 }
 
-func (s *memoryCredentials) Get(string) (registryauth.Credential, error) { return s.credential, s.err }
-func (s *memoryCredentials) Put(c registryauth.Credential) error {
-	if s.err == nil {
-		s.credential = c
-	}
-	return s.err
-}
-func (s *memoryCredentials) Delete(registry string) error {
-	if s.err == nil && s.credential.Registry == registry {
-		s.credential = registryauth.Credential{}
-	}
-	return s.err
-}
-
 func TestLoginLogoutStoreOnlyAndFailurePreservation(t *testing.T) {
 	r, err := Parse([]string{"login", "-u", "alice", "--password-stdin", "GHCR.IO"})
 	if err != nil || r.Reference != "ghcr.io" {
@@ -59,4 +45,20 @@ func TestLoginLogoutStoreOnlyAndFailurePreservation(t *testing.T) {
 			t.Fatalf("accepted %q", args)
 		}
 	}
+}
+
+func (s *memoryCredentials) Get(string) (registryauth.Credential, error) { return s.credential, s.err }
+
+func (s *memoryCredentials) Put(c registryauth.Credential) error {
+	if s.err == nil {
+		s.credential = c
+	}
+	return s.err
+}
+
+func (s *memoryCredentials) Delete(registry string) error {
+	if s.err == nil && s.credential.Registry == registry {
+		s.credential = registryauth.Credential{}
+	}
+	return s.err
 }

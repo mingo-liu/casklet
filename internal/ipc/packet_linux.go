@@ -23,7 +23,9 @@ func FD(file *os.File) int {
 		return -1
 	}
 	fd := -1
-	_ = connection.Control(func(value uintptr) { fd = int(value) })
+	if err := connection.Control(func(value uintptr) { fd = int(value) }); err != nil {
+		return -1
+	}
 	return fd
 }
 
@@ -62,9 +64,11 @@ func Receive(conn *net.UnixConn, maxFiles int) ([]byte, []*os.File, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var data []byte
-	var files []*os.File
-	var receiveErr error
+	var (
+		data       []byte
+		files      []*os.File
+		receiveErr error
+	)
 	err = connection.Read(func(fd uintptr) bool {
 		data, files, receiveErr = ReceiveFD(int(fd), maxFiles)
 		return !errors.Is(receiveErr, unix.EAGAIN) && !errors.Is(receiveErr, unix.EWOULDBLOCK)
@@ -89,8 +93,10 @@ func ReceiveFD(fd, maxFiles int) ([]byte, []*os.File, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	var files []*os.File
-	var ancillaryErr error
+	var (
+		files        []*os.File
+		ancillaryErr error
+	)
 	for _, message := range messages {
 		if message.Header.Level != unix.SOL_SOCKET || message.Header.Type != unix.SCM_RIGHTS {
 			ancillaryErr = errors.New("unexpected exec ancillary message")
@@ -139,8 +145,10 @@ func Peer(conn *net.UnixConn) (*unix.Ucred, error) {
 	if err != nil {
 		return nil, err
 	}
-	var credential *unix.Ucred
-	var peerErr error
+	var (
+		credential *unix.Ucred
+		peerErr    error
+	)
 	err = connection.Control(func(fd uintptr) {
 		credential, peerErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 	})

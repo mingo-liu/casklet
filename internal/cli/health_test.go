@@ -33,7 +33,9 @@ func TestHealthFlagsAndConfig(t *testing.T) {
 		t.Fatalf("disable: %+v %v", r, err)
 	}
 	file := filepath.Join(t.TempDir(), "run.json")
-	os.WriteFile(file, []byte(`{"image":"redis:8","detach":true,"health-cmd":"true","health-interval":"1s","health-retries":"2"}`), 0600)
+	if err := os.WriteFile(file, []byte(`{"image":"redis:8","detach":true,"health-cmd":"true","health-interval":"1s","health-retries":"2"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r, err = Parse([]string{"run", "--config", file, "--health-retries", "3"})
 	if err != nil || r.Config.Healthcheck.RetriesValue() != 3 {
 		t.Fatalf("file health: %+v %v", r, err)

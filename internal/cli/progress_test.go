@@ -11,6 +11,8 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
+type failingProgressWriter struct{ calls int }
+
 func TestProgressOptionsAndGuestModePreserveCommands(t *testing.T) {
 	for _, args := range [][]string{
 		{"image", "pull", "redis:8"},
@@ -99,13 +101,6 @@ func TestTTYProgressRewritesBoundedFrameAndFinishesOnFailure(t *testing.T) {
 	}
 }
 
-type failingProgressWriter struct{ calls int }
-
-func (w *failingProgressWriter) Write([]byte) (int, error) {
-	w.calls++
-	return 0, errors.New("closed output")
-}
-
 func TestProgressStopsWritingAfterOutputFailure(t *testing.T) {
 	writer := &failingProgressWriter{}
 	p := newPullProgress(writer, "plain")
@@ -124,4 +119,9 @@ func TestCachedLayerProgressReportsReuseWithoutNetworkBytes(t *testing.T) {
 			t.Fatalf("cached layer progress: %q", line)
 		}
 	}
+}
+
+func (w *failingProgressWriter) Write([]byte) (int, error) {
+	w.calls++
+	return 0, errors.New("closed output")
 }

@@ -4,6 +4,7 @@ package cli
 
 import (
 	"errors"
+
 	"github.com/mingo-liu/casklet/internal/storage"
 )
 

@@ -17,7 +17,7 @@ func TestMetricsFailuresAreIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &MetricsReader{dir: file}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	write := func(name, text string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0600); err != nil {
@@ -69,7 +69,7 @@ func TestOpenMetricsRejectsHostFilesAndSymlinks(t *testing.T) {
 	for _, path := range []string{dir, link, filepath.Join(dir, "missing")} {
 		reader, err := OpenMetrics(path)
 		if err == nil {
-			reader.Close()
+			_ = reader.Close()
 			t.Fatalf("accepted unsafe metrics directory %q", path)
 		}
 	}
@@ -88,7 +88,7 @@ func TestMetricsReaderPinsOneDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &MetricsReader{dir: file}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	if err := os.Rename(dir, dir+"-old"); err != nil {
 		t.Fatal(err)
 	}

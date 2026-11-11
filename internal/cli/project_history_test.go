@@ -23,7 +23,9 @@ func TestRestoreDeploymentPinsImagesAndKeepsExpandedEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(file)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
 	id := "sha256:" + strings.Repeat("a", 64)
 	d := project.Deployment{Revision: 1, CreatedAt: time.Now(), Plan: plan, Images: map[string]string{"app": id}}
 	restored, err := restoreDeployment(d)
@@ -39,13 +41,15 @@ func TestRestoreDeploymentPinsImagesAndKeepsExpandedEnvironment(t *testing.T) {
 		t.Fatal("snapshot mutated or spec not pinned")
 	}
 	invalid := d
-	invalid.Images = map[string]string{}
+	invalid.Images = make(map[string]string)
 	if _, err := restoreDeployment(invalid); err == nil {
 		t.Fatal("missing image identity accepted")
 	}
 	saved, _ := json.Marshal(d)
 	var edited project.Deployment
-	json.Unmarshal(saved, &edited)
+	if err := json.Unmarshal(saved, &edited); err != nil {
+		t.Fatal(err)
+	}
 	edited.Plan.Services[0].Args = append([]string{"run", "--env-file", "/private/missing"}, edited.Plan.Services[0].Args[1:]...)
 	if _, err := restoreDeployment(edited); err == nil || !strings.Contains(err.Error(), "unexpanded") {
 		t.Fatalf("reopened saved file: %v", err)
@@ -71,12 +75,14 @@ func TestRestoreDeploymentPinsImagesAndKeepsExpandedEnvironment(t *testing.T) {
 func TestRestoreDefaultNetworkTaskAndEmptyEnvironment(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "project.json")
 	data := `{"name":"demo","services":{"migrate":{"task":true,"run":{"rootfs":"/template","command":["/bin/true"]}},"app":{"depends-on":{"migrate":"completed"},"run":{"rootfs":"/template","network-alias":["web","backend"],"command":["/bin/sleep","300"]}}}}`
-	os.WriteFile(file, []byte(data), 0600)
+	if err := os.WriteFile(file, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
 	plan, err := readProjectPlan(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = restoreDeployment(project.Deployment{Plan: plan, Images: map[string]string{}})
+	_, err = restoreDeployment(project.Deployment{Plan: plan, Images: make(map[string]string)})
 	if err != nil {
 		t.Fatal(err)
 	}

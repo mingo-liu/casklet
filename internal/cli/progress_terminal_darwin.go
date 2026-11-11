@@ -3,8 +3,9 @@
 package cli
 
 import (
-	"golang.org/x/sys/unix"
 	"os"
+
+	"golang.org/x/sys/unix"
 )
 
 func isProgressTerminal(file *os.File) bool {

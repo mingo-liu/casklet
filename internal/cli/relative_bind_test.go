@@ -54,7 +54,7 @@ func TestConfigRelativeBindStillRejectsUnsafeMounts(t *testing.T) {
 	for _, mount := range []string{"type=bind,source=,target=/data", "type=bind,source=./data,target=relative", "type=bind,source=../../proc,target=/data", "type=bind,source=./data,target=/proc", "type=bind,source=./data,source=./other,target=/data"} {
 		run := map[string]any{"rootfs": "/template", "mount": []string{mount}, "command": []string{"true"}}
 		data, _ := json.Marshal(run)
-		if _, _, err := configDataArguments(data, "/work/config/run.json", map[string]bool{}); err == nil {
+		if _, _, err := configDataArguments(data, "/work/config/run.json", make(map[string]bool)); err == nil {
 			t.Fatalf("accepted unsafe mount: %s", mount)
 		}
 	}
@@ -74,7 +74,7 @@ func TestConfigRelativeBindStillRejectsUnsafeMounts(t *testing.T) {
 		}
 	}
 	data := []byte(`{"rootfs":"data","mount":["type=bind,source=./data/child,target=/data"],"command":["true"]}`)
-	options, command, err := configDataArguments(data, filepath.Join(t.TempDir(), "run.json"), map[string]bool{})
+	options, command, err := configDataArguments(data, filepath.Join(t.TempDir(), "run.json"), make(map[string]bool))
 	if err != nil {
 		t.Fatal(err)
 	}

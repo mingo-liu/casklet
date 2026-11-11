@@ -7,30 +7,6 @@ import (
 	"testing"
 )
 
-func helpExecution(t *testing.T, args []string) (string, string, int) {
-	t.Helper()
-	out, err := os.CreateTemp(t.TempDir(), "stdout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer out.Close()
-	diagnostic, err := os.CreateTemp(t.TempDir(), "stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer diagnostic.Close()
-	code := Execute(args, os.Stdin, out, diagnostic)
-	output, err := os.ReadFile(out.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	errors, err := os.ReadFile(diagnostic.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(output), string(errors), code
-}
-
 func TestScopedHelpWorksWithoutRuntimeAndMatchesNamedHelp(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, topic := range []string{
@@ -218,4 +194,28 @@ func TestProjectPreviewHelpDescribesRedactedChangesAndExplicitApply(t *testing.T
 			}
 		}
 	}
+}
+
+func helpExecution(t *testing.T, args []string) (string, string, int) {
+	t.Helper()
+	out, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	diagnostic, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = diagnostic.Close() }()
+	code := Execute(args, os.Stdin, out, diagnostic)
+	output, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	errors, err := os.ReadFile(diagnostic.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(output), string(errors), code
 }

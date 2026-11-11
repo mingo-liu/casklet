@@ -14,7 +14,7 @@ import (
 )
 
 func TestUnifiedPath(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name, input, want string
 	}{
 		{"scope", "0::/system.slice/run-123.scope\n", "/system.slice/run-123.scope"},
@@ -26,17 +26,18 @@ func TestUnifiedPath(t *testing.T) {
 		{"empty", "0::\n", ""},
 		{"v1", "4:memory:/old\n", ""},
 		{"duplicate", "0::/first\n0::/second\n", ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := unifiedPath(tc.input)
-			if tc.want == "" {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := unifiedPath(tt.input)
+			if tt.want == "" {
 				if err == nil {
 					t.Fatalf("unsafe membership accepted: %q", got)
 				}
 				return
 			}
-			if err != nil || got != tc.want {
-				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
 			}
 		})
 	}
@@ -153,7 +154,7 @@ func TestMissingCPUControlNeverCreatesFile(t *testing.T) {
 }
 
 func TestOptionalCPUController(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		controllers string
 		quota       int64
 		missing     string
@@ -164,14 +165,15 @@ func TestOptionalCPUController(t *testing.T) {
 		{"memory pids", 25000, "cpu"},
 		{"cpu pids", 0, "memory"},
 		{"cpu memory", 25000, "pids"},
-	} {
-		err := checkControllers(tc.controllers, tc.quota)
-		if tc.missing == "" {
+	}
+	for _, tt := range tests {
+		err := checkControllers(tt.controllers, tt.quota)
+		if tt.missing == "" {
 			if err != nil {
 				t.Fatalf("unexpected controller error: %v", err)
 			}
-		} else if err == nil || !strings.Contains(err.Error(), tc.missing) {
-			t.Fatalf("missing %s was not diagnosed: %v", tc.missing, err)
+		} else if err == nil || !strings.Contains(err.Error(), tt.missing) {
+			t.Fatalf("missing %s was not diagnosed: %v", tt.missing, err)
 		}
 	}
 }
@@ -196,18 +198,19 @@ func TestGroupControlsAndOOM(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "cgroup.kill")); string(data) != "1" {
 		t.Fatalf("unexpected cgroup kill write: %q", data)
 	}
-	for _, tc := range []struct {
+	tests := []struct {
 		data string
 		want bool
 	}{
 		{"oom 1\noom_kill 0\n", false},
 		{"oom_kill 1\n", true},
 		{"oom_kill 0\noom_group_kill 1\n", true},
-	} {
-		putControl(t, dir, "memory.events", tc.data)
+	}
+	for _, tt := range tests {
+		putControl(t, dir, "memory.events", tt.data)
 		got, err := g.OOMKilled()
-		if err != nil || got != tc.want {
-			t.Fatalf("OOM result for %q: got %v, %v", tc.data, got, err)
+		if err != nil || got != tt.want {
+			t.Fatalf("OOM result for %q: got %v, %v", tt.data, got, err)
 		}
 	}
 	putControl(t, dir, "memory.events", "oom 1\n")
