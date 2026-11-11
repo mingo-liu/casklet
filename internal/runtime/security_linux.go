@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -27,7 +27,7 @@ func installSeccomp(profile string) error {
 	}
 	program := unix.SockFprog{Len: uint16(len(filters)), Filter: &filters[0]}
 	result, _, errno := unix.RawSyscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&program)))
-	goruntime.KeepAlive(filters)
+	runtime.KeepAlive(filters)
 	if errno != 0 {
 		return fmt.Errorf("install seccomp filter on all threads: %w", errno)
 	}
@@ -39,7 +39,7 @@ func installSeccomp(profile string) error {
 
 func seccompFilter() ([]unix.SockFilter, error) {
 	var arch uint32
-	switch goruntime.GOARCH {
+	switch runtime.GOARCH {
 	case "amd64":
 		arch = unix.AUDIT_ARCH_X86_64
 	case "arm64":
@@ -56,7 +56,7 @@ func seccompFilter() ([]unix.SockFilter, error) {
 	}
 	denied := uint32(unix.SECCOMP_RET_ERRNO | uint32(unix.EPERM))
 	filters := []unix.SockFilter{load(4), equal(arch, 1, 0), ret(unix.SECCOMP_RET_KILL_PROCESS), load(0)}
-	if goruntime.GOARCH == "amd64" {
+	if runtime.GOARCH == "amd64" {
 		// x32 shares the x86-64 audit architecture but has another syscall ABI.
 		filters = append(filters, unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K, K: 0x40000000, Jf: 1}, ret(unix.SECCOMP_RET_KILL_PROCESS))
 	}
@@ -77,14 +77,14 @@ func seccompFilter() ([]unix.SockFilter, error) {
 	}
 	// clone3 arguments are behind a pointer; ENOSYS permits libc's clone fallback.
 	filters = append(filters, equal(unix.SYS_CLONE3, 0, 1), ret(unix.SECCOMP_RET_ERRNO|uint32(unix.ENOSYS)))
-	mask := uint32(namespaceFlags | unix.CLONE_NEWUSER | unix.CLONE_NEWCGROUP | unix.CLONE_PTRACE)
+	mask := uint32(_namespaceFlags | unix.CLONE_NEWUSER | unix.CLONE_NEWCGROUP | unix.CLONE_PTRACE)
 	filters = append(filters, equal(unix.SYS_CLONE, 0, 3), load(16), unix.SockFilter{Code: unix.BPF_JMP | unix.BPF_JSET | unix.BPF_K, K: mask, Jf: 1}, ret(denied), load(0))
 	filters = append(filters, equal(unix.SYS_IOCTL, 0, 4), load(24), equal(unix.TIOCSTI, 1, 0), equal(unix.TIOCLINUX, 0, 1), ret(denied), ret(unix.SECCOMP_RET_ALLOW))
 	return filters, nil
 }
 
 func namespaceAttributes(cfg config.Config) *syscall.SysProcAttr {
-	attributes := &syscall.SysProcAttr{Cloneflags: namespaceFlags, Setpgid: true}
+	attributes := &syscall.SysProcAttr{Cloneflags: _namespaceFlags, Setpgid: true}
 	if cfg.UserNS {
 		attributes.Cloneflags |= unix.CLONE_NEWUSER
 		attributes.GidMappingsEnableSetgroups = !cfg.Rootless

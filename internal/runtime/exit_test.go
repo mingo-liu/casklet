@@ -3,23 +3,24 @@ package runtime
 import "testing"
 
 func TestExitStatusKeepsObservedCausesSeparate(t *testing.T) {
-	for _, tc := range []struct {
+	tests := []struct {
 		name    string
 		status  ExitStatus
 		started bool
 		want    string
 	}{
-		{"startup", ExitStatus{}, false, "startup_failed"},
-		{"runtime", ExitStatus{}, true, "runtime_error"},
-		{"command", ExitStatus{ExitReason: "exited"}, true, "exited"},
-		{"timeout", ExitStatus{ExitReason: "timeout"}, true, "timeout"},
-		{"stop", ExitStatus{ExitReason: "stopped"}, true, "stopped"},
-		{"oom-after-timeout", ExitStatus{ExitReason: "timeout", OOMKilled: true}, true, "oom_killed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			status := tc.status
-			status.finish(tc.started)
-			if status.ExitReason != tc.want || status.OOMKilled != tc.status.OOMKilled {
+		{name: "startup", status: ExitStatus{}, started: false, want: "startup_failed"},
+		{name: "runtime", status: ExitStatus{}, started: true, want: "runtime_error"},
+		{name: "command", status: ExitStatus{ExitReason: "exited"}, started: true, want: "exited"},
+		{name: "timeout", status: ExitStatus{ExitReason: "timeout"}, started: true, want: "timeout"},
+		{name: "stop", status: ExitStatus{ExitReason: "stopped"}, started: true, want: "stopped"},
+		{name: "oom-after-timeout", status: ExitStatus{ExitReason: "timeout", OOMKilled: true}, started: true, want: "oom_killed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := tt.status
+			status.finish(tt.started)
+			if status.ExitReason != tt.want || status.OOMKilled != tt.status.OOMKilled {
 				t.Fatalf("result=%+v", status)
 			}
 		})

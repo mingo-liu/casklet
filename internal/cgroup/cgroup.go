@@ -21,6 +21,43 @@ type Group struct {
 	path string
 }
 
+var _execChildName = regexp.MustCompile(`^exec-[0-9a-f]{24}$`)
+
+// RemoveEmpty removes verified empty execution children before their workload.
+// This also handles abandoned child groups after a supervisor is lost.
+func RemoveEmpty(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !_execChildName.MatchString(entry.Name()) {
+			return fmt.Errorf("preserve unexpected cgroup child: %s", entry.Name())
+		}
+		child := filepath.Join(dir, entry.Name())
+		counters, err := readCounters(filepath.Join(child, "cgroup.events"))
+		if err != nil {
+			return err
+		}
+		if populated, ok := counters["populated"]; !ok || populated != 0 {
+			return fmt.Errorf("preserve populated exec cgroup: %s", child)
+		}
+		if err := os.Remove(child); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove exec cgroup: %w", err)
+		}
+	}
+	if err := os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove cgroup %s: %w", dir, err)
+	}
+	return nil
+}
+
 // Path returns the host cgroup directory for state records.
 func (g *Group) Path() string { return g.path }
 
@@ -87,43 +124,6 @@ func (g *Group) Close() error {
 	return RemoveEmpty(g.path)
 }
 
-var execChildName = regexp.MustCompile(`^exec-[0-9a-f]{24}$`)
-
-// RemoveEmpty removes verified empty execution children before their workload.
-// This also handles abandoned child groups after a supervisor is lost.
-func RemoveEmpty(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if !execChildName.MatchString(entry.Name()) {
-			return fmt.Errorf("preserve unexpected cgroup child: %s", entry.Name())
-		}
-		child := filepath.Join(dir, entry.Name())
-		counters, err := readCounters(filepath.Join(child, "cgroup.events"))
-		if err != nil {
-			return err
-		}
-		if populated, ok := counters["populated"]; !ok || populated != 0 {
-			return fmt.Errorf("preserve populated exec cgroup: %s", child)
-		}
-		if err := os.Remove(child); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove exec cgroup: %w", err)
-		}
-	}
-	if err := os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove cgroup %s: %w", dir, err)
-	}
-	return nil
-}
-
 func writeControl(filename, value string) error {
 	// Never create an ordinary file when a required kernel control is missing.
 	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC, 0)
@@ -176,13 +176,16 @@ func configureLimits(dir string, memory, pids, cpuQuota int64, write func(string
 		return err
 	}
 	settings := []struct{ name, value string }{
-		{"memory.max", strconv.FormatInt(memory, 10)},
-		{"memory.swap.max", "0"},
-		{"memory.oom.group", "1"},
-		{"pids.max", strconv.FormatInt(pids, 10)},
+		{name: "memory.max", value: strconv.FormatInt(memory, 10)},
+		{name: "memory.swap.max", value: "0"},
+		{name: "memory.oom.group", value: "1"},
+		{name: "pids.max", value: strconv.FormatInt(pids, 10)},
 	}
 	if cpuQuota > 0 {
-		settings = append(settings, struct{ name, value string }{"cpu.max", fmt.Sprintf("%d %d", cpuQuota, config.CPUPeriod)})
+		settings = append(settings, struct{ name, value string }{
+			name:  "cpu.max",
+			value: fmt.Sprintf("%d %d", cpuQuota, config.CPUPeriod),
+		})
 	}
 	for _, setting := range settings {
 		if err := write(filepath.Join(dir, setting.name), setting.value); err != nil {

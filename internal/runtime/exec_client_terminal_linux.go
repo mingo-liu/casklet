@@ -9,6 +9,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type execTerminalIO struct {
+	bridge *terminalBridge
+	stdout *os.File
+}
+
+var _ ExecTerminalIO = (*execTerminalIO)(nil)
+
 // CheckExecTerminal rejects redirected interactive input before starting a job.
 func CheckExecTerminal(stdin *os.File) error {
 	if _, err := unix.IoctlGetTermios(terminalFD(stdin), unix.TCGETS); err != nil {
@@ -34,10 +41,6 @@ func StartExecTerminal(master, stdin, stdout *os.File, interactive bool) (ExecTe
 	return &execTerminalIO{bridge: bridge, stdout: stdout}, nil
 }
 
-type execTerminalIO struct {
-	bridge *terminalBridge
-	stdout *os.File
-}
-
 func (terminal *execTerminalIO) Errors() <-chan error { return terminal.bridge.errors }
-func (terminal *execTerminalIO) Close() error         { return terminal.bridge.close(terminal.stdout) }
+
+func (terminal *execTerminalIO) Close() error { return terminal.bridge.close(terminal.stdout) }
