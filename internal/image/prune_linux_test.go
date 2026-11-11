@@ -11,10 +11,12 @@ import (
 )
 
 func TestPruneSkipsLeasesAndReferencesAndRechecksPreview(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-	source := testTemplate(t)
-	first, err := s.Import(ctx, source)
+	var (
+		s          = testStore(t)
+		ctx        = context.Background()
+		source     = testTemplate(t)
+		first, err = s.Import(ctx, source)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestPruneSkipsLeasesAndReferencesAndRechecksPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	preview, err := s.Prune(ctx, true, unused)
 	if err != nil || len(preview) != 1 || preview[0].ID != second.ID {
 		t.Fatalf("preview %+v %v", preview, err)
@@ -52,10 +54,13 @@ func TestPruneSkipsLeasesAndReferencesAndRechecksPreview(t *testing.T) {
 		t.Fatal("removed leased image", err)
 	}
 }
+
 func TestPrunePreservesImagesWhenReferenceChecksFail(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-	r, err := s.Import(ctx, testTemplate(t))
+	var (
+		s      = testStore(t)
+		ctx    = context.Background()
+		r, err = s.Import(ctx, testTemplate(t))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,9 +14,11 @@ import (
 	"github.com/mingo-liu/casklet/internal/rootfs"
 )
 
-const maxLayerBytes int64 = 4 << 30
-const maxImageBytes int64 = 16 << 30
-const maxLayerEntries = 1000000
+const (
+	_maxLayerBytes   int64 = 4 << 30
+	_maxImageBytes   int64 = 16 << 30
+	_maxLayerEntries       = 1000000
+)
 
 func archivePath(name string) (string, error) {
 	if name == "" || strings.HasPrefix(name, "/") || strings.ContainsRune(name, 0) {
@@ -54,7 +56,7 @@ func walkLayer(ctx context.Context, archive *os.File, visit func(*tar.Header, *t
 		if err := rejectSparseLayer(header); err != nil {
 			return err
 		}
-		if count >= maxLayerEntries {
+		if count >= _maxLayerEntries {
 			return errors.New("image layer exceeds entry limit")
 		}
 		name, err := archivePath(header.Name)
@@ -92,7 +94,7 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File, progress .
 				return err
 			}
 			entries, readErr := f.ReadDir(-1)
-			f.Close()
+			_ = f.Close()
 			if readErr != nil {
 				return readErr
 			}
@@ -117,8 +119,10 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File, progress .
 		uid, gid int
 		mode     fs.FileMode
 	}
-	var directories []metadata
-	seen := map[string]bool{}
+	var (
+		directories []metadata
+		seen        = make(map[string]bool)
+	)
 	type hardlink struct{ name, target string }
 	var links []hardlink
 	err = walkLayer(ctx, archive, func(h *tar.Header, reader *tar.Reader) error {
@@ -156,13 +160,14 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File, progress .
 			if err := root.MkdirAll(name, 0755); err != nil {
 				return err
 			}
-			directories = append(directories, metadata{name, h.Uid, h.Gid, mode})
+			directories = append(directories, metadata{name: name, uid: h.Uid, gid: h.Gid, mode: mode})
 			return nil
 		}
 		if err := root.RemoveAll(name); err != nil {
 			return err
 		}
 		switch h.Typeflag {
+		//lint:ignore SA1019 Preserve support for the historical NUL regular-file flag.
 		case tar.TypeReg, tar.TypeRegA:
 			f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 			if err != nil {
@@ -196,7 +201,7 @@ func applyLayer(ctx context.Context, root *os.Root, archive *os.File, progress .
 			}
 			info, err := root.Lstat(resolved)
 			if errors.Is(err, os.ErrNotExist) {
-				links = append(links, hardlink{name, target})
+				links = append(links, hardlink{name: name, target: target})
 				return nil
 			}
 			if err != nil {

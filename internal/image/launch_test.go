@@ -11,9 +11,11 @@ import (
 )
 
 func TestLaunchDefaultsAndOverrides(t *testing.T) {
-	defaults := LaunchConfig{Entrypoint: []string{"/entry"}, Cmd: []string{"server", "--default"}, Env: []string{"PATH=/usr/local/bin:/usr/bin", "COLOR=blue"}, Workdir: "/data", User: "1000:1001"}
-	base := config.Config{Image: "sha256:" + strings.Repeat("a", 64), Env: []string{"COLOR=red"}}
-	got, err := defaults.Apply(base, t.TempDir(), nil)
+	var (
+		defaults = LaunchConfig{Entrypoint: []string{"/entry"}, Cmd: []string{"server", "--default"}, Env: []string{"PATH=/usr/local/bin:/usr/bin", "COLOR=blue"}, Workdir: "/data", User: "1000:1001"}
+		base     = config.Config{Image: "sha256:" + strings.Repeat("a", 64), Env: []string{"COLOR=red"}}
+		got, err = defaults.Apply(base, t.TempDir(), nil)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +98,10 @@ func TestNormalizeImageReferences(t *testing.T) {
 }
 
 func TestImageStopSignalDefaultAndOverride(t *testing.T) {
-	defaults := LaunchConfig{Cmd: []string{"/server"}, StopSignal: "SIGUSR1"}
-	got, err := defaults.Apply(config.Config{}, t.TempDir(), nil)
+	var (
+		defaults = LaunchConfig{Cmd: []string{"/server"}, StopSignal: "SIGUSR1"}
+		got, err = defaults.Apply(config.Config{}, t.TempDir(), nil)
+	)
 	if err != nil || got.StoppingSignal() != 10 {
 		t.Fatalf("default %+v %v", got, err)
 	}

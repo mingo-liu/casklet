@@ -15,8 +15,10 @@ import (
 )
 
 func TestImagePrefixesKeepLeasesAndCanonicalReferenceChecks(t *testing.T) {
-	store, ctx := testStore(t), context.Background()
-	record, err := store.Import(ctx, testTemplate(t))
+	var (
+		store, ctx  = testStore(t), context.Background()
+		record, err = store.Import(ctx, testTemplate(t))
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +33,10 @@ func TestImagePrefixesKeepLeasesAndCanonicalReferenceChecks(t *testing.T) {
 			t.Fatalf("acquire %s: %+v %s %v", ref, got, tree, err)
 		}
 		if err := store.Remove(ctx, hex[:12], unused); !errors.Is(err, ErrInUse) {
-			lease.Close()
+			_ = lease.Close()
 			t.Fatalf("short ID bypassed live lease: %v", err)
 		}
-		lease.Close()
+		_ = lease.Close()
 	}
 	checks := 0
 	referenced := func(_ context.Context, id string) (bool, error) {
@@ -55,27 +57,13 @@ func TestImagePrefixesKeepLeasesAndCanonicalReferenceChecks(t *testing.T) {
 	}
 }
 
-func metadataImage(t *testing.T, store *Store, id string) Record {
-	t.Helper()
-	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC()}
-	if err := os.Mkdir(store.path(id), 0700); err != nil {
-		t.Fatal(err)
-	}
-	data, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store.path(id), "image.json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	return record
-}
-
 func TestImageAmbiguityRefusesAcquisitionAndDeletion(t *testing.T) {
-	store, ctx := testStore(t), context.Background()
-	prefix := "406e742c72ac"
-	first := metadataImage(t, store, "sha256:"+prefix+strings.Repeat("a", 52))
-	second := metadataImage(t, store, "sha256:"+prefix+strings.Repeat("b", 52))
+	var (
+		store, ctx = testStore(t), context.Background()
+		prefix     = "406e742c72ac"
+		first      = metadataImage(t, store, "sha256:"+prefix+strings.Repeat("a", 52))
+		second     = metadataImage(t, store, "sha256:"+prefix+strings.Repeat("b", 52))
+	)
 	for _, ref := range []string{prefix, prefix[:1], "sha256:" + prefix} {
 		if _, err := store.Resolve(ctx, ref); !errors.Is(err, ErrAmbiguousID) {
 			t.Fatalf("ambiguous resolve %s: %v", ref, err)
@@ -110,4 +98,20 @@ func TestImageAmbiguityRefusesAcquisitionAndDeletion(t *testing.T) {
 	if got, err := store.Resolve(ctx, prefix); err != nil || got.ID != second.ID {
 		t.Fatalf("exact cached name did not win: %+v %v", got, err)
 	}
+}
+
+func metadataImage(t *testing.T, store *Store, id string) Record {
+	t.Helper()
+	record := Record{ID: id, Architecture: runtime.GOARCH, CreatedAt: time.Now().UTC()}
+	if err := os.Mkdir(store.path(id), 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.path(id), "image.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return record
 }

@@ -13,17 +13,21 @@ import (
 )
 
 func TestImageHealthExtensionMergeAndIdentity(t *testing.T) {
-	raw := []byte(`{"config":{"Healthcheck":{"Test":["CMD-SHELL","test -f ready"],"Interval":2000000000,"Timeout":1000000000,"StartPeriod":4000000000,"StartInterval":100000000,"Retries":2}}}`)
-	health, err := imageHealthcheck(raw)
+	var (
+		raw         = []byte(`{"config":{"Healthcheck":{"Test":["CMD-SHELL","test -f ready"],"Interval":2000000000,"Timeout":1000000000,"StartPeriod":4000000000,"StartInterval":100000000,"Retries":2}}}`)
+		health, err = imageHealthcheck(raw)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if health.StartIntervalValue() != 100*time.Millisecond || health.StartPeriodValue() != 4*time.Second {
 		t.Fatalf("extension: %+v", health)
 	}
-	defaults := LaunchConfig{Cmd: []string{"/server"}, Healthcheck: health, Shell: []string{"/bin/custom-sh", "-c"}}
-	interval := time.Second
-	zero := time.Duration(0)
+	var (
+		defaults = LaunchConfig{Cmd: []string{"/server"}, Healthcheck: health, Shell: []string{"/bin/custom-sh", "-c"}}
+		interval = time.Second
+		zero     = time.Duration(0)
+	)
 	cfg, err := defaults.Apply(config.Config{Healthcheck: &config.HealthConfig{Interval: &interval, StartPeriod: &zero}}, t.TempDir(), nil)
 	if err != nil || cfg.Healthcheck.StartPeriodValue() != 0 || cfg.Healthcheck.TimeoutValue() != time.Second || !reflect.DeepEqual(cfg.Healthcheck.Command(), []string{"/bin/custom-sh", "-c", "test -f ready"}) {
 		t.Fatalf("apply: %+v %v", cfg, err)
@@ -36,7 +40,9 @@ func TestImageHealthExtensionMergeAndIdentity(t *testing.T) {
 		t.Fatal("accepted options without test")
 	}
 	tree := t.TempDir()
-	os.WriteFile(filepath.Join(tree, "app"), []byte("same"), 0755)
+	if err := os.WriteFile(filepath.Join(tree, "app"), []byte("same"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	before, _, err := Identity(context.Background(), tree, "arm64", &defaults)
 	if err != nil {
 		t.Fatal(err)

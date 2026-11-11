@@ -16,32 +16,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func cacheFixture(t *testing.T, store *Store) ([]*cachedBlob, string) {
-	t.Helper()
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "a", body: "first"}), layerBytes(t, tarEntry{name: "b", body: "second"}), layerBytes(t, tarEntry{name: "c", body: "third"}))
-	layers, err := img.Layers()
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest, err := img.Manifest()
-	if err != nil {
-		t.Fatal(err)
-	}
-	blobs, err := store.downloadBlobs(context.Background(), layers, manifest.Layers, "localhost/cache-policy:v1", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { closeBlobs(blobs) })
-	dir, err := store.blobDirectory(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return blobs, dir
-}
-
 func TestCachePolicyDefaultsAndPersistsAcrossStores(t *testing.T) {
-	store := testStore(t)
-	report, err := store.CacheUsage(context.Background())
+	var (
+		store       = testStore(t)
+		report, err = store.CacheUsage(context.Background())
+	)
 	if err != nil || report.MaxBytes != DefaultCacheLimit || report.SizeBytes != 0 || report.Entries == nil {
 		t.Fatalf("default: %+v %v", report, err)
 	}
@@ -65,9 +44,11 @@ func TestCachePolicyDefaultsAndPersistsAcrossStores(t *testing.T) {
 }
 
 func TestCacheEvictionUsesVerifiedHitsAndPreservesActiveLeases(t *testing.T) {
-	store := testStore(t)
-	blobs, dir := cacheFixture(t, store)
-	var total int64
+	var (
+		store      = testStore(t)
+		blobs, dir = cacheFixture(t, store)
+		total      int64
+	)
 	for i, blob := range blobs {
 		total += blob.descriptor.Size
 		old := time.Now().Add(time.Duration(i-3) * time.Hour)
@@ -89,7 +70,7 @@ func TestCacheEvictionUsesVerifiedHitsAndPreservesActiveLeases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hit.Close()
+	_ = hit.Close()
 	limit := total - blobs[1].descriptor.Size
 	closeBlobs(blobs)
 	report, err = store.SetCacheLimit(context.Background(), limit)
@@ -146,7 +127,7 @@ func TestPullCompletionEnforcesCapacityWithoutRemovingImages(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer lease.Close()
+				defer func() { _ = lease.Close() }()
 				if data, err := os.ReadFile(filepath.Join(tree, "app")); err != nil || string(data) != "still runnable" {
 					t.Fatalf("image lost after eviction: %q %v", data, err)
 				}
@@ -160,9 +141,11 @@ func TestPullCompletionEnforcesCapacityWithoutRemovingImages(t *testing.T) {
 }
 
 func TestIndependentCachePruneReportsPreviewAndPreservesImageLease(t *testing.T) {
-	store := testStore(t)
-	img := fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "retained image"}))
-	record, err := store.pullImage(context.Background(), "localhost/prune-cache:v1", img)
+	var (
+		store       = testStore(t)
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "app", body: "retained image"}))
+		record, err = store.pullImage(context.Background(), "localhost/prune-cache:v1", img)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +153,7 @@ func TestIndependentCachePruneReportsPreviewAndPreservesImageLease(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	manifest, _ := img.Manifest()
 	dir, err := store.blobDirectory(false)
 	if err != nil {
@@ -200,15 +183,17 @@ func TestIndependentCachePruneReportsPreviewAndPreservesImageLease(t *testing.T)
 }
 
 func TestCacheManagementSkipsBlockedDownloadsAndDoesNotHoldMetadataLock(t *testing.T) {
-	store := testStore(t)
-	img, control := controlledImage(t, 1)
+	var (
+		store        = testStore(t)
+		img, control = controlledImage(t, 1)
+	)
 	t.Cleanup(func() { close(control.gates[0]) })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	results := make(chan pullResult, 1)
 	go func() {
 		record, err := store.pullImage(ctx, "localhost/blocked-cache:v1", img)
-		results <- pullResult{record, err}
+		results <- pullResult{record: record, err: err}
 	}()
 	select {
 	case <-control.started:
@@ -235,9 +220,11 @@ func TestCacheManagementSkipsBlockedDownloadsAndDoesNotHoldMetadataLock(t *testi
 func TestCachePolicyRejectsUnsafeAndMalformedArtifacts(t *testing.T) {
 	for _, kind := range []string{"symlink", "hardlink", "fifo", "public", "unknown field", "negative", "missing", "duplicate"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
-			path := filepath.Join(store.root, ".cache-policy")
-			outside := filepath.Join(t.TempDir(), "keep")
+			var (
+				store   = testStore(t)
+				path    = filepath.Join(store.root, ".cache-policy")
+				outside = filepath.Join(t.TempDir(), "keep")
+			)
 			if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -283,12 +270,14 @@ func TestCachePolicyRejectsUnsafeAndMalformedArtifacts(t *testing.T) {
 }
 
 func TestCacheManagementLockWaitHonorsCancellation(t *testing.T) {
-	store := testStore(t)
-	lock, err := store.cacheLock(context.Background())
+	var (
+		store     = testStore(t)
+		lock, err = store.cacheLock(context.Background())
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	if _, err := cleanupPeer(t, store).PruneCache(ctx, false); !errors.Is(err, context.DeadlineExceeded) {
@@ -315,4 +304,29 @@ func TestUnlimitedCacheRetainsBlobs(t *testing.T) {
 			t.Fatal(entry)
 		}
 	}
+}
+
+func cacheFixture(t *testing.T, store *Store) ([]*cachedBlob, string) {
+	t.Helper()
+	var (
+		img         = fixtureImage(t, runtime.GOARCH, layerBytes(t, tarEntry{name: "a", body: "first"}), layerBytes(t, tarEntry{name: "b", body: "second"}), layerBytes(t, tarEntry{name: "c", body: "third"}))
+		layers, err = img.Layers()
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := img.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := store.downloadBlobs(context.Background(), layers, manifest.Layers, "localhost/cache-policy:v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeBlobs(blobs) })
+	dir, err := store.blobDirectory(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blobs, dir
 }

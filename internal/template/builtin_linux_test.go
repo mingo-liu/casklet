@@ -18,75 +18,13 @@ import (
 	"time"
 )
 
-func builtinParent(t *testing.T) string {
-	t.Helper()
-	path := t.TempDir()
-	if err := os.Chmod(path, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func builtinFixture(t *testing.T, path string) {
-	t.Helper()
-	root := testRootFS(t)
-	for _, dir := range []string{"etc", "usr/bin"} {
-		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, dir := range []string{".", "usr"} {
-		if err := os.Chmod(filepath.Join(root, dir), 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Chmod(filepath.Join(root, "tmp"), os.ModeSticky|0777); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"sh", "cat"} {
-		if err := os.Symlink("busybox", filepath.Join(root, "bin", name)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"passwd", "group"} {
-		if err := os.WriteFile(filepath.Join(root, "etc", name), []byte("root fixture\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	data, err := os.ReadFile(filepath.Join(root, "bin/busybox"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadata, err := json.Marshal(builtinMetadata{Architecture: runtime.GOARCH, Package: "busybox-static", Version: "fixture", SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Applets: []string{"cat", "sh"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".casklet-rootfs.json"), metadata, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(root, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func assertNoBuiltinStages(t *testing.T, parent string) {
-	t.Helper()
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), builtinStagePrefix) {
-			t.Fatalf("unreclaimed staging tree: %s", entry.Name())
-		}
-	}
-}
-
 func TestBuiltinRepairAndHealthyReuse(t *testing.T) {
 	for _, failure := range []string{"absent", "missing busybox", "nonexecutable busybox", "corrupt binary", "missing applet", "wrong applet link", "missing directory", "invalid metadata", "legacy metadata", "unexpected entry"} {
 		t.Run(failure, func(t *testing.T) {
-			path := filepath.Join(builtinParent(t), "busybox")
-			owner := uint32(os.Geteuid())
+			var (
+				path  = filepath.Join(builtinParent(t), "busybox")
+				owner = uint32(os.Geteuid())
+			)
 			if failure != "absent" {
 				builtinFixture(t, path)
 				var err error
@@ -192,17 +130,19 @@ func TestBuiltinFailedPreparationPreservesOldTree(t *testing.T) {
 func TestBuiltinRecoveryAndUnsafeTreePreservation(t *testing.T) {
 	for _, kind := range []string{"stale stage", "template symlink", "stage symlink", "public directory", "lease symlink", "lease hardlink"} {
 		t.Run(kind, func(t *testing.T) {
-			parent := builtinParent(t)
-			path := filepath.Join(parent, "busybox")
-			outside := t.TempDir()
-			marker := filepath.Join(outside, "preserved")
+			var (
+				parent  = builtinParent(t)
+				path    = filepath.Join(parent, "busybox")
+				outside = t.TempDir()
+				marker  = filepath.Join(outside, "preserved")
+			)
 			if err := os.WriteFile(marker, []byte("preserved"), 0644); err != nil {
 				t.Fatal(err)
 			}
 			var setupErr error
 			switch kind {
 			case "stale stage":
-				stage := filepath.Join(parent, builtinStagePrefix+"abandoned")
+				stage := filepath.Join(parent, _builtinStagePrefix+"abandoned")
 				setupErr = os.Mkdir(stage, 0700)
 				if setupErr == nil {
 					setupErr = os.Symlink(outside, filepath.Join(stage, "external"))
@@ -210,7 +150,7 @@ func TestBuiltinRecoveryAndUnsafeTreePreservation(t *testing.T) {
 			case "template symlink":
 				setupErr = os.Symlink(outside, path)
 			case "stage symlink":
-				setupErr = os.Symlink(outside, filepath.Join(parent, builtinStagePrefix+"unsafe"))
+				setupErr = os.Symlink(outside, filepath.Join(parent, _builtinStagePrefix+"unsafe"))
 			case "public directory":
 				setupErr = os.Chmod(parent, 0777)
 			case "lease symlink":
@@ -244,20 +184,24 @@ func TestBuiltinRecoveryAndUnsafeTreePreservation(t *testing.T) {
 }
 
 func TestBuiltinCopyLeaseFencesRepairAndReleasesIndependently(t *testing.T) {
-	parent := builtinParent(t)
-	owner := uint32(os.Geteuid())
-	writer, err := lockBuiltinAt(context.Background(), parent, owner, true)
+	var (
+		parent      = builtinParent(t)
+		owner       = uint32(os.Geteuid())
+		writer, err = lockBuiltinAt(context.Background(), parent, owner, true)
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer.Close()
+	_ = writer.Close()
 	reader, err := lockBuiltinAt(context.Background(), parent, owner, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	imageLease := &testLease{}
-	source := &Template{copyLease: reader, lease: imageLease}
-	defer source.Close()
+	var (
+		imageLease = &testLease{}
+		source     = &Template{copyLease: reader, lease: imageLease}
+	)
+	defer func() { _ = source.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	if lease, err := lockBuiltinAt(ctx, parent, owner, true); lease != nil || !errors.Is(err, context.DeadlineExceeded) {
@@ -273,7 +217,7 @@ func TestBuiltinCopyLeaseFencesRepairAndReleasesIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer.Close()
+	_ = writer.Close()
 }
 
 func TestCanceledBuiltinAcquisitionDoesNotReturnLease(t *testing.T) {
@@ -286,10 +230,12 @@ func TestCanceledBuiltinAcquisitionDoesNotReturnLease(t *testing.T) {
 }
 
 func TestConcurrentBuiltinRepairPublishesOnce(t *testing.T) {
-	path := filepath.Join(builtinParent(t), "busybox")
-	var wait sync.WaitGroup
-	errorsCh := make(chan error, 4)
-	var calls atomic.Int32
+	var (
+		path     = filepath.Join(builtinParent(t), "busybox")
+		wait     sync.WaitGroup
+		errorsCh = make(chan error, 4)
+		calls    atomic.Int32
+	)
 	for range 4 {
 		wait.Add(1)
 		go func() {
@@ -310,5 +256,69 @@ func TestConcurrentBuiltinRepairPublishesOnce(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("concurrent repairs generated %d templates", calls.Load())
+	}
+}
+
+func builtinParent(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir()
+	if err := os.Chmod(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func builtinFixture(t *testing.T, path string) {
+	t.Helper()
+	root := testRootFS(t)
+	for _, dir := range []string{"etc", "usr/bin"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{".", "usr"} {
+		if err := os.Chmod(filepath.Join(root, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(filepath.Join(root, "tmp"), os.ModeSticky|0777); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sh", "cat"} {
+		if err := os.Symlink("busybox", filepath.Join(root, "bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"passwd", "group"} {
+		if err := os.WriteFile(filepath.Join(root, "etc", name), []byte("root fixture\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, "bin/busybox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := json.Marshal(builtinMetadata{Architecture: runtime.GOARCH, Package: "busybox-static", Version: "fixture", SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Applets: []string{"cat", "sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".casklet-rootfs.json"), metadata, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(root, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertNoBuiltinStages(t *testing.T, parent string) {
+	t.Helper()
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), _builtinStagePrefix) {
+			t.Fatalf("unreclaimed staging tree: %s", entry.Name())
+		}
 	}
 }

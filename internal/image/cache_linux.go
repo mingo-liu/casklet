@@ -19,6 +19,90 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type cachePolicy struct {
+	MaxBytes int64 `json:"max_bytes"`
+}
+
+// CacheUsage reports retained blobs. In-use and reclaimable values are snapshots;
+// prune and eviction recheck leases immediately before any mutation.
+func (store *Store) CacheUsage(ctx context.Context) (CacheReport, error) {
+	lock, err := store.cacheLock(ctx)
+	if err != nil {
+		return CacheReport{}, err
+	}
+	defer func() { _ = lock.Close() }()
+	limit, err := store.cacheLimit()
+	if err != nil {
+		return CacheReport{}, err
+	}
+	return store.cacheUsageLocked(ctx, limit)
+}
+
+// SetCacheLimit persists the compressed-data capacity and evicts idle excess data.
+func (store *Store) SetCacheLimit(ctx context.Context, limit int64) (CacheReport, error) {
+	if limit < 0 {
+		return CacheReport{}, errors.New("download cache limit must be nonnegative")
+	}
+	lock, err := store.cacheLock(ctx)
+	if err != nil {
+		return CacheReport{}, err
+	}
+	defer func() { _ = lock.Close() }()
+	// Validate existing policy artifacts before replacing their inode.
+	if _, err := store.cacheLimit(); err != nil {
+		return CacheReport{}, err
+	}
+	if err := store.writeCacheLimit(ctx, limit); err != nil {
+		return CacheReport{}, err
+	}
+	if err := store.evictCacheLocked(ctx, limit); err != nil {
+		return CacheReport{}, err
+	}
+	return store.cacheUsageLocked(ctx, limit)
+}
+
+// PruneCache removes compressed data only. It never deletes image roots or
+// references. Stable digest locks remain, including after preview and eviction.
+func (store *Store) PruneCache(ctx context.Context, dryRun bool) (CachePruneResult, error) {
+	var (
+		result    = CachePruneResult{DryRun: dryRun}
+		lock, err = store.cacheLock(ctx)
+	)
+	if err != nil {
+		return result, err
+	}
+	defer func() { _ = lock.Close() }()
+	dir, err := store.blobDirectory(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return result, err
+	}
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		digest, err := blobEntryDigest(entry.Name())
+		if err != nil {
+			return result, err
+		}
+		if seen[digest] {
+			continue
+		}
+		seen[digest] = true
+		if err := store.pruneCacheDigest(ctx, dir, digest, dryRun, &result); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
 // Cache management never holds the image metadata lock. Downloads take only
 // digest locks; management tries those locks without waiting, preventing cycles.
 func (store *Store) cacheLock(ctx context.Context) (*os.File, error) {
@@ -32,10 +116,6 @@ func (store *Store) cacheLock(ctx context.Context) (*os.File, error) {
 	return waitFileLock(ctx, file, false)
 }
 
-type cachePolicy struct {
-	MaxBytes int64 `json:"max_bytes"`
-}
-
 func (store *Store) cacheLimit() (int64, error) {
 	file, err := store.openFile(filepath.Join(store.root, ".cache-policy"), unix.O_RDONLY)
 	if errors.Is(err, os.ErrNotExist) {
@@ -44,7 +124,7 @@ func (store *Store) cacheLimit() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, 129))
 	if err != nil {
 		return 0, err
@@ -72,12 +152,14 @@ func (store *Store) writeCacheLimit(ctx context.Context, limit int64) error {
 		if !strings.HasPrefix(entry.Name(), ".cache-policy-stage-") {
 			continue
 		}
-		path := filepath.Join(store.root, entry.Name())
-		file, err := store.openFile(path, unix.O_RDONLY)
+		var (
+			path      = filepath.Join(store.root, entry.Name())
+			file, err = store.openFile(path, unix.O_RDONLY)
+		)
 		if err != nil {
 			return err
 		}
-		file.Close()
+		_ = file.Close()
 		if err := os.Remove(path); err != nil {
 			return err
 		}
@@ -86,9 +168,9 @@ func (store *Store) writeCacheLimit(ctx context.Context, limit int64) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	defer os.Remove(file.Name())
-	if err := json.NewEncoder(file).Encode(cachePolicy{limit}); err != nil {
+	defer func() { _ = file.Close() }()
+	defer func() { _ = os.Remove(file.Name()) }()
+	if err := json.NewEncoder(file).Encode(cachePolicy{MaxBytes: limit}); err != nil {
 		return err
 	}
 	if err := file.Sync(); err != nil {
@@ -103,21 +185,6 @@ func (store *Store) writeCacheLimit(ctx context.Context, limit int64) error {
 	return syncDirectory(store.root)
 }
 
-func blobEntryDigest(name string) (string, error) {
-	digest := strings.TrimPrefix(name, ".lock-")
-	if strings.HasPrefix(name, ".stage-") {
-		parts := strings.SplitN(strings.TrimPrefix(name, ".stage-"), "-", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			return "", errors.New("invalid compressed layer staging name")
-		}
-		digest = parts[0]
-	}
-	if ValidateID("sha256:"+digest) != nil {
-		return "", errors.New("invalid compressed layer cache entry")
-	}
-	return digest, nil
-}
-
 func (store *Store) tryBlobExclusive(dir, digest string) (*os.File, bool, error) {
 	file, err := store.openFile(filepath.Join(dir, ".lock-"+digest), unix.O_RDWR|unix.O_CREAT)
 	if err != nil {
@@ -125,11 +192,11 @@ func (store *Store) tryBlobExclusive(dir, digest string) (*os.File, bool, error)
 	}
 	err = unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
 	if errors.Is(err, unix.EWOULDBLOCK) {
-		file.Close()
+		_ = file.Close()
 		return nil, false, nil
 	}
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, false, err
 	}
 	return file, true, nil
@@ -140,7 +207,7 @@ func (store *Store) cacheEntry(dir, digest string) (CacheEntry, error) {
 	if err != nil {
 		return CacheEntry{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var stat unix.Stat_t
 	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return CacheEntry{}, err
@@ -153,8 +220,10 @@ func (store *Store) cacheEntry(dir, digest string) (CacheEntry, error) {
 }
 
 func (store *Store) cacheUsageLocked(ctx context.Context, limit int64) (CacheReport, error) {
-	report := CacheReport{MaxBytes: limit, Entries: []CacheEntry{}}
-	dir, err := store.blobDirectory(false)
+	var (
+		report   = CacheReport{MaxBytes: limit, Entries: []CacheEntry{}}
+		dir, err = store.blobDirectory(false)
+	)
 	if errors.Is(err, os.ErrNotExist) {
 		return report, nil
 	}
@@ -182,7 +251,7 @@ func (store *Store) cacheUsageLocked(ctx context.Context, limit int64) (CacheRep
 		}
 		entry, err := store.cacheEntry(dir, digest)
 		if lock != nil {
-			lock.Close()
+			_ = lock.Close()
 		}
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -204,49 +273,12 @@ func (store *Store) cacheUsageLocked(ctx context.Context, limit int64) (CacheRep
 	return report, nil
 }
 
-// CacheUsage reports retained blobs. In-use and reclaimable values are snapshots;
-// prune and eviction recheck leases immediately before any mutation.
-func (store *Store) CacheUsage(ctx context.Context) (CacheReport, error) {
-	lock, err := store.cacheLock(ctx)
-	if err != nil {
-		return CacheReport{}, err
-	}
-	defer lock.Close()
-	limit, err := store.cacheLimit()
-	if err != nil {
-		return CacheReport{}, err
-	}
-	return store.cacheUsageLocked(ctx, limit)
-}
-
-func (store *Store) SetCacheLimit(ctx context.Context, limit int64) (CacheReport, error) {
-	if limit < 0 {
-		return CacheReport{}, errors.New("download cache limit must be nonnegative")
-	}
-	lock, err := store.cacheLock(ctx)
-	if err != nil {
-		return CacheReport{}, err
-	}
-	defer lock.Close()
-	// Validate existing policy artifacts before replacing their inode.
-	if _, err := store.cacheLimit(); err != nil {
-		return CacheReport{}, err
-	}
-	if err := store.writeCacheLimit(ctx, limit); err != nil {
-		return CacheReport{}, err
-	}
-	if err := store.evictCacheLocked(ctx, limit); err != nil {
-		return CacheReport{}, err
-	}
-	return store.cacheUsageLocked(ctx, limit)
-}
-
 func (store *Store) enforceCacheLimit(ctx context.Context) error {
 	lock, err := store.cacheLock(ctx)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	limit, err := store.cacheLimit()
 	if err != nil {
 		return err
@@ -283,8 +315,10 @@ func (store *Store) evictCacheLocked(ctx context.Context, limit int64) error {
 		if report.SizeBytes <= limit {
 			break
 		}
-		digest := strings.TrimPrefix(entry.Digest, "sha256:")
-		lock, available, err := store.tryBlobExclusive(dir, digest)
+		var (
+			digest               = strings.TrimPrefix(entry.Digest, "sha256:")
+			lock, available, err = store.tryBlobExclusive(dir, digest)
+		)
 		if err != nil {
 			return err
 		}
@@ -294,73 +328,33 @@ func (store *Store) evictCacheLocked(ctx context.Context, limit int64) error {
 		current, err := store.cacheEntry(dir, digest)
 		if errors.Is(err, os.ErrNotExist) {
 			report.SizeBytes -= entry.SizeBytes
-			lock.Close()
+			_ = lock.Close()
 			continue
 		}
 		if err != nil {
-			lock.Close()
+			_ = lock.Close()
 			return err
 		}
 		// A hit after the inventory is newer than this LRU candidate. Preserve it.
 		if !current.LastUsedAt.Equal(entry.LastUsedAt) {
-			lock.Close()
+			_ = lock.Close()
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			lock.Close()
+			_ = lock.Close()
 			return err
 		}
 		err = os.Remove(filepath.Join(dir, digest))
 		if err == nil {
 			err = syncDirectory(dir)
 		}
-		lock.Close()
+		_ = lock.Close()
 		if err != nil {
 			return err
 		}
 		report.SizeBytes -= entry.SizeBytes
 	}
 	return nil
-}
-
-// PruneCache removes compressed data only. It never deletes image roots or
-// references. Stable digest locks remain, including after preview and eviction.
-func (store *Store) PruneCache(ctx context.Context, dryRun bool) (CachePruneResult, error) {
-	result := CachePruneResult{DryRun: dryRun}
-	lock, err := store.cacheLock(ctx)
-	if err != nil {
-		return result, err
-	}
-	defer lock.Close()
-	dir, err := store.blobDirectory(false)
-	if errors.Is(err, os.ErrNotExist) {
-		return result, nil
-	}
-	if err != nil {
-		return result, err
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return result, err
-	}
-	seen := map[string]bool{}
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		digest, err := blobEntryDigest(entry.Name())
-		if err != nil {
-			return result, err
-		}
-		if seen[digest] {
-			continue
-		}
-		seen[digest] = true
-		if err := store.pruneCacheDigest(ctx, dir, digest, dryRun, &result); err != nil {
-			return result, err
-		}
-	}
-	return result, nil
 }
 
 func (store *Store) pruneCacheDigest(ctx context.Context, dir, digest string, dryRun bool, result *CachePruneResult) error {
@@ -371,7 +365,7 @@ func (store *Store) pruneCacheDigest(ctx context.Context, dir, digest string, dr
 	if !available {
 		return nil
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	entry, err := store.cacheEntry(dir, digest)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -399,14 +393,16 @@ func (store *Store) pruneCacheDigest(ctx context.Context, dir, digest string, dr
 		if !strings.HasPrefix(entry.Name(), ".stage-"+digest+"-") {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
-		file, err := store.openFile(path, unix.O_RDONLY)
+		var (
+			path      = filepath.Join(dir, entry.Name())
+			file, err = store.openFile(path, unix.O_RDONLY)
+		)
 		if err != nil {
 			return err
 		}
 		var stat unix.Stat_t
 		err = unix.Fstat(int(file.Fd()), &stat)
-		file.Close()
+		_ = file.Close()
 		if err != nil {
 			return err
 		}
@@ -425,6 +421,21 @@ func (store *Store) pruneCacheDigest(ctx context.Context, dir, digest string, dr
 		return syncDirectory(dir)
 	}
 	return nil
+}
+
+func blobEntryDigest(name string) (string, error) {
+	digest := strings.TrimPrefix(name, ".lock-")
+	if strings.HasPrefix(name, ".stage-") {
+		parts := strings.SplitN(strings.TrimPrefix(name, ".stage-"), "-", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			return "", errors.New("invalid compressed layer staging name")
+		}
+		digest = parts[0]
+	}
+	if ValidateID("sha256:"+digest) != nil {
+		return "", errors.New("invalid compressed layer cache entry")
+	}
+	return digest, nil
 }
 
 func touchCachedBlob(file *os.File) error {

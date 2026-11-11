@@ -25,33 +25,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func referenceKey(ref string) string { return fmt.Sprintf(".ref-%x", sha256.Sum256([]byte(ref))) }
-
 type cachedReference struct {
 	Reference string `json:"reference"`
 	ID        string `json:"id"`
 }
 
-func (store *Store) readReference(key string) (cachedReference, error) {
-	f, err := store.openFile(filepath.Join(store.root, key), unix.O_RDONLY)
-	if err != nil {
-		return cachedReference{}, err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 1025))
-	if err != nil {
-		return cachedReference{}, err
-	}
-	var cached cachedReference
-	if len(data) > 1024 || json.Unmarshal(data, &cached) != nil || ValidateID(cached.ID) != nil || referenceKey(cached.Reference) != key {
-		return cachedReference{}, errors.New("invalid cached image reference")
-	}
-	canonical, err := NormalizeReference(cached.Reference)
-	if err != nil || canonical != cached.Reference {
-		return cachedReference{}, errors.New("invalid cached image reference")
-	}
-	return cached, nil
+// trackedLayer preserves go-containerregistry's decompression and blob digest
+// verification while counting bytes read from the compressed network stream.
+type trackedLayer struct {
+	v1.Layer
+
+	progress *streamProgress
 }
+
+var _ v1.Layer = trackedLayer{}
 
 // Resolve returns the cached identity of a canonical reference, without network
 // access. A removed target is a cache miss. Corrupt metadata is never ignored.
@@ -66,7 +53,7 @@ func (store *Store) Resolve(ctx context.Context, reference string) (record Recor
 		if err != nil {
 			return Record{}, err
 		}
-		defer lock.Close()
+		defer func() { _ = lock.Close() }()
 		// Prefer an exact cached name to a bare ID prefix, as with containers.
 		if !strings.HasPrefix(reference, "sha256:") {
 			ref, err := NormalizeReference(reference)
@@ -87,19 +74,8 @@ func (store *Store) Resolve(ctx context.Context, reference string) (record Recor
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	return store.resolveLocked(ref)
-}
-
-func (store *Store) resolveLocked(ref string) (Record, error) {
-	cached, err := store.readReference(referenceKey(ref))
-	if errors.Is(err, os.ErrNotExist) {
-		return Record{}, ErrNotFound
-	}
-	if err != nil {
-		return Record{}, err
-	}
-	return store.read(cached.ID)
 }
 
 // Pull refreshes a reference, selecting the native Linux platform. Download and
@@ -123,9 +99,9 @@ func (store *Store) Pull(ctx context.Context, reference string) (result Record, 
 	if err != nil {
 		return Record{}, err
 	}
-	defer refLock.Close()
+	defer func() { _ = refLock.Close() }()
 	reportProgress(ctx, Progress{Stage: ProgressResolving, Reference: ref})
-	options, err := registryOptions(ctx, parsed)
+	options, err := store.registryOptions(ctx, parsed)
 	if err != nil {
 		return Record{}, err
 	}
@@ -137,12 +113,44 @@ func (store *Store) Pull(ctx context.Context, reference string) (result Record, 
 	return store.pullImageLocked(ctx, ref, img, cancel)
 }
 
+func (store *Store) readReference(key string) (cachedReference, error) {
+	f, err := store.openFile(filepath.Join(store.root, key), unix.O_RDONLY)
+	if err != nil {
+		return cachedReference{}, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, 1025))
+	if err != nil {
+		return cachedReference{}, err
+	}
+	var cached cachedReference
+	if len(data) > 1024 || json.Unmarshal(data, &cached) != nil || ValidateID(cached.ID) != nil || referenceKey(cached.Reference) != key {
+		return cachedReference{}, errors.New("invalid cached image reference")
+	}
+	canonical, err := NormalizeReference(cached.Reference)
+	if err != nil || canonical != cached.Reference {
+		return cachedReference{}, errors.New("invalid cached image reference")
+	}
+	return cached, nil
+}
+
+func (store *Store) resolveLocked(ref string) (Record, error) {
+	cached, err := store.readReference(referenceKey(ref))
+	if errors.Is(err, os.ErrNotExist) {
+		return Record{}, ErrNotFound
+	}
+	if err != nil {
+		return Record{}, err
+	}
+	return store.read(cached.ID)
+}
+
 func (store *Store) pullImage(ctx context.Context, ref string, img v1.Image) (Record, error) {
 	refLock, err := store.lockReference(ctx, ref)
 	if err != nil {
 		return Record{}, err
 	}
-	defer refLock.Close()
+	defer func() { _ = refLock.Close() }()
 	return store.pullImageLocked(ctx, ref, img)
 }
 
@@ -213,17 +221,19 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 	if err != nil {
 		return Record{}, err
 	}
-	cached, cacheErr := store.resolveLocked(ref)
-	var cachedLease *os.File
+	var (
+		cached, cacheErr = store.resolveLocked(ref)
+		cachedLease      *os.File
+	)
 	if cacheErr == nil && cached.ManifestDigest == digest.String() && sameLaunchConfig(cached.Config, launch) {
 		cachedLease, cacheErr = store.acquireLeaseLocked(cached.ID)
 	}
-	lock.Close()
+	_ = lock.Close()
 	if cacheErr != nil && !errors.Is(cacheErr, ErrNotFound) {
 		return Record{}, cacheErr
 	}
 	if cachedLease != nil {
-		defer cachedLease.Close()
+		defer func() { _ = cachedLease.Close() }()
 		reportProgress(ctx, Progress{Stage: ProgressVerifyingImage, Reference: ref})
 		if err := store.verify(ctx, cached); err != nil {
 			return Record{}, err
@@ -235,7 +245,7 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 	if err != nil {
 		return Record{}, err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	defer store.cleanupImport(stage, transaction)
 
 	tree := filepath.Join(stage, "rootfs")
@@ -246,7 +256,7 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 	if err != nil {
 		return Record{}, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	// Reject malformed DiffIDs before downloading any data. Compressed blobs
 	// are independent transactions; ordered application remains in this thread.
 	for _, diff := range cf.RootFS.DiffIDs {
@@ -270,9 +280,11 @@ func (store *Store) pullImageLocked(ctx context.Context, ref string, img v1.Imag
 			return Record{}, err
 		}
 		event := Progress{Reference: ref, Layer: manifest.Layers[i].Digest.String(), Index: i + 1, Layers: len(layers)}
-		count, err := unpackCachedLayer(ctx, root, archive, blob, cf.RootFS.DiffIDs[i], maxImageBytes-total, event)
-		closeErr := archive.Close()
-		removeErr := os.Remove(archive.Name())
+		count, err := unpackCachedLayer(ctx, root, archive, blob, cf.RootFS.DiffIDs[i], _maxImageBytes-total, event)
+		var (
+			closeErr  = archive.Close()
+			removeErr = os.Remove(archive.Name())
+		)
 		if err := errors.Join(err, closeErr, removeErr); err != nil {
 			return Record{}, fmt.Errorf("image layer %d: %w", i+1, err)
 		}
@@ -319,7 +331,7 @@ func (store *Store) publishReferenceLocked(ctx context.Context, ref, id string) 
 	if err != nil {
 		return err
 	}
-	defer os.Remove(refStage.Name())
+	defer func() { _ = os.Remove(refStage.Name()) }()
 	writeErr := json.NewEncoder(refStage).Encode(cachedReference{Reference: ref, ID: id})
 	if err := errors.Join(writeErr, refStage.Sync(), refStage.Close()); err != nil {
 		return err
@@ -333,13 +345,6 @@ func (store *Store) publishReferenceLocked(ctx context.Context, ref, id string) 
 	return syncDirectory(store.root)
 }
 
-// trackedLayer preserves go-containerregistry's decompression and blob digest
-// verification while counting bytes read from the compressed network stream.
-type trackedLayer struct {
-	v1.Layer
-	progress *streamProgress
-}
-
 func (l trackedLayer) Compressed() (io.ReadCloser, error) {
 	r, err := l.Layer.Compressed()
 	if err != nil {
@@ -348,8 +353,10 @@ func (l trackedLayer) Compressed() (io.ReadCloser, error) {
 	return struct {
 		io.Reader
 		io.Closer
-	}{countingReader{reader: r, read: l.progress.add}, r}, nil
+	}{Reader: countingReader{reader: r, read: l.progress.add}, Closer: r}, nil
 }
+
+func referenceKey(ref string) string { return fmt.Sprintf(".ref-%x", sha256.Sum256([]byte(ref))) }
 
 func unpackLayer(ctx context.Context, root *os.Root, archive *os.File, layer v1.Layer, expected v1.Hash, remaining int64, events ...Progress) (count int64, resultErr error) {
 	event := Progress{Stage: ProgressDownloading}
@@ -398,9 +405,11 @@ func unpackPreparedLayer(ctx context.Context, root *os.Root, archive *os.File, l
 	if err != nil {
 		return 0, err
 	}
-	defer r.Close()
-	limit := min(maxLayerBytes, remaining)
-	digest := sha256.New()
+	defer func() { _ = r.Close() }()
+	var (
+		limit  = min(_maxLayerBytes, remaining)
+		digest = sha256.New()
+	)
 	count, err = io.Copy(io.MultiWriter(archive, digest), io.LimitReader(contextReader{ctx: ctx, r: r}, limit+1))
 	if err != nil {
 		return count, err

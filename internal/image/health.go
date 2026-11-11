@@ -13,14 +13,14 @@ func imageHealthcheck(raw []byte) (*config.HealthConfig, error) {
 	var extension struct {
 		Config struct {
 			Healthcheck *struct {
-				Test          []string
-				Interval      time.Duration
-				Timeout       time.Duration
-				StartPeriod   time.Duration
-				StartInterval time.Duration
-				Retries       int
-			}
-		}
+				Test          []string      `json:"Test"`
+				Interval      time.Duration `json:"Interval"`
+				Timeout       time.Duration `json:"Timeout"`
+				StartPeriod   time.Duration `json:"StartPeriod"`
+				StartInterval time.Duration `json:"StartInterval"`
+				Retries       int           `json:"Retries"`
+			} `json:"Healthcheck"`
+		} `json:"config"`
 	}
 	if err := json.Unmarshal(raw, &extension); err != nil {
 		return nil, err

@@ -26,6 +26,14 @@ type Template struct {
 	copyLease io.Closer
 }
 
+var _ io.Closer = (*Template)(nil)
+
+// Acquire resolves the configured source and validates all host bind sources.
+// On failure, any acquired source leases are released before returning.
+func Acquire(ctx context.Context, cfg config.Config) (*Template, error) {
+	return acquire(ctx, cfg, acquireImage)
+}
+
 // ImageLeaseFile returns the usage lease for inheritance by namespace init.
 // Copy-on-write roots depend on their lower image throughout execution, even
 // after abrupt supervisor loss. Callers must not close this borrowed file.
@@ -54,12 +62,6 @@ func (t *Template) Close() error {
 	lease := t.lease
 	t.lease = nil
 	return errors.Join(copyErr, lease.Close())
-}
-
-// Acquire resolves the configured source and validates all host bind sources.
-// On failure, any acquired source leases are released before returning.
-func Acquire(ctx context.Context, cfg config.Config) (*Template, error) {
-	return acquire(ctx, cfg, acquireImage)
 }
 
 func acquireImage(ctx context.Context, id string) (string, io.Closer, error) {
