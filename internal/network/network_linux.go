@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	bridge         = "casklet0"
-	gateway        = "10.231.0.1"
-	subnet         = "10.231.0.0/24"
-	bridgeAlias    = "casklet bridge v1"
-	runsRoot       = "/var/lib/casklet/runs"
-	forwardingPath = "/proc/sys/net/ipv4/ip_forward"
+	_bridge         = "casklet0"
+	_gateway        = "10.231.0.1"
+	_subnet         = "10.231.0.0/24"
+	_bridgeAlias    = "casklet bridge v1"
+	_runsRoot       = "/var/lib/casklet/runs"
+	_forwardingPath = "/proc/sys/net/ipv4/ip_forward"
 )
 
 type allocation struct {
@@ -52,11 +52,21 @@ type Lease struct {
 	dns     *dnsServer
 }
 
+type linkInfo struct {
+	Name  string `json:"ifname"`
+	Alias string `json:"ifalias"`
+	Group uint32 `json:"group,string"`
+	Info  struct {
+		Kind string `json:"info_kind"`
+	} `json:"linkinfo"`
+}
+
 func (l *Lease) StopDNS() {
 	if l.dns != nil {
 		l.dns.Quiesce()
 	}
 }
+
 func (l *Lease) Close() {
 	if l.dns != nil {
 		l.dns.Close()
@@ -66,184 +76,6 @@ func (l *Lease) Close() {
 		socket.Close()
 	}
 	l.sockets = nil
-}
-
-func currentBoot() (string, error) {
-	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-	if err != nil {
-		return "", err
-	}
-	id := strings.TrimSpace(string(data))
-	if !validBoot(id) {
-		return "", errors.New("invalid host boot identity")
-	}
-	return id, nil
-}
-
-func validBoot(id string) bool {
-	if len(id) != 36 {
-		return false
-	}
-	for i, ch := range id {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if ch != '-' {
-				return false
-			}
-			continue
-		}
-		if !strings.ContainsRune("0123456789abcdef", ch) {
-			return false
-		}
-	}
-	return true
-}
-
-func identity(path string) (string, string) {
-	sum := sha256.Sum256([]byte(filepath.Base(path)))
-	suffix := hex.EncodeToString(sum[:])[:12]
-	return "cs" + suffix, "casklet_" + suffix
-}
-
-func checkPath(path string) error {
-	if filepath.Dir(path) != runsRoot || filepath.Clean(path) != path || !strings.HasPrefix(filepath.Base(path), "run-") || len(filepath.Base(path)) <= 4 {
-		return errors.New("invalid network run directory")
-	}
-	for _, dir := range []string{"/var/lib/casklet", runsRoot, path} {
-		var stat unix.Stat_t
-		if err := unix.Lstat(dir, &stat); err != nil {
-			return err
-		}
-		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Mode&0022 != 0 {
-			return errors.New("network state requires private root-owned directories")
-		}
-	}
-	return nil
-}
-
-func lock(ctx context.Context) (*os.File, error) {
-	fd, err := unix.Open(filepath.Join(runsRoot, ".network.lock"), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
-	if err != nil {
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), "network-lock")
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != 0 || stat.Mode&0022 != 0 || stat.Nlink != 1 {
-		file.Close()
-		return nil, errors.New("invalid network coordination lock")
-	}
-	for {
-		if err := ctx.Err(); err != nil {
-			file.Close()
-			return nil, err
-		}
-		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return file, nil
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			file.Close()
-			return nil, ctx.Err()
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func readJSON(path string, value any) error {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	if err != nil {
-		return err
-	}
-	file := os.NewFile(uintptr(fd), "network-state")
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Size() > 32768 || stat.Uid != 0 || stat.Mode&0022 != 0 || stat.Nlink != 1 {
-		return errors.New("invalid network state file")
-	}
-	decoder := json.NewDecoder(io.LimitReader(file, 32769))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("trailing network state data")
-	}
-	return nil
-}
-
-func writeJSON(path string, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".network-state-")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file.Name())
-	_, writeErr := file.Write(data)
-	syncErr := file.Sync()
-	closeErr := file.Close()
-	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
-		return err
-	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
-
-// Commands use fixed system paths, a bounded deadline, and no invoking-user environment.
-func tool(name string) (string, error) {
-	for _, dir := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
-		path := filepath.Join(dir, name)
-		info, err := os.Stat(path)
-		if err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("bridge networking requires %s (install iproute2, nftables, util-linux, and conntrack)", name)
-}
-
-func command(ctx context.Context, name, input string, args ...string) ([]byte, error) {
-	return commandFiles(ctx, nil, name, input, args...)
-}
-
-func commandFiles(ctx context.Context, files []*os.File, name, input string, args ...string) ([]byte, error) {
-	executable, err := tool(name)
-	if err != nil {
-		return nil, err
-	}
-	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(bounded, executable, args...)
-	cmd.ExtraFiles = files
-	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
-	if input != "" {
-		cmd.Stdin = strings.NewReader(input)
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return out, nil
 }
 
 func Resolvers(explicit []string) ([]string, error) {
@@ -264,186 +96,6 @@ func Resolvers(explicit []string) ([]string, error) {
 	return nil, errors.New("no usable host IPv4 DNS servers; specify --dns with bridge or named networking")
 }
 
-func allocations() (map[string]allocation, error) {
-	entries, err := os.ReadDir(runsRoot)
-	if err != nil {
-		return nil, err
-	}
-	result := map[string]allocation{}
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), "run-") {
-			continue
-		}
-		path := filepath.Join(runsRoot, entry.Name())
-		if err := checkPath(path); err != nil {
-			// A loopback-only run may disappear while the directory listing is read.
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		var record allocation
-		err := readJSON(filepath.Join(path, "network.json"), &record)
-		if errors.Is(err, os.ErrNotExist) {
-			err = readJSON(filepath.Join(path, "network-named.json"), &record)
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !validBoot(record.BootID) {
-			return nil, errors.New("invalid recorded network boot identity")
-		}
-		pool := subnet
-		if record.Network != "" {
-			r, err := namedRecord(record.Network)
-			if err != nil {
-				return nil, err
-			}
-			pool = r.Subnet
-			for _, name := range record.Aliases {
-				if err := config.ValidateDNSName(name); err != nil {
-					return nil, err
-				}
-			}
-		}
-		ip, err := netip.ParseAddr(record.Address)
-		if err != nil || !netip.MustParsePrefix(pool).Contains(ip) || ip.As4()[3] < 2 || ip.As4()[3] == 255 {
-			return nil, errors.New("invalid recorded network address")
-		}
-		if err := config.ValidateNetwork("bridge", nil, record.Publish, nil); err != nil {
-			return nil, err
-		}
-		result[path] = record
-	}
-	return result, nil
-}
-
-type linkInfo struct {
-	Name  string `json:"ifname"`
-	Alias string `json:"ifalias"`
-	Group uint32 `json:"group,string"`
-	Info  struct {
-		Kind string `json:"info_kind"`
-	} `json:"linkinfo"`
-}
-
-func links(ctx context.Context) ([]linkInfo, error) {
-	out, err := command(ctx, "ip", "", "-N", "-j", "-d", "link", "show")
-	if err != nil {
-		return nil, err
-	}
-	var result []linkInfo
-	err = json.Unmarshal(out, &result)
-	return result, err
-}
-
-func ensureBridge(ctx context.Context) error {
-	boot, err := currentBoot()
-	if err != nil {
-		return err
-	}
-	statePath := filepath.Join(runsRoot, ".network-shared.json")
-	var state sharedState
-	err = readJSON(statePath, &state)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	fresh := errors.Is(err, os.ErrNotExist)
-	if !fresh && state.BootID != boot {
-		return errors.New("previous-boot network state requires recovery")
-	}
-	if !fresh && state.Forwarding != "0" && state.Forwarding != "1" {
-		return errors.New("invalid recorded IP forwarding setting")
-	}
-	devices, err := links(ctx)
-	if err != nil {
-		return err
-	}
-	exists := false
-	for _, device := range devices {
-		if device.Name == bridge {
-			if fresh || device.Group != ownershipGroup(bridgeAlias) || device.Info.Kind != "bridge" {
-				return errors.New("casklet0 already exists or is not owned by casklet")
-			}
-			exists = true
-		}
-	}
-	if fresh {
-		out, err := command(ctx, "ip", "", "-j", "-4", "route", "show", "table", "all")
-		if err != nil {
-			return err
-		}
-		var routes []struct {
-			Destination string `json:"dst"`
-		}
-		if err := json.Unmarshal(out, &routes); err != nil {
-			return err
-		}
-		pool := netip.MustParsePrefix(subnet)
-		for _, route := range routes {
-			prefix, err := netip.ParsePrefix(route.Destination)
-			if err != nil {
-				if ip, err := netip.ParseAddr(route.Destination); err == nil && pool.Contains(ip) {
-					return errors.New("bridge subnet 10.231.0.0/24 overlaps a host route")
-				}
-				continue
-			}
-			if prefix.Bits() > 0 && (prefix.Contains(pool.Addr()) || pool.Contains(prefix.Addr())) {
-				return errors.New("bridge subnet 10.231.0.0/24 overlaps a host route")
-			}
-		}
-		value, err := os.ReadFile(forwardingPath)
-		if err != nil {
-			return err
-		}
-		state.BootID = boot
-		state.Forwarding = strings.TrimSpace(string(value))
-		if state.Forwarding != "0" && state.Forwarding != "1" {
-			return errors.New("invalid host IP forwarding setting")
-		}
-		// Persist intent before the first host mutation so recovery covers interrupted setup.
-		if err := writeJSON(statePath, state); err != nil {
-			return err
-		}
-	}
-	if !exists {
-		// Create and assign ownership in the same netlink request.
-		if err := addLink(bridge, bridgeAlias, "bridge", ""); err != nil {
-			return err
-		}
-		if _, err := command(ctx, "ip", "", "link", "set", bridge, "alias", bridgeAlias); err != nil {
-			return err
-		}
-	}
-	if _, err := command(ctx, "ip", "", "address", "replace", gateway+"/24", "dev", bridge); err != nil {
-		return err
-	}
-	if _, err := command(ctx, "ip", "", "link", "set", bridge, "up"); err != nil {
-		return err
-	}
-	// Only this owned bridge may route loopback-source packets for local DNAT.
-	if err := os.WriteFile("/proc/sys/net/ipv4/conf/"+bridge+"/route_localnet", []byte("1\n"), 0600); err != nil {
-		return err
-	}
-	return os.WriteFile(forwardingPath, []byte("1\n"), 0600)
-}
-
-func containerMAC(address string) string {
-	ip := netip.MustParseAddr(address).As4()
-	return fmt.Sprintf("02:4d:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3])
-}
-
-func reserve(p config.PortMapping) (io.Closer, error) {
-	addr := net.JoinHostPort(p.HostIP, strconv.Itoa(int(p.HostPort)))
-	if p.Protocol == "udp" {
-		return net.ListenPacket("udp4", addr)
-	}
-	return net.Listen("tcp4", addr)
-}
-
 // Setup journals allocation before attaching a veth to the init's live namespace.
 // On every error, the caller must invoke Cleanup before closing any returned
 // lease; failed cleanup preserves its journal.
@@ -452,10 +104,12 @@ func Setup(ctx context.Context, path string, namespace *os.File, ports []config.
 }
 
 func SetupConfigured(ctx context.Context, path string, namespace *os.File, cfg config.Config) (resultLease *Lease, resultErr error) {
-	ports := cfg.Publish
-	bridge, gateway, pool := bridge, gateway, subnet
-	named := config.IsNamedNetwork(cfg.Network)
-	var nr Record
+	var (
+		ports                 = cfg.Publish
+		bridge, gateway, pool = _bridge, _gateway, _subnet
+		named                 = config.IsNamedNetwork(cfg.Network)
+		nr                    Record
+	)
 	if named {
 		var err error
 		nr, err = namedRecord(cfg.Network)
@@ -490,7 +144,7 @@ func SetupConfigured(ctx context.Context, path string, namespace *os.File, cfg c
 	if _, exists := records[path]; exists {
 		return nil, errors.New("network allocation already exists")
 	}
-	used := map[string]bool{}
+	used := make(map[string]bool, len(records))
 	for _, record := range records {
 		if record.Network == cfg.Network || (!named && record.Network == "") {
 			used[record.Address] = true
@@ -637,104 +291,6 @@ func SetupConfigured(ctx context.Context, path string, namespace *os.File, cfg c
 	return lease, nil
 }
 
-func rules(path, address string, ports []config.PortMapping) string {
-	return rulesFor(path, address, ports, bridge, gateway, false, 0)
-}
-func rulesFor(path, address string, ports []config.PortMapping, bridge, gateway string, named bool, dnsPort int) string {
-	_, table := identity(path)
-	var result strings.Builder
-	fmt.Fprintf(&result, "create table ip %s { comment \"%s\"; }\nadd table ip %s {\n", table, table, table)
-	result.WriteString("chain prerouting { type nat hook prerouting priority dstnat; policy accept;\n")
-	if named {
-		for _, proto := range []string{"udp", "tcp"} {
-			fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s ip daddr %s %s dport 53 dnat to %s:%d\n", bridge, address, gateway, proto, gateway, dnsPort)
-		}
-	}
-	for _, p := range ports {
-		// Loopback mappings are host-local and must never DNAT ingress packets.
-		if netip.MustParseAddr(p.HostIP).IsLoopback() {
-			continue
-		}
-		result.WriteString(portRule(p, address))
-	}
-	result.WriteString("}\nchain output { type nat hook output priority dstnat; policy accept;\n")
-	for _, p := range ports {
-		result.WriteString(portRule(p, address))
-	}
-	result.WriteString("}\nchain postrouting { type nat hook postrouting priority srcnat; policy accept;\n")
-	// Masquerade outgoing traffic, and SNAT hairpin/localhost DNAT to this container.
-	fmt.Fprintf(&result, "ip saddr %s oifname != \"%s\" counter masquerade\n", address, bridge)
-	fmt.Fprintf(&result, "ip daddr %s ct status dnat oifname \"%s\" counter snat to %s\n", address, bridge, gateway)
-	result.WriteString("}\nchain forward { type filter hook forward priority filter; policy accept;\n")
-	if named {
-		for _, peer := range []string{"csn*", "casklet0"} {
-			fmt.Fprintf(&result, "iifname \"%s\" oifname \"%s\" oifname != \"%s\" drop\n", bridge, peer, bridge)
-			fmt.Fprintf(&result, "oifname \"%s\" iifname \"%s\" iifname != \"%s\" drop\n", bridge, peer, bridge)
-		}
-	}
-
-	fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s accept\n", bridge, address)
-	fmt.Fprintf(&result, "oifname \"%s\" ip daddr %s ct state established,related accept\n", bridge, address)
-	for _, p := range ports {
-		fmt.Fprintf(&result, "oifname \"%s\" ip daddr %s %s dport %d ct status dnat accept\n", bridge, address, p.Protocol, p.ContainerPort)
-	}
-	result.WriteString("}\n}\n")
-	return result.String()
-}
-
-func portRule(p config.PortMapping, address string) string {
-	match := "fib daddr type local"
-	if p.HostIP != "0.0.0.0" {
-		match = "ip daddr " + p.HostIP
-	}
-	return fmt.Sprintf("%s %s dport %d counter dnat to %s:%d\n", match, p.Protocol, p.HostPort, address, p.ContainerPort)
-}
-
-func ownedTable(ctx context.Context, path string) (string, bool, error) {
-	_, table := identity(path)
-	out, err := command(ctx, "nft", "", "-j", "list", "tables")
-	if err != nil {
-		return table, false, err
-	}
-	var listing struct {
-		Items []struct {
-			Table *struct {
-				Family string `json:"family"`
-				Name   string `json:"name"`
-			} `json:"table"`
-		} `json:"nftables"`
-	}
-	if err := json.Unmarshal(out, &listing); err != nil {
-		return table, false, err
-	}
-	for _, item := range listing.Items {
-		if item.Table == nil || item.Table.Family != "ip" || item.Table.Name != table {
-			continue
-		}
-		out, err := command(ctx, "nft", "", "-j", "list", "table", "ip", table)
-		if err != nil {
-			return table, false, err
-		}
-		var detail struct {
-			Items []struct {
-				Table *struct {
-					Comment string `json:"comment"`
-				} `json:"table"`
-			} `json:"nftables"`
-		}
-		if err := json.Unmarshal(out, &detail); err != nil {
-			return table, false, err
-		}
-		for _, item := range detail.Items {
-			if item.Table != nil && item.Table.Comment == table {
-				return table, true, nil
-			}
-		}
-		return table, true, errors.New("refuse cleanup of an unowned nftables table")
-	}
-	return table, false, nil
-}
-
 // Cleanup is idempotent, serialized against new allocations, and safe after
 // partial startup or supervisor loss. Its journal survives every failed cleanup.
 func Cleanup(path string) error {
@@ -744,8 +300,8 @@ func Cleanup(path string) error {
 	// Loopback-only runs have no dependency on networking tools or state.
 	_, allocationErr := os.Lstat(filepath.Join(path, "network.json"))
 	_, namedErr := os.Lstat(filepath.Join(path, "network-named.json"))
-	_, sharedErr := os.Lstat(filepath.Join(runsRoot, ".network-shared.json"))
-	_, namedSharedErr := os.Lstat(filepath.Join(runsRoot, ".named-forwarding.json"))
+	_, sharedErr := os.Lstat(filepath.Join(_runsRoot, ".network-shared.json"))
+	_, namedSharedErr := os.Lstat(filepath.Join(_runsRoot, ".named-forwarding.json"))
 	if errors.Is(allocationErr, os.ErrNotExist) && errors.Is(namedErr, os.ErrNotExist) && errors.Is(sharedErr, os.ErrNotExist) && errors.Is(namedSharedErr, os.ErrNotExist) {
 		return nil
 	}
@@ -765,7 +321,7 @@ func Cleanup(path string) error {
 		return err
 	}
 	if record, exists := records[path]; exists && record.BootID == boot {
-		bridge := bridge
+		bridge := _bridge
 		if record.Network != "" {
 			nr, err := namedRecord(record.Network)
 			if err != nil {
@@ -865,8 +421,457 @@ func Cleanup(path string) error {
 	return restoreNamedForwarding()
 }
 
+func currentBoot() (string, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(data))
+	if !validBoot(id) {
+		return "", errors.New("invalid host boot identity")
+	}
+	return id, nil
+}
+
+func validBoot(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, ch := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if ch != '-' {
+				return false
+			}
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdef", ch) {
+			return false
+		}
+	}
+	return true
+}
+
+func identity(path string) (string, string) {
+	sum := sha256.Sum256([]byte(filepath.Base(path)))
+	suffix := hex.EncodeToString(sum[:])[:12]
+	return "cs" + suffix, "casklet_" + suffix
+}
+
+func checkPath(path string) error {
+	if filepath.Dir(path) != _runsRoot || filepath.Clean(path) != path || !strings.HasPrefix(filepath.Base(path), "run-") || len(filepath.Base(path)) <= 4 {
+		return errors.New("invalid network run directory")
+	}
+	for _, dir := range []string{"/var/lib/casklet", _runsRoot, path} {
+		var stat unix.Stat_t
+		if err := unix.Lstat(dir, &stat); err != nil {
+			return err
+		}
+		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Mode&0022 != 0 {
+			return errors.New("network state requires private root-owned directories")
+		}
+	}
+	return nil
+}
+
+func lock(ctx context.Context) (*os.File, error) {
+	fd, err := unix.Open(filepath.Join(_runsRoot, ".network.lock"), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "network-lock")
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != 0 || stat.Mode&0022 != 0 || stat.Nlink != 1 {
+		file.Close()
+		return nil, errors.New("invalid network coordination lock")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			file.Close()
+			return nil, err
+		}
+		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return file, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
+			file.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			file.Close()
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func readJSON(path string, value any) error {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(fd), "network-state")
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 32768 || stat.Uid != 0 || stat.Mode&0022 != 0 || stat.Nlink != 1 {
+		return errors.New("invalid network state file")
+	}
+	decoder := json.NewDecoder(io.LimitReader(file, 32769))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("trailing network state data")
+	}
+	return nil
+}
+
+func writeJSON(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".network-state-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// Commands use fixed system paths, a bounded deadline, and no invoking-user environment.
+func tool(name string) (string, error) {
+	for _, dir := range []string{"/usr/sbin", "/usr/bin", "/sbin", "/bin"} {
+		path := filepath.Join(dir, name)
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("bridge networking requires %s (install iproute2, nftables, util-linux, and conntrack)", name)
+}
+
+func command(ctx context.Context, name, input string, args ...string) ([]byte, error) {
+	return commandFiles(ctx, nil, name, input, args...)
+}
+
+func commandFiles(ctx context.Context, files []*os.File, name, input string, args ...string) ([]byte, error) {
+	executable, err := tool(name)
+	if err != nil {
+		return nil, err
+	}
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(bounded, executable, args...)
+	cmd.ExtraFiles = files
+	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "LC_ALL=C"}
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
+func allocations() (map[string]allocation, error) {
+	entries, err := os.ReadDir(_runsRoot)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]allocation, len(entries))
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "run-") {
+			continue
+		}
+		path := filepath.Join(_runsRoot, entry.Name())
+		if err := checkPath(path); err != nil {
+			// A loopback-only run may disappear while the directory listing is read.
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		var record allocation
+		err := readJSON(filepath.Join(path, "network.json"), &record)
+		if errors.Is(err, os.ErrNotExist) {
+			err = readJSON(filepath.Join(path, "network-named.json"), &record)
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !validBoot(record.BootID) {
+			return nil, errors.New("invalid recorded network boot identity")
+		}
+		pool := _subnet
+		if record.Network != "" {
+			r, err := namedRecord(record.Network)
+			if err != nil {
+				return nil, err
+			}
+			pool = r.Subnet
+			for _, name := range record.Aliases {
+				if err := config.ValidateDNSName(name); err != nil {
+					return nil, err
+				}
+			}
+		}
+		ip, err := netip.ParseAddr(record.Address)
+		if err != nil || !netip.MustParsePrefix(pool).Contains(ip) || ip.As4()[3] < 2 || ip.As4()[3] == 255 {
+			return nil, errors.New("invalid recorded network address")
+		}
+		if err := config.ValidateNetwork("bridge", nil, record.Publish, nil); err != nil {
+			return nil, err
+		}
+		result[path] = record
+	}
+	return result, nil
+}
+
+func links(ctx context.Context) ([]linkInfo, error) {
+	out, err := command(ctx, "ip", "", "-N", "-j", "-d", "link", "show")
+	if err != nil {
+		return nil, err
+	}
+	var result []linkInfo
+	err = json.Unmarshal(out, &result)
+	return result, err
+}
+
+func ensureBridge(ctx context.Context) error {
+	boot, err := currentBoot()
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(_runsRoot, ".network-shared.json")
+	var state sharedState
+	err = readJSON(statePath, &state)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fresh := errors.Is(err, os.ErrNotExist)
+	if !fresh && state.BootID != boot {
+		return errors.New("previous-boot network state requires recovery")
+	}
+	if !fresh && state.Forwarding != "0" && state.Forwarding != "1" {
+		return errors.New("invalid recorded IP forwarding setting")
+	}
+	devices, err := links(ctx)
+	if err != nil {
+		return err
+	}
+	exists := false
+	for _, device := range devices {
+		if device.Name != _bridge {
+			continue
+		}
+		if fresh || device.Group != ownershipGroup(_bridgeAlias) || device.Info.Kind != "bridge" {
+			return errors.New("casklet0 already exists or is not owned by casklet")
+		}
+		exists = true
+	}
+	if fresh {
+		out, err := command(ctx, "ip", "", "-j", "-4", "route", "show", "table", "all")
+		if err != nil {
+			return err
+		}
+		var routes []struct {
+			Destination string `json:"dst"`
+		}
+		if err := json.Unmarshal(out, &routes); err != nil {
+			return err
+		}
+		pool := netip.MustParsePrefix(_subnet)
+		for _, route := range routes {
+			prefix, err := netip.ParsePrefix(route.Destination)
+			if err != nil {
+				if ip, err := netip.ParseAddr(route.Destination); err == nil && pool.Contains(ip) {
+					return errors.New("bridge subnet 10.231.0.0/24 overlaps a host route")
+				}
+				continue
+			}
+			if prefix.Bits() > 0 && (prefix.Contains(pool.Addr()) || pool.Contains(prefix.Addr())) {
+				return errors.New("bridge subnet 10.231.0.0/24 overlaps a host route")
+			}
+		}
+		value, err := os.ReadFile(_forwardingPath)
+		if err != nil {
+			return err
+		}
+		state.BootID = boot
+		state.Forwarding = strings.TrimSpace(string(value))
+		if state.Forwarding != "0" && state.Forwarding != "1" {
+			return errors.New("invalid host IP forwarding setting")
+		}
+		// Persist intent before the first host mutation so recovery covers interrupted setup.
+		if err := writeJSON(statePath, state); err != nil {
+			return err
+		}
+	}
+	if !exists {
+		// Create and assign ownership in the same netlink request.
+		if err := addLink(_bridge, _bridgeAlias, "bridge", ""); err != nil {
+			return err
+		}
+		if _, err := command(ctx, "ip", "", "link", "set", _bridge, "alias", _bridgeAlias); err != nil {
+			return err
+		}
+	}
+	if _, err := command(ctx, "ip", "", "address", "replace", _gateway+"/24", "dev", _bridge); err != nil {
+		return err
+	}
+	if _, err := command(ctx, "ip", "", "link", "set", _bridge, "up"); err != nil {
+		return err
+	}
+	// Only this owned bridge may route loopback-source packets for local DNAT.
+	if err := os.WriteFile("/proc/sys/net/ipv4/conf/"+_bridge+"/route_localnet", []byte("1\n"), 0600); err != nil {
+		return err
+	}
+	return os.WriteFile(_forwardingPath, []byte("1\n"), 0600)
+}
+
+func containerMAC(address string) string {
+	ip := netip.MustParseAddr(address).As4()
+	return fmt.Sprintf("02:4d:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3])
+}
+
+func reserve(p config.PortMapping) (io.Closer, error) {
+	addr := net.JoinHostPort(p.HostIP, strconv.Itoa(int(p.HostPort)))
+	if p.Protocol == "udp" {
+		return net.ListenPacket("udp4", addr)
+	}
+	return net.Listen("tcp4", addr)
+}
+
+func rules(path, address string, ports []config.PortMapping) string {
+	return rulesFor(path, address, ports, _bridge, _gateway, false, 0)
+}
+
+func rulesFor(path, address string, ports []config.PortMapping, bridge, gateway string, named bool, dnsPort int) string {
+	_, table := identity(path)
+	var result strings.Builder
+	fmt.Fprintf(&result, "create table ip %s { comment \"%s\"; }\nadd table ip %s {\n", table, table, table)
+	result.WriteString("chain prerouting { type nat hook prerouting priority dstnat; policy accept;\n")
+	if named {
+		for _, proto := range []string{"udp", "tcp"} {
+			fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s ip daddr %s %s dport 53 dnat to %s:%d\n", bridge, address, gateway, proto, gateway, dnsPort)
+		}
+	}
+	for _, p := range ports {
+		// Loopback mappings are host-local and must never DNAT ingress packets.
+		if netip.MustParseAddr(p.HostIP).IsLoopback() {
+			continue
+		}
+		result.WriteString(portRule(p, address))
+	}
+	result.WriteString("}\nchain output { type nat hook output priority dstnat; policy accept;\n")
+	for _, p := range ports {
+		result.WriteString(portRule(p, address))
+	}
+	result.WriteString("}\nchain postrouting { type nat hook postrouting priority srcnat; policy accept;\n")
+	// Masquerade outgoing traffic, and SNAT hairpin/localhost DNAT to this container.
+	fmt.Fprintf(&result, "ip saddr %s oifname != \"%s\" counter masquerade\n", address, bridge)
+	fmt.Fprintf(&result, "ip daddr %s ct status dnat oifname \"%s\" counter snat to %s\n", address, bridge, gateway)
+	result.WriteString("}\nchain forward { type filter hook forward priority filter; policy accept;\n")
+	if named {
+		for _, peer := range []string{"csn*", "casklet0"} {
+			fmt.Fprintf(&result, "iifname \"%s\" oifname \"%s\" oifname != \"%s\" drop\n", bridge, peer, bridge)
+			fmt.Fprintf(&result, "oifname \"%s\" iifname \"%s\" iifname != \"%s\" drop\n", bridge, peer, bridge)
+		}
+	}
+
+	fmt.Fprintf(&result, "iifname \"%s\" ip saddr %s accept\n", bridge, address)
+	fmt.Fprintf(&result, "oifname \"%s\" ip daddr %s ct state established,related accept\n", bridge, address)
+	for _, p := range ports {
+		fmt.Fprintf(&result, "oifname \"%s\" ip daddr %s %s dport %d ct status dnat accept\n", bridge, address, p.Protocol, p.ContainerPort)
+	}
+	result.WriteString("}\n}\n")
+	return result.String()
+}
+
+func portRule(p config.PortMapping, address string) string {
+	match := "fib daddr type local"
+	if p.HostIP != "0.0.0.0" {
+		match = "ip daddr " + p.HostIP
+	}
+	return fmt.Sprintf("%s %s dport %d counter dnat to %s:%d\n", match, p.Protocol, p.HostPort, address, p.ContainerPort)
+}
+
+func ownedTable(ctx context.Context, path string) (string, bool, error) {
+	_, table := identity(path)
+	out, err := command(ctx, "nft", "", "-j", "list", "tables")
+	if err != nil {
+		return table, false, err
+	}
+	var listing struct {
+		Items []struct {
+			Table *struct {
+				Family string `json:"family"`
+				Name   string `json:"name"`
+			} `json:"table"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(out, &listing); err != nil {
+		return table, false, err
+	}
+	for _, item := range listing.Items {
+		if item.Table == nil || item.Table.Family != "ip" || item.Table.Name != table {
+			continue
+		}
+		out, err := command(ctx, "nft", "", "-j", "list", "table", "ip", table)
+		if err != nil {
+			return table, false, err
+		}
+		var detail struct {
+			Items []struct {
+				Table *struct {
+					Comment string `json:"comment"`
+				} `json:"table"`
+			} `json:"nftables"`
+		}
+		if err := json.Unmarshal(out, &detail); err != nil {
+			return table, false, err
+		}
+		for _, item := range detail.Items {
+			if item.Table != nil && item.Table.Comment == table {
+				return table, true, nil
+			}
+		}
+		return table, true, errors.New("refuse cleanup of an unowned nftables table")
+	}
+	return table, false, nil
+}
+
 func cleanupBridge(ctx context.Context) error {
-	path := filepath.Join(runsRoot, ".network-shared.json")
+	path := filepath.Join(_runsRoot, ".network-shared.json")
 	var state sharedState
 	err := readJSON(path, &state)
 	if errors.Is(err, os.ErrNotExist) {
@@ -895,23 +900,23 @@ func cleanupBridge(ctx context.Context) error {
 		return err
 	}
 	for _, device := range devices {
-		if device.Name != bridge {
+		if device.Name != _bridge {
 			continue
 		}
-		if device.Group != ownershipGroup(bridgeAlias) || device.Info.Kind != "bridge" {
+		if device.Group != ownershipGroup(_bridgeAlias) || device.Info.Kind != "bridge" {
 			return errors.New("refuse cleanup of an unowned bridge")
 		}
-		if _, err := command(ctx, "ip", "", "link", "delete", bridge); err != nil {
+		if _, err := command(ctx, "ip", "", "link", "delete", _bridge); err != nil {
 			return err
 		}
 	}
 	if state.Forwarding == "0" {
-		value, err := os.ReadFile(forwardingPath)
+		value, err := os.ReadFile(_forwardingPath)
 		if err != nil {
 			return err
 		}
 		if strings.TrimSpace(string(value)) == "1" {
-			if err := os.WriteFile(forwardingPath, []byte("0\n"), 0600); err != nil {
+			if err := os.WriteFile(_forwardingPath, []byte("0\n"), 0600); err != nil {
 				return err
 			}
 		}
