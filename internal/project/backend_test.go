@@ -18,31 +18,7 @@ type valueBackend struct {
 	sampled   []string
 }
 
-func (backend *valueBackend) Records(context.Context, string) ([]container.Record, error) {
-	return backend.records, nil
-}
-func (backend *valueBackend) Status(_ context.Context, _ string, ids []string) ([]ServiceStatus, error) {
-	backend.sampled = append([]string(nil), ids...)
-	return backend.status, nil
-}
-func (backend *valueBackend) Resources(_ context.Context, kind string) ([]Resource, error) {
-	result := []Resource{}
-	for _, resource := range backend.resources {
-		if resource.Kind == kind {
-			result = append(result, resource)
-		}
-	}
-	return result, nil
-}
-func (backend *valueBackend) CreateResource(_ context.Context, kind, name string) (Resource, error) {
-	resource := Resource{Kind: kind, Name: name, CreatedAt: time.Unix(100, 0).UTC()}
-	backend.resources[kind+":"+name] = resource
-	return resource, nil
-}
-func (backend *valueBackend) RemoveResource(_ context.Context, resource Resource) error {
-	delete(backend.resources, resource.Kind+":"+resource.Name)
-	return nil
-}
+var _ Backend = (*valueBackend)(nil)
 
 func TestRunnerUsesTypedInventoryReadinessAndResources(t *testing.T) {
 	plan := fakePlan()
@@ -50,9 +26,9 @@ func TestRunnerUsesTypedInventoryReadinessAndResources(t *testing.T) {
 	service := plan.Services[0]
 	record := container.Record{ID: "00000000000000000000000000000001", Name: service.Name, State: container.StateRunning,
 		Labels: map[string]string{LabelName: plan.Name, LabelService: service.Key, LabelSpec: service.Fingerprint}}
-	backend := &valueBackend{records: []container.Record{record}, resources: map[string]Resource{},
+	backend := &valueBackend{records: []container.Record{record}, resources: make(map[string]Resource),
 		status: []ServiceStatus{{ID: record.ID, Project: plan.Name, Service: service.Key, State: container.StateRunning}}}
-	runner := Runner{Backend: backend, State: State{Version: 1, Name: plan.Name, Resources: map[string]Resource{}}, Save: func(State) error { return nil },
+	runner := Runner{Backend: backend, State: State{Version: 1, Name: plan.Name, Resources: make(map[string]Resource)}, Save: func(State) error { return nil },
 		Call: func(context.Context, ...string) ([]byte, error) {
 			t.Fatal("typed operations escaped into command transport")
 			return nil, nil
@@ -104,4 +80,34 @@ func TestCommandBackendRejectsMalformedResponsesAndPreservesErrors(t *testing.T)
 			}
 		}
 	}
+}
+
+func (backend *valueBackend) Records(context.Context, string) ([]container.Record, error) {
+	return backend.records, nil
+}
+
+func (backend *valueBackend) Status(_ context.Context, _ string, ids []string) ([]ServiceStatus, error) {
+	backend.sampled = append([]string(nil), ids...)
+	return backend.status, nil
+}
+
+func (backend *valueBackend) Resources(_ context.Context, kind string) ([]Resource, error) {
+	result := []Resource{}
+	for _, resource := range backend.resources {
+		if resource.Kind == kind {
+			result = append(result, resource)
+		}
+	}
+	return result, nil
+}
+
+func (backend *valueBackend) CreateResource(_ context.Context, kind, name string) (Resource, error) {
+	resource := Resource{Kind: kind, Name: name, CreatedAt: time.Unix(100, 0).UTC()}
+	backend.resources[kind+":"+name] = resource
+	return resource, nil
+}
+
+func (backend *valueBackend) RemoveResource(_ context.Context, resource Resource) error {
+	delete(backend.resources, resource.Kind+":"+resource.Name)
+	return nil
 }

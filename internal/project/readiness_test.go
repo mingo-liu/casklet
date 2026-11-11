@@ -12,22 +12,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-// Simulate image-inherited healthchecks absent from the explicit project plan.
-func healthInspection(t *testing.T, data []byte, status string) []byte {
-	t.Helper()
-	var value container.Inspection
-	if err := json.Unmarshal(data, &value); err != nil {
-		t.Fatal(err)
-	}
-	value.Config.Healthcheck = &container.InspectionHealthConfig{Test: []string{"CMD-SHELL", "true"}}
-	value.Health = &container.Health{Status: status}
-	result, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result
-}
-
 func TestProjectWaitIncludesLeafHealthAndKeepsDefaultBehavior(t *testing.T) {
 	for _, wait := range []bool{false, true} {
 		fake := newFakeProject()
@@ -243,7 +227,9 @@ func TestProjectWaitHonorsDisabledHealthAndInheritedDeadline(t *testing.T) {
 		data, err := fake.call(ctx, args...)
 		if err == nil && args[0] == "inspect" {
 			var value container.Inspection
-			json.Unmarshal(data, &value)
+			if err := json.Unmarshal(data, &value); err != nil {
+				t.Fatal(err)
+			}
 			value.Config.Healthcheck = &container.InspectionHealthConfig{Test: []string{"NONE"}}
 			data, _ = json.Marshal(value)
 		}
@@ -263,4 +249,20 @@ func TestProjectWaitHonorsDisabledHealthAndInheritedDeadline(t *testing.T) {
 	if !errors.Is(err, ErrWaitTimeout) || len(fake.records) != 1 {
 		t.Fatalf("inherited budget=%v records=%v", err, fake.records)
 	}
+}
+
+// Simulate image-inherited healthchecks absent from the explicit project plan.
+func healthInspection(t *testing.T, data []byte, status string) []byte {
+	t.Helper()
+	var value container.Inspection
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatal(err)
+	}
+	value.Config.Healthcheck = &container.InspectionHealthConfig{Test: []string{"CMD-SHELL", "true"}}
+	value.Health = &container.Health{Status: status}
+	result, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

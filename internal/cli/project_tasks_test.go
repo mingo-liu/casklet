@@ -28,8 +28,8 @@ func TestProjectTaskConfigAndExitStatus(t *testing.T) {
 			t.Fatalf("accepted %s", run)
 		}
 	}
-	var output error = &project.TaskFailure{Service: "migrate", Code: 7}
-	if !errors.As(output, new(*project.TaskFailure)) {
+	var output error = &project.TaskFailureError{Service: "migrate", Code: 7}
+	if !errors.As(output, new(*project.TaskFailureError)) {
 		t.Fatal("task error type")
 	}
 	code := manageOperation(Request{Action: "project-up"}, os.Stderr, func(_ context.Context) (int, error) { return 125, output })
