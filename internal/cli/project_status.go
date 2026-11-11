@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 
 	"github.com/mingo-liu/casklet/internal/container"
 	"github.com/mingo-liu/casklet/internal/project"
@@ -24,7 +25,7 @@ func parseProjectStatus(args []string) (Request, error) {
 		}
 		seen[id] = true
 	}
-	return Request{Action: "project-status", Reference: args[0], References: args[1:]}, nil
+	return Request{Action: "project-status", Reference: args[0], References: slices.Clone(args[1:])}, nil
 }
 
 func executeProjectStatus(ctx context.Context, r Request, out io.Writer) error {

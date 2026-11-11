@@ -127,7 +127,7 @@ func parseProject(r Request, args []string) (Request, error) {
 		if fs.NArg() < 1 {
 			return r, errors.New("project lifecycle command requires PROJECT [SERVICE ...]")
 		}
-		r.Reference, r.Services = fs.Arg(0), fs.Args()[1:]
+		r.Reference, r.Services = fs.Arg(0), slices.Clone(fs.Args()[1:])
 		if r.StopTimeout != nil {
 			if err := config.ValidateStopTimeout(*r.StopTimeout); err != nil {
 				return r, err

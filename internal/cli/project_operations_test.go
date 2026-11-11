@@ -79,3 +79,26 @@ func TestProjectExecResolvesLogicalServiceAndKeepsWorkloadOperands(t *testing.T)
 		t.Fatalf("args %v %v", args, err)
 	}
 }
+
+func TestParsedProjectSelectionsOwnArguments(t *testing.T) {
+	tests := []struct {
+		giveArgs     []string
+		wantServices []string
+		wantRefs     []string
+	}{
+		{giveArgs: []string{"project", "start", "demo", "api"}, wantServices: []string{"api"}},
+		{giveArgs: []string{"__project-status", "demo", strings.Repeat("a", 32)}, wantRefs: []string{strings.Repeat("a", 32)}},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.giveArgs[:2], " "), func(t *testing.T) {
+			request, err := Parse(tt.giveArgs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.giveArgs[len(tt.giveArgs)-1] = "replacement"
+			if !reflect.DeepEqual(request.Services, tt.wantServices) || !reflect.DeepEqual(request.References, tt.wantRefs) {
+				t.Fatalf("caller mutation changed selection: services=%v references=%v", request.Services, request.References)
+			}
+		})
+	}
+}
