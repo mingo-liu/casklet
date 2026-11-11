@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -142,6 +143,7 @@ func Decode(r io.Reader, registry string) (Credential, error) {
 
 // DecodeContext bounds a stalled host handshake and closes a pipe on caller
 // cancellation so the guest CLI can honor forwarded signals during preparation.
+// Other readers must finish their reads independently; Close need not interrupt Read.
 func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credential, error) {
 	type result struct {
 		credential Credential
@@ -158,8 +160,11 @@ func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credentia
 	case <-ctx.Done():
 		if closer, ok := r.(io.Closer); ok {
 			_ = closer.Close()
-			//lint:ignore S1005 Cancellation takes precedence over the completed decode error.
-			_ = <-done
+			switch r.(type) {
+			case net.Conn, *os.File, *io.PipeReader:
+				//lint:ignore S1005 Cancellation takes precedence over the completed decode error.
+				_ = <-done
+			}
 		}
 		return Credential{}, ctx.Err()
 	}

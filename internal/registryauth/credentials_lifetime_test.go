@@ -15,7 +15,7 @@ type credentialHandshakeReader struct {
 	finished chan struct{}
 }
 
-func TestCredentialCancellationWaitsForReader(t *testing.T) {
+func TestCredentialCancellationDoesNotWaitForUninterruptibleReader(t *testing.T) {
 	var (
 		ctx, cancel = context.WithCancel(context.Background())
 		reader      = &credentialHandshakeReader{
@@ -27,7 +27,14 @@ func TestCredentialCancellationWaitsForReader(t *testing.T) {
 		done = make(chan error, 1)
 	)
 	defer cancel()
-	defer close(reader.release)
+	defer func() {
+		close(reader.release)
+		select {
+		case <-reader.finished:
+		case <-time.After(time.Second):
+			t.Error("released credential reader did not finish")
+		}
+	}()
 	go func() {
 		_, err := DecodeContext(ctx, reader, "ghcr.io")
 		done <- err
@@ -39,34 +46,22 @@ func TestCredentialCancellationWaitsForReader(t *testing.T) {
 	}
 	cancel()
 	select {
-	case <-reader.closed:
-	case <-time.After(time.Second):
-		t.Fatal("cancellation did not close credential input")
-	}
-	select {
-	case err := <-done:
-		t.Fatalf("cancellation returned before the input read stopped: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-	reader.release <- struct{}{}
-	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancellation: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("canceled credential input was not joined")
+		t.Fatal("cancellation waited for a reader that Close cannot interrupt")
 	}
 	select {
-	case <-reader.finished:
+	case <-reader.closed:
 	default:
-		t.Fatal("credential input read remains active")
+		t.Fatal("credential cancellation did not close its input")
 	}
 }
 
 func (r *credentialHandshakeReader) Read([]byte) (int, error) {
 	close(r.started)
-	<-r.closed
 	<-r.release
 	close(r.finished)
 	return 0, io.ErrClosedPipe

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
@@ -34,6 +36,7 @@ type PortCheckResult struct {
 
 // CheckHostPorts runs while the guest holds the lifecycle operation lock,
 // after stopping the old execution and before publishing a new generation.
+// Standard pipe/socket inputs close on cancellation; other readers own their read lifetime.
 func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, ports []config.PortMapping) error {
 	if len(ports) == 0 {
 		return nil
@@ -51,9 +54,12 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	select {
 	case <-ctx.Done():
 		if closer, ok := input.(io.Closer); ok {
-			_ = closer.Close()
-			//lint:ignore S1005 Cancellation takes precedence over the completed handshake error.
-			_ = <-completed
+			switch input.(type) {
+			case net.Conn, *os.File, *io.PipeReader:
+				_ = closer.Close()
+				//lint:ignore S1005 Cancellation takes precedence over the completed handshake error.
+				_ = <-completed
+			}
 		}
 		return ctx.Err()
 	case err := <-completed:
