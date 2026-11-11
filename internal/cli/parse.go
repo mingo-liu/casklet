@@ -129,11 +129,11 @@ func Parse(args []string) (request Request, err error) {
 		return parseEvents(r, args[1:])
 	}
 	if r.Action == "cp" {
-		return parseCopy(r, args[1:], false)
+		return parseCopy(r, args[1:], false /* private */)
 	}
 	if r.Action == "__copy-in" || r.Action == "__copy-out" {
 		r.Action = strings.TrimPrefix(r.Action, "__")
-		return parseCopy(r, args[1:], true)
+		return parseCopy(r, args[1:], true /* private */)
 	}
 	if r.Action == "exec" {
 		return parseExec(r, args[1:])

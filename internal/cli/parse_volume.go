@@ -4,8 +4,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/config"
 	"io"
+
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func parseVolume(r Request, args []string) (Request, error) {

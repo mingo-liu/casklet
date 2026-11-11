@@ -20,7 +20,7 @@ func ExecuteHostLifecycle(args []string, stdin, stdout, stderr *os.File) int {
 		err = fmt.Errorf("host lifecycle transport requires root and start or restart")
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", err)
 		return 125
 	}
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) {

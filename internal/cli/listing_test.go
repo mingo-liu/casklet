@@ -14,29 +14,8 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func completeListingRecord() container.Record {
-	at := time.Date(2026, 10, 26, 1, 2, 3, 0, time.UTC)
-	code, grace := 7, 3*time.Second
-	boot := "00000000-0000-0000-0000-000000000001"
-	return container.Record{
-		ExitReason: "oom_killed", OOMKilled: true,
-		Labels:        map[string]string{project.LabelName: "demo", project.LabelService: "app", project.LabelSpec: "spec"},
-		Health:        &container.Health{Status: container.HealthStopped, FailingStreak: 1, Checks: []container.HealthResult{{StartedAt: at, FinishedAt: at, ExitCode: 124, TimedOut: true, ExecutionFailed: true}}},
-		RestartBootID: boot, StoppedBootID: boot, StoppedByUser: true,
-		RestartCount: 2, RestartAt: &at, LogLocking: true,
-		CleanupFailures: []string{"cgroup.remove"}, Generation: 3, LaunchAt: &at,
-		PreviousExit: &container.ExecutionResult{ExitReason: "exited", CleanupFailures: []string{"run.remove"}, Generation: 2, StartedAt: &at, FinishedAt: &at, ExitCode: &code},
-		StopTimeout:  &grace, RetainRootFS: true, Version: 1,
-		ID: strings.Repeat("a", 32), BootID: boot, Name: "cp-demo-app", State: container.StateFailed,
-		CreatedAt: at, StartedAt: &at, FinishedAt: &at, ExitCode: &code,
-		Error: "legacy-error", RunPath: "/legacy-run", Cgroup: "/legacy-cgroup", LogTruncated: true,
-		Command: []string{"echo", "", "line\nbreak", "--publish"},
-		Publish: []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}},
-	}
-}
-
 func TestContainerListingJSONPreservesExistingFieldsAndOmissionRules(t *testing.T) {
-	empty := container.Record{Command: []string{}, Labels: map[string]string{}, Publish: []config.PortMapping{}, CleanupFailures: []string{}, Health: &container.Health{Checks: []container.HealthResult{}}}
+	empty := container.Record{Command: []string{}, Labels: make(map[string]string), Publish: []config.PortMapping{}, CleanupFailures: []string{}, Health: &container.Health{Checks: []container.HealthResult{}}}
 	zero, grace := 0, time.Duration(0)
 	zeroPointers := container.Record{ExitCode: &zero, StopTimeout: &grace, PreviousExit: &container.ExecutionResult{ExitCode: &zero}}
 	for _, records := range [][]container.Record{nil, {}, {{}}, {empty}, {zeroPointers}, {completeListingRecord(), empty, zeroPointers}} {
@@ -121,5 +100,26 @@ func TestProjectListingTransportDropsFieldsOutsideItsContract(t *testing.T) {
 	encoded, _ := json.Marshal(got)
 	if !bytes.Equal(encoded, want) {
 		t.Fatalf("transport did not preserve its explicit contract:\ngot %s\nwant %s", encoded, want)
+	}
+}
+
+func completeListingRecord() container.Record {
+	at := time.Date(2026, 10, 26, 1, 2, 3, 0, time.UTC)
+	code, grace := 7, 3*time.Second
+	boot := "00000000-0000-0000-0000-000000000001"
+	return container.Record{
+		ExitReason: "oom_killed", OOMKilled: true,
+		Labels:        map[string]string{project.LabelName: "demo", project.LabelService: "app", project.LabelSpec: "spec"},
+		Health:        &container.Health{Status: container.HealthStopped, FailingStreak: 1, Checks: []container.HealthResult{{StartedAt: at, FinishedAt: at, ExitCode: 124, TimedOut: true, ExecutionFailed: true}}},
+		RestartBootID: boot, StoppedBootID: boot, StoppedByUser: true,
+		RestartCount: 2, RestartAt: &at, LogLocking: true,
+		CleanupFailures: []string{"cgroup.remove"}, Generation: 3, LaunchAt: &at,
+		PreviousExit: &container.ExecutionResult{ExitReason: "exited", CleanupFailures: []string{"run.remove"}, Generation: 2, StartedAt: &at, FinishedAt: &at, ExitCode: &code},
+		StopTimeout:  &grace, RetainRootFS: true, Version: 1,
+		ID: strings.Repeat("a", 32), BootID: boot, Name: "cp-demo-app", State: container.StateFailed,
+		CreatedAt: at, StartedAt: &at, FinishedAt: &at, ExitCode: &code,
+		Error: "legacy-error", RunPath: "/legacy-run", Cgroup: "/legacy-cgroup", LogTruncated: true,
+		Command: []string{"echo", "", "line\nbreak", "--publish"},
+		Publish: []config.PortMapping{{HostIP: "127.0.0.1", HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}},
 	}
 }

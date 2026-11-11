@@ -110,7 +110,7 @@ func TestProjectRecordPagesRejectMalformedContinuationsAndHonorCancellation(t *t
 	call := newProjectBackend("demo", func(context.Context, ...string) ([]byte, error) {
 		count++
 		cancel()
-		records := make([]container.Record, projectRecordPageSize)
+		records := make([]container.Record, _projectRecordPageSize)
 		for i := range records {
 			records[i].ID = fmt.Sprintf("%032x", i+1)
 		}
@@ -157,7 +157,7 @@ func TestProjectInventoryPreservesUnownedNameConflicts(t *testing.T) {
 func testRecordPage(records []container.Record, cursor, name string, inventory bool, excluded []string) container.RecordPage {
 	records = append([]container.Record(nil), records...)
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	skip := map[string]bool{}
+	skip := make(map[string]bool)
 	for _, id := range excluded {
 		skip[id] = true
 	}

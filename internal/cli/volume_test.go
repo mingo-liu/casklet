@@ -1,8 +1,9 @@
 package cli
 
 import (
-	"github.com/mingo-liu/casklet/internal/config"
 	"testing"
+
+	"github.com/mingo-liu/casklet/internal/config"
 )
 
 func TestVolumeCommandsAndMountValidation(t *testing.T) {
@@ -22,6 +23,7 @@ func TestVolumeCommandsAndMountValidation(t *testing.T) {
 		}
 	}
 }
+
 func TestNamedVolumesAreNeverTranslatedAsHostPaths(t *testing.T) {
 	args := []string{"run", "--mount", "type=volume,source=data,target=/data", "--", "sh"}
 	got, err := hostPathArguments(args, "run")

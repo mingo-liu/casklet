@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mingo-liu/casklet/internal/container"
-	"github.com/mingo-liu/casklet/internal/network"
 	"io"
 	"text/tabwriter"
+
+	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/network"
 )
 
 func executeNetwork(ctx context.Context, r Request, stdout io.Writer) (int, error) {
@@ -46,9 +47,13 @@ func executeNetwork(ctx context.Context, r Request, stdout io.Writer) (int, erro
 			return 0, json.NewEncoder(stdout).Encode(records)
 		}
 		w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSUBNET\tGATEWAY\tBRIDGE")
+		if _, err := fmt.Fprintln(w, "NAME\tSUBNET\tGATEWAY\tBRIDGE"); err != nil {
+			return 125, err
+		}
 		for _, record := range records {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", record.Name, record.Subnet, record.Gateway, record.Bridge)
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", record.Name, record.Subnet, record.Gateway, record.Bridge); err != nil {
+				return 125, err
+			}
 		}
 		return 0, w.Flush()
 	}

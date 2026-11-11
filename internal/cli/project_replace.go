@@ -46,7 +46,7 @@ func executeProjectPreflight(ctx context.Context, r Request, out io.Writer) (int
 		if err != nil {
 			return 125, err
 		}
-		defer lease.Close()
+		defer func() { _ = lease.Close() }()
 		cfg = resolved
 	}
 	if err := cfg.ValidateExecution(); err != nil {
@@ -65,7 +65,7 @@ func executeProjectPreflight(ctx context.Context, r Request, out io.Writer) (int
 	if err != nil {
 		return 125, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	if cfg.Image != "" {
 		_, err = io.WriteString(out, cfg.Image+"\n")
 	}

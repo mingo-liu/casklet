@@ -95,7 +95,7 @@ func TestImageListingTable(t *testing.T) {
 }
 
 func TestImageSizeUnitsAndRounding(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		bytes int64
 		want  string
 	}{
@@ -105,9 +105,10 @@ func TestImageSizeUnitsAndRounding(t *testing.T) {
 		{202000000, "202MB"}, {1850000000, "1.85GB"},
 		{1000000000000, "1TB"}, {1000000000000000, "1PB"},
 		{1000000000000000000, "1EB"}, {1<<63 - 1, "9.22EB"},
-	} {
-		if got := displayImageSize(test.bytes); got != test.want {
-			t.Errorf("size %d = %q, want %q", test.bytes, got, test.want)
+	}
+	for _, tt := range tests {
+		if got := displayImageSize(tt.bytes); got != tt.want {
+			t.Errorf("size %d = %q, want %q", tt.bytes, got, tt.want)
 		}
 	}
 }

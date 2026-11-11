@@ -21,6 +21,10 @@ type boundedProjectOutput struct {
 	limit    int
 }
 
+var _ io.Writer = (*boundedProjectOutput)(nil)
+
+const _projectPreviewEnvironment = "CASKLET_PROJECT_PREVIEW"
+
 func (output *boundedProjectOutput) Write(data []byte) (int, error) {
 	remaining := output.limit - len(output.data)
 	if len(data) > remaining {
@@ -28,43 +32,6 @@ func (output *boundedProjectOutput) Write(data []byte) (int, error) {
 	}
 	output.data = append(output.data, data[:min(len(data), remaining)]...)
 	return len(data), nil
-}
-
-const projectPreviewEnvironment = "CASKLET_PROJECT_PREVIEW"
-
-func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
-	binary, err := os.Executable()
-	if err != nil {
-		return nil, err
-	}
-	return func(ctx context.Context, args ...string) ([]byte, error) {
-		output := &boundedProjectOutput{limit: 8 << 20}
-		cmd := exec.CommandContext(ctx, binary, args...)
-		if preview {
-			cmd.Env = append(os.Environ(), projectPreviewEnvironment+"=1")
-		}
-		// Allow each existing CLI to cancel its remote session and detached startup
-		// normally before the bounded fallback kills an unresponsive child.
-		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-		cmd.WaitDelay = 80 * time.Second
-		cmd.Stdout, cmd.Stderr = output, diagnostic
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, fmt.Errorf("project operation %s failed: %w", args[0], err)
-		}
-		if output.overflow {
-			return nil, errors.New("project operation output exceeds 8 MiB")
-		}
-		if args[0] == "__project-reservations" {
-			return platformProjectReservations(output.data)
-		}
-		if args[0] == "__project-records" {
-			return platformProjectRecords(output.data)
-		}
-		return output.data, nil
-	}, nil
 }
 
 func executeProject(r Request, stdout, stderr io.Writer, input ...*os.File) int {
@@ -88,7 +55,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 				Valid    bool     `json:"valid"`
 				Name     string   `json:"name"`
 				Services []string `json:"services"`
-			}{true, r.Project.Name, services}
+			}{Valid: true, Name: r.Project.Name, Services: services}
 			return 0, json.NewEncoder(stdout).Encode(summary)
 		}
 		_, err := fmt.Fprintf(stdout, "Project %s is valid (%d services).\n", r.Project.Name, len(r.Project.Services))
@@ -143,7 +110,7 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 	if err != nil {
 		return 125, preparationError(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	state, err := store.Load()
 	if err != nil {
 		return 125, preparationError(err)
@@ -230,4 +197,39 @@ func executeProjectContext(ctx context.Context, r Request, stdout, stderr io.Wri
 		return 0, runner.Down(ctx, name, r.RemoveVolumes)
 	}
 	return 125, errors.New("invalid project operation")
+}
+
+func projectCall(diagnostic io.Writer, preview bool) (project.Call, error) {
+	binary, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, args ...string) ([]byte, error) {
+		output := &boundedProjectOutput{limit: 8 << 20}
+		cmd := exec.CommandContext(ctx, binary, args...)
+		if preview {
+			cmd.Env = append(os.Environ(), _projectPreviewEnvironment+"=1")
+		}
+		// Allow each existing CLI to cancel its remote session and detached startup
+		// normally before the bounded fallback kills an unresponsive child.
+		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.WaitDelay = 80 * time.Second
+		cmd.Stdout, cmd.Stderr = output, diagnostic
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("project operation %s failed: %w", args[0], err)
+		}
+		if output.overflow {
+			return nil, errors.New("project operation output exceeds 8 MiB")
+		}
+		if args[0] == "__project-reservations" {
+			return platformProjectReservations(output.data)
+		}
+		if args[0] == "__project-records" {
+			return platformProjectRecords(output.data)
+		}
+		return output.data, nil
+	}, nil
 }

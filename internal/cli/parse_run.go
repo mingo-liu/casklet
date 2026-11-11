@@ -16,7 +16,7 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
-var hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+var _hostnamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
 func parseRun(r Request, args []string) (Request, error) {
 	var memory, cpus, user string
@@ -78,7 +78,7 @@ func parseRun(r Request, args []string) (Request, error) {
 	if r.Entrypoint != nil && (r.Config.Image == "" || strings.ContainsRune(*r.Entrypoint, 0)) {
 		return r, errors.New("--entrypoint requires --image and cannot contain NUL")
 	}
-	if !hostnamePattern.MatchString(r.Config.Hostname) {
+	if !_hostnamePattern.MatchString(r.Config.Hostname) {
 		return r, errors.New("hostname must contain 1-63 letters, digits, or hyphens and start and end with a letter or digit")
 	}
 	var err error
@@ -308,7 +308,7 @@ func runFlagSet(r *Request, memory, cpus, user *string) *flag.FlagSet {
 				return err
 			}
 			if r.Config.Labels == nil {
-				r.Config.Labels = map[string]string{}
+				r.Config.Labels = make(map[string]string)
 			}
 			r.Config.Labels[key] = val
 			return config.ValidateLabels(r.Config.Labels)

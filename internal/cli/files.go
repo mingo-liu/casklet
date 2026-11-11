@@ -17,26 +17,27 @@ import (
 	"github.com/mingo-liu/casklet/internal/runargs"
 )
 
-const optionFileLimit = 1 << 20
+const _optionFileLimit = 1 << 20
 
-var repeatedOptions = map[string]bool{"label": true, "network-alias": true, "env": true, "env-file": true, "mount": true, "secret": true, "dns": true, "publish": true, "uid-map": true, "gid-map": true}
-var runFileOptions = strings.Fields("rootfs image entrypoint detach name hostname memory tmp-size shm-size pids-limit cpus timeout stop-timeout stop-signal restart log-max-size log-max-files seccomp userns rootless uid-map gid-map network network-alias dns publish interactive tty env env-file label mount secret workdir user read-only progress health-cmd health-interval health-timeout health-retries health-start-period health-start-interval no-healthcheck")
+var _repeatedOptions = map[string]bool{"label": true, "network-alias": true, "env": true, "env-file": true, "mount": true, "secret": true, "dns": true, "publish": true, "uid-map": true, "gid-map": true}
+
+var _runFileOptions = strings.Fields("rootfs image entrypoint detach name hostname memory tmp-size shm-size pids-limit cpus timeout stop-timeout stop-signal restart log-max-size log-max-files seccomp userns rootless uid-map gid-map network network-alias dns publish interactive tty env env-file label mount secret workdir user read-only progress health-cmd health-interval health-timeout health-retries health-start-period health-start-interval no-healthcheck")
 
 func readOptionFile(filename string) ([]byte, error) {
 	f, err := os.OpenFile(filename, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > optionFileLimit {
+	if !info.Mode().IsRegular() || info.Size() > _optionFileLimit {
 		return nil, errors.New("option file must be regular and at most 1 MiB")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, optionFileLimit+1))
-	if len(data) > optionFileLimit {
+	data, err := io.ReadAll(io.LimitReader(f, _optionFileLimit+1))
+	if len(data) > _optionFileLimit {
 		return nil, errors.New("option file exceeds 1 MiB")
 	}
 	return data, err
@@ -48,7 +49,7 @@ func readEnvironment(filename string) ([]string, error) {
 		return nil, err
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 4096), optionFileLimit+1)
+	scanner.Buffer(make([]byte, 4096), _optionFileLimit+1)
 	var env []string
 	for line := 1; scanner.Scan(); line++ {
 		value := strings.TrimSuffix(scanner.Text(), "\r")
@@ -82,9 +83,9 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 	if err != nil || token != json.Delim('{') {
 		return nil, nil, errors.New("run config must be a JSON object")
 	}
-	values := map[string]json.RawMessage{}
+	values := make(map[string]json.RawMessage)
 	allowed := map[string]bool{"command": true}
-	for _, name := range runFileOptions {
+	for _, name := range _runFileOptions {
 		allowed[name] = true
 	}
 	for decoder.More() {
@@ -92,7 +93,10 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 		if err != nil {
 			return nil, nil, err
 		}
-		name := key.(string)
+		name, ok := key.(string)
+		if !ok {
+			return nil, nil, errors.New("run config must be a JSON object")
+		}
 		if !allowed[name] || values[name] != nil {
 			return nil, nil, fmt.Errorf("unknown or duplicate run config field %q", name)
 		}
@@ -128,7 +132,7 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 		}
 		var entries []string
 		switch {
-		case repeatedOptions[name]:
+		case _repeatedOptions[name]:
 			if json.Unmarshal(raw, &entries) != nil {
 				return nil, nil, fmt.Errorf("config field %q must be a string array", name)
 			}
@@ -145,7 +149,7 @@ func configDataArguments(data []byte, filename string, explicit map[string]bool)
 			}
 			entries = []string{value}
 		}
-		if explicit[name] && !repeatedOptions[name] {
+		if explicit[name] && !_repeatedOptions[name] {
 			continue
 		}
 		if (name == "rootfs" || name == "image") && (explicit["rootfs"] || explicit["image"]) {
@@ -195,7 +199,7 @@ func expandFileArguments(args []string) ([]string, error) {
 	if len(args) == 0 || args[0] != "run" && args[0] != "exec" {
 		return args, nil
 	}
-	explicit := map[string]bool{}
+	explicit := make(map[string]bool)
 	configPath := ""
 	configCount := 0
 	help := false

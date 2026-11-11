@@ -105,7 +105,7 @@ func projectExecArguments(ctx context.Context, r Request, backend project.Backen
 func executeProjectExec(r Request, stdout, stderr io.Writer, input ...*os.File) int {
 	var args []string
 	code := manageOperation(r, stderr, func(ctx context.Context) (int, error) {
-		call, err := projectCall(stderr, false)
+		call, err := projectCall(stderr, false /* preview */)
 		if err != nil {
 			return 125, err
 		}

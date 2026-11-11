@@ -18,14 +18,18 @@ type statsOperations struct {
 }
 
 func containerStatsOperations() statsOperations {
-	return statsOperations{container.List, container.Inspect, container.StatsMany}
+	return statsOperations{
+		list:    container.List,
+		inspect: container.Inspect,
+		sample:  container.StatsMany,
+	}
 }
 
 func executeStats(ctx context.Context, r Request, out io.Writer, ops statsOperations) error {
 	// Snapshot selection once. Reusing a name or adding a matching label cannot
 	// redirect a running monitor to another container.
 	var ids []string
-	names := map[string]string{}
+	names := make(map[string]string)
 	add := func(id, name string) {
 		if _, found := names[id]; !found {
 			ids = append(ids, id)
@@ -41,7 +45,7 @@ func executeStats(ctx context.Context, r Request, out io.Writer, ops statsOperat
 			add(record.ID, record.Name)
 		}
 	} else {
-		records, err := ops.list(ctx, true)
+		records, err := ops.list(ctx, true /* all */)
 		if err != nil {
 			return err
 		}

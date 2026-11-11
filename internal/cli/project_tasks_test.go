@@ -23,7 +23,9 @@ func TestProjectTaskConfigAndExitStatus(t *testing.T) {
 	}
 	for _, run := range []string{`"restart":"always"`, `"health-cmd":"true"`, `"health-interval":"1s"`} {
 		body := `{"name":"demo","services":{"task":{"task":true,"run":{"image":"app:1",` + run + `}}}}`
-		os.WriteFile(filename, []byte(body), 0600)
+		if err := os.WriteFile(filename, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := Parse([]string{"project", "validate", "--config", filename}); err == nil {
 			t.Fatalf("accepted %s", run)
 		}

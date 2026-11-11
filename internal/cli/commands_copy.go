@@ -12,11 +12,11 @@ import (
 	"github.com/mingo-liu/casklet/internal/copyfs"
 )
 
+type copyTransport func(context.Context, []string, *os.File, *os.File, *os.File) (int, error)
+
 func executeCopy(r Request, stderr *os.File) int {
 	return manageOperation(r, stderr, func(ctx context.Context) (int, error) { return copyHost(ctx, r, stderr, platformCopy) })
 }
-
-type copyTransport func(context.Context, []string, *os.File, *os.File, *os.File) (int, error)
 
 // Local paths stay on the invoking host and require no VM share.
 func copyHost(ctx context.Context, r Request, stderr *os.File, transport copyTransport) (int, error) {
@@ -35,7 +35,7 @@ func copyHost(ctx context.Context, r Request, stderr *os.File, transport copyTra
 	if err != nil {
 		return 125, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	name := filepath.Base(filename)
 	if !toContainer && strings.HasSuffix(local.Path, "/") {
 		name += "/"
@@ -52,13 +52,13 @@ func copyHost(ctx context.Context, r Request, stderr *os.File, transport copyTra
 	if err != nil {
 		return 125, err
 	}
-	defer input.Close()
-	defer output.Close()
+	defer func() { _ = input.Close() }()
+	defer func() { _ = output.Close() }()
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return 125, err
 	}
-	defer null.Close()
+	defer func() { _ = null.Close() }()
 	archiveEnd := input
 	if toContainer {
 		archiveEnd = output
@@ -76,8 +76,8 @@ func copyHost(ctx context.Context, r Request, stderr *os.File, transport copyTra
 		} else {
 			err = copyfs.Import(ctx, root, name, stream)
 		}
-		stream.Close()
-		archiveEnd.Close()
+		_ = stream.Close()
+		_ = archiveEnd.Close()
 		if err != nil {
 			cancel()
 		}
@@ -90,9 +90,9 @@ func copyHost(ctx context.Context, r Request, stderr *os.File, transport copyTra
 	}
 	code, transportErr := transport(ctx, []string{action, remote.Container, remote.Path}, stdin, stdout, stderr)
 	if toContainer {
-		input.Close()
+		_ = input.Close()
 	} else {
-		output.Close()
+		_ = output.Close()
 	}
 	if transportErr != nil || code != 0 {
 		cancel()

@@ -43,10 +43,14 @@ func manageOperation(r Request, stderr io.Writer, operation func(context.Context
 	if ctx.Err() != nil {
 		// This context is canceled only by a signal, which is also delivered
 		// to the buffered channel. Receiving it avoids a notification race.
-		return 128 + int((<-signals).(syscall.Signal))
+		sig, ok := (<-signals).(syscall.Signal)
+		if !ok {
+			return 125
+		}
+		return 128 + int(sig)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
+		_, _ = fmt.Fprintf(stderr, "casklet: %v\n", operationError(r, err))
 		if r.Action == "wait" && r.Healthy && errors.Is(err, container.ErrWaitTimeout) {
 			return 124
 		}
