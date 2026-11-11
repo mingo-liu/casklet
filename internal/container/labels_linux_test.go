@@ -11,8 +11,10 @@ import (
 )
 
 func TestLabelsPersistAcrossReopeningAndExecutions(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
 	cfg.Labels = map[string]string{"project": "demo", "role": "api", "empty": ""}
 	record, err := store.Create(context.Background(), cfg, "labeled")
 	if err != nil {
@@ -48,7 +50,7 @@ func TestLabelsPersistAcrossReopeningAndExecutions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	next, err := reopened.BeginExecution(context.Background(), got.ID, got.Generation)
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +65,10 @@ func TestLabelsPersistAcrossReopeningAndExecutions(t *testing.T) {
 }
 
 func TestLabelMutationsCannotSplitListingAndConfiguration(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
 	cfg.Labels = map[string]string{"project": "original"}
 	record, err := store.Create(context.Background(), cfg, "immutable-labels")
 	if err != nil {
@@ -83,9 +87,11 @@ func TestLabelMutationsCannotSplitListingAndConfiguration(t *testing.T) {
 }
 
 func TestEscapedLabelMetadataFitsAndOversizedCreationRollsBack(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
-	cfg.Labels = map[string]string{}
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
+	cfg.Labels = make(map[string]string)
 	for _, key := range []string{"a", "b", "c", "d"} {
 		cfg.Labels[key] = strings.Repeat("\\", 4095)
 	}

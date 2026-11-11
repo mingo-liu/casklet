@@ -13,24 +13,30 @@ import (
 )
 
 func TestInitialLogTailAcrossSegmentsAndEmptyFiles(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		name     string
 		segments []string // Oldest first.
 		tail     int
 		want     string
 	}{
-		{"zero", []string{"old\n", "new\n"}, 0, ""},
-		{"all", []string{"old\n", "new\n"}, -1, "old\nnew\n"},
-		{"terminated", []string{"old\n", "new\n"}, 1, "new\n"},
-		{"unterminated", []string{"old\n", "new"}, 1, "new"},
-		{"split line", []string{"old\npart", "ial\nlast\n"}, 2, "partial\nlast\n"},
-		{"empty current", []string{"old\nnew\n", "", ""}, 1, "new\n"},
-		{"empty lines", []string{"old\n", "\n\n"}, 2, "\n\n"},
-		{"boundary", []string{"old\n", "new\n"}, 2, "old\nnew\n"},
-		{"too many", []string{"old\n", "new\n"}, 100, "old\nnew\n"},
-		{"empty", []string{"", ""}, 2, ""},
-		{"long line", []string{"old\n" + strings.Repeat("x", 40<<10), "last"}, 1, strings.Repeat("x", 40<<10) + "last"},
-	} {
+		{name: "zero", segments: []string{"old\n", "new\n"}, tail: 0, want: ""},
+		{name: "all", segments: []string{"old\n", "new\n"}, tail: -1, want: "old\nnew\n"},
+		{name: "terminated", segments: []string{"old\n", "new\n"}, tail: 1, want: "new\n"},
+		{name: "unterminated", segments: []string{"old\n", "new"}, tail: 1, want: "new"},
+		{name: "split line", segments: []string{"old\npart", "ial\nlast\n"}, tail: 2, want: "partial\nlast\n"},
+		{name: "empty current", segments: []string{"old\nnew\n", "", ""}, tail: 1, want: "new\n"},
+		{name: "empty lines", segments: []string{"old\n", "\n\n"}, tail: 2, want: "\n\n"},
+		{name: "boundary", segments: []string{"old\n", "new\n"}, tail: 2, want: "old\nnew\n"},
+		{name: "too many", segments: []string{"old\n", "new\n"}, tail: 100, want: "old\nnew\n"},
+		{name: "empty", segments: []string{"", ""}, tail: 2, want: ""},
+		{
+			name:     "long line",
+			segments: []string{"old\n" + strings.Repeat("x", 40<<10), "last"},
+			tail:     1,
+			want:     strings.Repeat("x", 40<<10) + "last",
+		},
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store, record, cfg, _ := rotationFixture(t, len(tt.segments))
 			cfg.LogMaxSize = 128 << 10
@@ -43,7 +49,7 @@ func TestInitialLogTailAcrossSegmentsAndEmptyFiles(t *testing.T) {
 			if cursor.pin != nil {
 				defer func() {
 					if cursor.pin != nil {
-						cursor.pin.Close()
+						_ = cursor.pin.Close()
 					}
 				}()
 			}
@@ -73,7 +79,7 @@ func TestInitialLogTailSkipsPayloadAndFollowsRotation(t *testing.T) {
 		}
 		defer func() {
 			if cursor.pin != nil {
-				cursor.pin.Close()
+				_ = cursor.pin.Close()
 			}
 		}()
 		want := ""
@@ -83,8 +89,10 @@ func TestInitialLogTailSkipsPayloadAndFollowsRotation(t *testing.T) {
 		if string(data) != want || cap(data) > 32<<10 {
 			t.Fatalf("initial suffix size=%d capacity=%d", len(data), cap(data))
 		}
-		writer := &rotatingLog{store: store, id: record.ID, cfg: cfg}
-		suffix := "next entry\n" // Crosses the nearly full current segment.
+		var (
+			writer = &rotatingLog{store: store, id: record.ID, cfg: cfg}
+			suffix = "next entry\n"
+		) // Crosses the nearly full current segment.
 		if _, err := writer.Write([]byte(suffix)); err != nil {
 			t.Fatal(err)
 		}

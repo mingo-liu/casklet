@@ -17,9 +17,11 @@ func scanReport(t *testing.T) func(string, error) {
 
 func TestRestartScannerBoundsStateReadsAndCachesOnlyPolicies(t *testing.T) {
 	store, records := paginationStore(t, 256)
-	states := watchRecordReads(t, store, records)
-	configs := watchContainerFileReads(t, store, records, "config.json")
-	scan := restartScanner{}
+	var (
+		states  = watchRecordReads(t, store, records)
+		configs = watchContainerFileReads(t, store, records, "config.json")
+		scan    restartScanner
+	)
 	for cycle := range 2 {
 		for page := range 4 {
 			ids, err := scan.next(context.Background(), store, nil, 4, scanReport(t))
@@ -59,13 +61,15 @@ func TestRestartScannerKeepsPendingCandidatesAndPrunesRemovedIDs(t *testing.T) {
 	for _, record := range records {
 		cfg := testConfig()
 		cfg.RestartPolicy = "always"
-		if err := store.writeJSON(filepath.Join(store.root, record.ID), "config.json", cfg, maxConfigBytes); err != nil {
+		if err := store.writeJSON(filepath.Join(store.root, record.ID), "config.json", cfg, _maxConfigBytes); err != nil {
 			t.Fatal(err)
 		}
 	}
-	scan := restartScanner{}
-	active := map[string]bool{records[0].ID: true}
-	seen := map[string]bool{}
+	var (
+		scan   restartScanner
+		active = map[string]bool{records[0].ID: true}
+		seen   = make(map[string]bool)
+	)
 	for i := range 3 {
 		ids, err := scan.next(context.Background(), store, active, 4, scanReport(t))
 		if err != nil {
@@ -106,7 +110,7 @@ func TestRestartScannerContinuesAfterMissingCandidateAndRespectsCapacity(t *test
 	store, records := paginationStore(t, 2)
 	cfg := testConfig()
 	cfg.RestartPolicy = "always"
-	if err := store.writeJSON(filepath.Join(store.root, records[1].ID), "config.json", cfg, maxConfigBytes); err != nil {
+	if err := store.writeJSON(filepath.Join(store.root, records[1].ID), "config.json", cfg, _maxConfigBytes); err != nil {
 		t.Fatal(err)
 	}
 	scan := restartScanner{pending: records, end: true}

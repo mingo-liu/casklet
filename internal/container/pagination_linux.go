@@ -10,6 +10,18 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
+// ListPage preserves List's supervisor recovery and effective health semantics,
+// but refreshes only selected records, after releasing the metadata lock.
+func ListPage(ctx context.Context, options RecordPageOptions) (RecordPage, error) {
+	store, err := managementStore(ctx)
+	if err != nil {
+		return RecordPage{}, err
+	}
+	return refreshedPage(ctx, store, options, func(ctx context.Context, record Record) (Record, error) {
+		return refreshRecord(ctx, store, record, false)
+	})
+}
+
 // ListPage reads at most one page of matching records, without decoding IDs at
 // or before the cursor or excluded IDs. Directory enumeration remains per page.
 func (store *Store) ListPage(ctx context.Context, options RecordPageOptions) (RecordPage, error) {
@@ -42,7 +54,7 @@ func (store *Store) listPage(ctx context.Context, options RecordPageOptions, lim
 	if err != nil {
 		return RecordPage{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	entries, err := os.ReadDir(store.root)
 	if err != nil {
 		return RecordPage{}, err
@@ -53,7 +65,7 @@ func (store *Store) listPage(ctx context.Context, options RecordPageOptions, lim
 			return RecordPage{}, err
 		}
 		id := entry.Name()
-		if id <= options.After || !containerID.MatchString(id) || excluded[id] {
+		if id <= options.After || !_containerID.MatchString(id) || excluded[id] {
 			continue
 		}
 		if len(page.Records) == limit {
@@ -76,18 +88,6 @@ func (store *Store) listPage(ctx context.Context, options RecordPageOptions, lim
 		}
 	}
 	return page, ctx.Err()
-}
-
-// ListPage preserves List's supervisor recovery and effective health semantics,
-// but refreshes only selected records, after releasing the metadata lock.
-func ListPage(ctx context.Context, options RecordPageOptions) (RecordPage, error) {
-	store, err := managementStore(ctx)
-	if err != nil {
-		return RecordPage{}, err
-	}
-	return refreshedPage(ctx, store, options, func(ctx context.Context, record Record) (Record, error) {
-		return refreshRecord(ctx, store, record, false)
-	})
 }
 
 func refreshedPage(ctx context.Context, store *Store, options RecordPageOptions, refresh func(context.Context, Record) (Record, error)) (RecordPage, error) {

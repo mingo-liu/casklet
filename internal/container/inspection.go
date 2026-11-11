@@ -10,8 +10,10 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
-var errStatsInterval = errors.New("--interval must be between 10ms and 1m")
-var workloadName = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
+var (
+	errStatsInterval = errors.New("--interval must be between 10ms and 1m")
+	_workloadName    = regexp.MustCompile(`^container-[0-9a-f]{24}$`)
+)
 
 // Inspection deliberately excludes environment values, raw errors, and private runtime paths.
 // Keep this public schema separate from persisted metadata and configuration.
@@ -77,13 +79,46 @@ type ResourceLimits struct {
 	CPUs          float64 `json:"cpus"`
 }
 
+// Statistics is a single sample. Null metrics mean unavailable, never zero usage.
+type Statistics struct {
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	State             string    `json:"state"`
+	SampledAt         time.Time `json:"sampled_at"`
+	Interval          string    `json:"interval"`
+	MemoryBytes       *uint64   `json:"memory_bytes"`
+	MemoryLimitBytes  int64     `json:"memory_limit_bytes"`
+	CPUPercent        *float64  `json:"cpu_percent"`
+	CPUUsageUsec      *uint64   `json:"cpu_usage_usec"`
+	MemoryUnavailable string    `json:"memory_unavailable,omitempty"`
+	CPUUnavailable    string    `json:"cpu_unavailable,omitempty"`
+}
+
+// InspectionHealthConfig exposes scheduling without probe output.
+type InspectionHealthConfig struct {
+	Shell         []string `json:"shell"`
+	Test          []string `json:"test"`
+	Interval      string   `json:"interval"`
+	Timeout       string   `json:"timeout"`
+	StartPeriod   string   `json:"start_period"`
+	StartInterval string   `json:"start_interval"`
+	Retries       int      `json:"retries"`
+}
+
+func ValidateStatsInterval(interval time.Duration) error {
+	if interval < 10*time.Millisecond || interval > time.Minute {
+		return errStatsInterval
+	}
+	return nil
+}
+
 func inspectRecord(record Record, cfg config.Config) Inspection {
 	names := make([]string, 0)
 	for _, assignment := range cfg.CommandEnvironment() {
 		name, _, _ := strings.Cut(assignment, "=")
 		names = append(names, name)
 	}
-	user := config.User{}
+	var user config.User
 	if cfg.User != nil {
 		user = *cfg.User
 	}
@@ -102,34 +137,62 @@ func inspectRecord(record Record, cfg config.Config) Inspection {
 		secretTargets = append(secretTargets, secret.Target)
 	}
 	return Inspection{
-		ExitReason: record.ExitReason, OOMKilled: record.OOMKilled,
-		Labels:        maps.Clone(record.Labels),
-		Health:        record.effectiveHealth(),
-		StoppedByUser: record.StoppedByUser, RestartCount: record.RestartCount, RestartAt: record.RestartAt,
-		CleanupFailures: append([]string{}, record.CleanupFailures...),
-		Generation:      record.Generation, PreviousExit: record.PreviousExit, FilesystemRetained: record.RetainRootFS, ID: record.ID, Name: record.Name, State: record.State, CreatedAt: record.CreatedAt,
-		StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, ExitCode: record.ExitCode, LogTruncated: record.LogTruncated,
-		Config: InspectionConfig{SecretTargets: secretTargets, TmpSize: tmpSize, ShmSize: shmSize, Healthcheck: inspectHealth(cfg.Healthcheck), RestartPolicy: policy, LogMaxSize: logSize, LogMaxFiles: logFiles, Seccomp: cfg.SeccompProfile(), Network: cfg.NetworkMode(), NetworkAliases: append([]string(nil), cfg.NetworkAliases...), DNS: append([]string{}, cfg.DNS...), Publish: append([]config.PortMapping{}, cfg.Publish...), StopTimeout: cfg.StoppingTimeout().String(), StopSignal: cfg.StoppingSignalName(), Image: cfg.Image, OCI: cfg.OCI, Mounts: append([]config.BindMount{}, cfg.Mounts...), RootFS: rootfs, Hostname: cfg.Hostname, Command: append([]string(nil), cfg.Command...),
-			EnvironmentNames: names, Workdir: cfg.WorkingDirectory(), User: user, ReadOnly: cfg.ReadOnly,
-			Interactive: cfg.Interactive, TTY: cfg.TTY, Timeout: cfg.Timeout.String()},
-		Limits: ResourceLimits{MemoryBytes: cfg.Memory, Pids: cfg.PidsLimit, CPUQuotaUsec: cfg.CPUQuota,
-			CPUPeriodUsec: config.CPUPeriod, CPUs: float64(cfg.CPUQuota) / float64(config.CPUPeriod)},
+		ExitReason:         record.ExitReason,
+		OOMKilled:          record.OOMKilled,
+		Labels:             maps.Clone(record.Labels),
+		Health:             record.effectiveHealth(),
+		StoppedByUser:      record.StoppedByUser,
+		RestartCount:       record.RestartCount,
+		RestartAt:          record.RestartAt,
+		CleanupFailures:    append([]string{}, record.CleanupFailures...),
+		Generation:         record.Generation,
+		PreviousExit:       record.PreviousExit,
+		FilesystemRetained: record.RetainRootFS,
+		ID:                 record.ID,
+		Name:               record.Name,
+		State:              record.State,
+		CreatedAt:          record.CreatedAt,
+		StartedAt:          record.StartedAt,
+		FinishedAt:         record.FinishedAt,
+		ExitCode:           record.ExitCode,
+		LogTruncated:       record.LogTruncated,
+		Config: InspectionConfig{
+			SecretTargets:    secretTargets,
+			TmpSize:          tmpSize,
+			ShmSize:          shmSize,
+			Healthcheck:      inspectHealth(cfg.Healthcheck),
+			RestartPolicy:    policy,
+			LogMaxSize:       logSize,
+			LogMaxFiles:      logFiles,
+			Seccomp:          cfg.SeccompProfile(),
+			Network:          cfg.NetworkMode(),
+			NetworkAliases:   append([]string(nil), cfg.NetworkAliases...),
+			DNS:              append([]string{}, cfg.DNS...),
+			Publish:          append([]config.PortMapping{}, cfg.Publish...),
+			StopTimeout:      cfg.StoppingTimeout().String(),
+			StopSignal:       cfg.StoppingSignalName(),
+			Image:            cfg.Image,
+			OCI:              cfg.OCI,
+			Mounts:           append([]config.BindMount{}, cfg.Mounts...),
+			RootFS:           rootfs,
+			Hostname:         cfg.Hostname,
+			Command:          append([]string(nil), cfg.Command...),
+			EnvironmentNames: names,
+			Workdir:          cfg.WorkingDirectory(),
+			User:             user,
+			ReadOnly:         cfg.ReadOnly,
+			Interactive:      cfg.Interactive,
+			TTY:              cfg.TTY,
+			Timeout:          cfg.Timeout.String(),
+		},
+		Limits: ResourceLimits{
+			MemoryBytes:   cfg.Memory,
+			Pids:          cfg.PidsLimit,
+			CPUQuotaUsec:  cfg.CPUQuota,
+			CPUPeriodUsec: config.CPUPeriod,
+			CPUs:          float64(cfg.CPUQuota) / float64(config.CPUPeriod),
+		},
 	}
-}
-
-// Statistics is a single sample. Null metrics mean unavailable, never zero usage.
-type Statistics struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	State             string    `json:"state"`
-	SampledAt         time.Time `json:"sampled_at"`
-	Interval          string    `json:"interval"`
-	MemoryBytes       *uint64   `json:"memory_bytes"`
-	MemoryLimitBytes  int64     `json:"memory_limit_bytes"`
-	CPUPercent        *float64  `json:"cpu_percent"`
-	CPUUsageUsec      *uint64   `json:"cpu_usage_usec"`
-	MemoryUnavailable string    `json:"memory_unavailable,omitempty"`
-	CPUUnavailable    string    `json:"cpu_unavailable,omitempty"`
 }
 
 func cpuPercent(before, after *uint64, elapsed time.Duration) *float64 {
@@ -140,27 +203,17 @@ func cpuPercent(before, after *uint64, elapsed time.Duration) *float64 {
 	return &value
 }
 
-func ValidateStatsInterval(interval time.Duration) error {
-	if interval < 10*time.Millisecond || interval > time.Minute {
-		return errStatsInterval
-	}
-	return nil
-}
-
-// InspectionHealthConfig exposes scheduling without probe output.
-type InspectionHealthConfig struct {
-	Shell         []string `json:"shell"`
-	Test          []string `json:"test"`
-	Interval      string   `json:"interval"`
-	Timeout       string   `json:"timeout"`
-	StartPeriod   string   `json:"start_period"`
-	StartInterval string   `json:"start_interval"`
-	Retries       int      `json:"retries"`
-}
-
 func inspectHealth(h *config.HealthConfig) *InspectionHealthConfig {
 	if !h.Enabled() {
 		return nil
 	}
-	return &InspectionHealthConfig{Shell: append([]string{}, h.Shell...), Test: append([]string(nil), h.Test...), Interval: h.IntervalValue().String(), Timeout: h.TimeoutValue().String(), StartPeriod: h.StartPeriodValue().String(), StartInterval: h.StartIntervalValue().String(), Retries: h.RetriesValue()}
+	return &InspectionHealthConfig{
+		Shell:         append([]string{}, h.Shell...),
+		Test:          append([]string(nil), h.Test...),
+		Interval:      h.IntervalValue().String(),
+		Timeout:       h.TimeoutValue().String(),
+		StartPeriod:   h.StartPeriodValue().String(),
+		StartInterval: h.StartIntervalValue().String(),
+		Retries:       h.RetriesValue(),
+	}
 }

@@ -18,16 +18,16 @@ type unitStatus struct {
 	MainPID, ExitCode, ExitStatus  int
 }
 
+func (status unitStatus) live() bool {
+	return status.MainPID != 0 || (status.ActiveState != "inactive" && status.ActiveState != "failed")
+}
+
 func unitName(id string, generation ...uint64) string {
 	suffix := ""
 	if len(generation) != 0 && generation[0] != 0 {
 		suffix = "-g" + strconv.FormatUint(generation[0], 10)
 	}
 	return "casklet-" + id + suffix + ".service"
-}
-
-func (status unitStatus) live() bool {
-	return status.MainPID != 0 || (status.ActiveState != "inactive" && status.ActiveState != "failed")
 }
 
 func checkSystemd() error {
@@ -76,7 +76,7 @@ func inspectUnit(ctx context.Context, id string, generation ...uint64) (unitStat
 }
 
 func parseUnitStatus(output string) (unitStatus, error) {
-	fields := make(map[string]string)
+	fields := make(map[string]string, 6)
 	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
@@ -96,7 +96,11 @@ func parseUnitStatus(output string) (unitStatus, error) {
 	default:
 		return status, errors.New("systemd reported an unknown unit activity state")
 	}
-	for key, target := range map[string]*int{"MainPID": &status.MainPID, "ExecMainCode": &status.ExitCode, "ExecMainStatus": &status.ExitStatus} {
+	for key, target := range map[string]*int{
+		"MainPID":        &status.MainPID,
+		"ExecMainCode":   &status.ExitCode,
+		"ExecMainStatus": &status.ExitStatus,
+	} {
 		value, err := strconv.Atoi(fields[key])
 		if err != nil || value < 0 {
 			return status, fmt.Errorf("invalid systemd %s", key)

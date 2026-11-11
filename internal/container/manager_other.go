@@ -15,19 +15,26 @@ import (
 func Start(context.Context, config.Config, string) (Record, error) {
 	return Record{}, errUnsupportedStore
 }
-func List(context.Context, bool) ([]Record, error)             { return nil, errUnsupportedStore }
-func Stop(context.Context, string) (Record, error)             { return Record{}, errUnsupportedStore }
+
+func List(context.Context, bool) ([]Record, error) { return nil, errUnsupportedStore }
+
+func Stop(context.Context, string) (Record, error) { return Record{}, errUnsupportedStore }
+
 func Logs(context.Context, string, int, bool, io.Writer) error { return errUnsupportedStore }
-func Remove(context.Context, string) error                     { return errUnsupportedStore }
+
+func Remove(context.Context, string) error { return errUnsupportedStore }
+
 func Exec(context.Context, string, config.Exec, *os.File, *os.File, *os.File, <-chan os.Signal) (int, error) {
 	return 125, errUnsupportedStore
 }
+
 func Supervisor(string, ...uint64) int {
-	fmt.Fprintln(os.Stderr, "casklet:", errUnsupportedStore)
+	_, _ = fmt.Fprintln(os.Stderr, "casklet:", errUnsupportedStore)
 	return 125
 }
 
 func Inspect(context.Context, string) (Inspection, error) { return Inspection{}, errUnsupportedStore }
+
 func Stats(context.Context, string, time.Duration) (Statistics, error) {
 	return Statistics{}, errUnsupportedStore
 }
@@ -35,13 +42,17 @@ func Stats(context.Context, string, time.Duration) (Statistics, error) {
 func StopWithTimeout(context.Context, string, *time.Duration) (Record, error) {
 	return Record{}, errUnsupportedStore
 }
+
 func StartExisting(context.Context, string) (Record, error) { return Record{}, errUnsupportedStore }
+
 func Restart(context.Context, string, *time.Duration) (Record, error) {
 	return Record{}, errUnsupportedStore
 }
+
 func Wait(context.Context, string) (int, error) { return 125, errUnsupportedStore }
 
-func RestartManager() int                              { return 125 }
+func RestartManager() int { return 125 }
+
 func EnsureRestartManager(context.Context, bool) error { return errUnsupportedStore }
 
 func WaitHealthy(context.Context, string, time.Duration) error { return errUnsupportedStore }

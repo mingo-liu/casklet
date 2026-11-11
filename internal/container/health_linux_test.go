@@ -9,10 +9,12 @@ import (
 )
 
 func TestHealthResultsCannotCrossExecutionsOrStopping(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "health")
-	ctx := context.Background()
-	health := Health{Status: HealthHealthy, Checks: []HealthResult{}}
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "health")
+		ctx    = context.Background()
+		health = Health{Status: HealthHealthy, Checks: []HealthResult{}}
+	)
 	if err := store.Update(ctx, record.ID, func(r *Record) error { r.State = StateRunning; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +32,7 @@ func TestHealthResultsCannotCrossExecutionsOrStopping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	next, err := store.BeginExecution(ctx, record.ID, record.Generation)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +40,9 @@ func TestHealthResultsCannotCrossExecutionsOrStopping(t *testing.T) {
 	if next.Health != nil {
 		t.Fatal("carried old probe results into new execution")
 	}
-	store.Update(ctx, record.ID, func(r *Record) error { r.State = StateRunning; return nil })
+	if err := store.Update(ctx, record.ID, func(r *Record) error { r.State = StateRunning; return nil }); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.updateHealth(ctx, record.ID, record.Generation, health); !errors.Is(err, errHealthInactive) {
 		t.Fatal(err)
 	}

@@ -15,11 +15,11 @@ import (
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/ipc"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 	"golang.org/x/sys/unix"
 )
 
-const maxExecSessions = 16
+const _maxExecSessions = 16
 
 type execMessage struct {
 	Generation uint64       `json:"generation,omitempty"`
@@ -31,6 +31,24 @@ type execMessage struct {
 	Error      string       `json:"error,omitempty"`
 }
 
+var _ runtime.Executor = (*execServer)(nil)
+
+type execServer struct {
+	store      *Store
+	id         string
+	generation uint64
+	resources  runtime.ExecResources
+	ctx        context.Context
+	cancel     context.CancelFunc
+	listener   *net.UnixListener
+	mu         sync.Mutex
+	clients    map[*net.UnixConn]struct{}
+	workers    sync.WaitGroup
+
+	// slots bounds concurrent sessions; accept rejects clients instead of waiting.
+	slots chan struct{}
+}
+
 // Exec attaches caller-owned streams to an additional command in a live container.
 // Signaling this invocation never targets the container's main process.
 func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, stderr *os.File, signals <-chan os.Signal) (code int, runErr error) {
@@ -38,7 +56,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 		return 125, err
 	}
 	if options.TTY && options.Interactive {
-		if err := containerruntime.CheckExecTerminal(stdin); err != nil {
+		if err := runtime.CheckExecTerminal(stdin); err != nil {
 			return 125, err
 		}
 	}
@@ -65,8 +83,10 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	if !status.live() || status.MainPID <= 0 {
 		return 125, errors.New("container supervisor is unavailable")
 	}
-	path := filepath.Join(store.root, record.ID, "exec.sock")
-	var stat unix.Stat_t
+	var (
+		path = filepath.Join(store.root, record.ID, "exec.sock")
+		stat unix.Stat_t
+	)
 	if err := unix.Lstat(path, &stat); err != nil {
 		return 125, fmt.Errorf("container exec endpoint unavailable: %w", err)
 	}
@@ -77,8 +97,12 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	if err != nil {
 		return 125, fmt.Errorf("connect container exec: %w", err)
 	}
-	conn := connection.(*net.UnixConn)
-	defer conn.Close()
+	conn, ok := connection.(*net.UnixConn)
+	if !ok {
+		_ = connection.Close()
+		return 125, errors.New("container exec requires a Unix connection")
+	}
+	defer func() { _ = conn.Close() }()
 	peer, err := ipc.Peer(conn)
 	if err != nil || peer.Uid != 0 || int(peer.Pid) != status.MainPID {
 		return 125, errors.New("container exec endpoint has an unexpected supervisor")
@@ -88,7 +112,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 		if err != nil {
 			return 125, err
 		}
-		defer input.Close()
+		defer func() { _ = input.Close() }()
 		stdin = input
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
@@ -113,7 +137,7 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 				err = ipc.Decode(data, &response)
 			}
 			select {
-			case received <- packet{response, files, err}:
+			case received <- packet{message: response, files: files, err: err}:
 			case <-readerStop:
 				ipc.CloseFiles(files)
 				return
@@ -123,12 +147,14 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 			}
 		}
 	}()
-	var terminal containerruntime.ExecTerminalIO
-	var terminalErrors <-chan error
+	var (
+		terminal       runtime.ExecTerminalIO
+		terminalErrors <-chan error
+	)
 	defer func() {
 		// Disconnect before draining the PTY so early failures cancel the job.
 		close(readerStop)
-		conn.Close()
+		_ = conn.Close()
 		<-readerDone
 		select {
 		case packet := <-received:
@@ -148,20 +174,30 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 				return 125, fmt.Errorf("container exec interrupted: %w", packet.err)
 			}
 			response := packet.message
-			if response.Kind == "terminal" && response.Version == 1 && response.Options == nil && response.Signal == 0 && response.Code == 0 && response.Error == "" && options.TTY && terminal == nil && len(packet.files) == 1 {
-				terminal, err = containerruntime.StartExecTerminal(packet.files[0], stdin, stdout, options.Interactive)
+			if response.Kind == "terminal" && response.Version == 1 && response.Options == nil && response.Signal == 0 &&
+				response.Code == 0 &&
+				response.Error == "" &&
+				options.TTY &&
+				terminal == nil &&
+				len(packet.files) == 1 {
+				terminal, err = runtime.StartExecTerminal(packet.files[0], stdin, stdout, options.Interactive)
 				if err != nil {
 					ipc.CloseFiles(packet.files)
 					return 125, err
 				}
 				terminalErrors = terminal.Errors()
-				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+					return 125, err
+				}
 				if err := ipc.Send(conn, execMessage{Version: 1, Kind: "ready"}, nil); err != nil {
 					return 125, err
 				}
 				continue
 			}
-			valid := response.Version == 1 && response.Kind == "result" && response.Code >= 0 && response.Code <= 255 && response.Options == nil && response.Signal == 0 && len(packet.files) == 0
+			valid := response.Version == 1 && response.Kind == "result" && response.Code >= 0 && response.Code <= 255 &&
+				response.Options == nil &&
+				response.Signal == 0 &&
+				len(packet.files) == 0
 			ipc.CloseFiles(packet.files)
 			if !valid {
 				return 125, errors.New("invalid container exec result")
@@ -181,7 +217,9 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 			if !ok || !allowedExecSignal(sig) {
 				continue
 			}
-			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+			if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+				return 125, err
+			}
 			if err := ipc.Send(conn, execMessage{Version: 1, Kind: "signal", Signal: int(sig)}, nil); err != nil {
 				return 125, err
 			}
@@ -194,34 +232,24 @@ func Exec(ctx context.Context, ref string, options config.Exec, stdin, stdout, s
 	}
 }
 
-func allowedExecSignal(signal syscall.Signal) bool {
-	return signal == syscall.SIGINT || signal == syscall.SIGTERM || signal == syscall.SIGHUP || signal == syscall.SIGQUIT
-}
-
-type execServer struct {
-	store      *Store
-	id         string
-	generation uint64
-	resources  containerruntime.ExecResources
-	ctx        context.Context
-	cancel     context.CancelFunc
-	listener   *net.UnixListener
-	mu         sync.Mutex
-	clients    map[*net.UnixConn]struct{}
-	workers    sync.WaitGroup
-	slots      chan struct{}
-}
-
 func newExecServer(store *Store, id string, generations ...uint64) *execServer {
 	generation := uint64(0)
 	if len(generations) > 0 {
 		generation = generations[0]
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &execServer{store: store, id: id, generation: generation, ctx: ctx, cancel: cancel, clients: make(map[*net.UnixConn]struct{}), slots: make(chan struct{}, maxExecSessions)}
+	return &execServer{
+		store:      store,
+		id:         id,
+		generation: generation,
+		ctx:        ctx,
+		cancel:     cancel,
+		clients:    make(map[*net.UnixConn]struct{}, _maxExecSessions),
+		slots:      make(chan struct{}, _maxExecSessions),
+	}
 }
 
-func (server *execServer) Start(resources containerruntime.ExecResources) error {
+func (server *execServer) Start(resources runtime.ExecResources) error {
 	path := filepath.Join(server.store.root, server.id, "exec.sock")
 	// Existing endpoints belong to a previous attempt and are never replaced.
 	if _, err := os.Lstat(path); err == nil {
@@ -234,7 +262,7 @@ func (server *execServer) Start(resources containerruntime.ExecResources) error 
 		return err
 	}
 	if err := os.Chmod(path, 0600); err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return err
 	}
 	server.listener, server.resources = listener, resources
@@ -253,12 +281,12 @@ func (server *execServer) accept() {
 		select {
 		case server.slots <- struct{}{}:
 		case <-server.ctx.Done():
-			conn.Close()
+			_ = conn.Close()
 			return
 		default:
 			_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 			_ = ipc.Send(conn, execMessage{Version: 1, Kind: "result", Code: 125, Error: "container exec session limit reached"}, nil)
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 		server.mu.Lock()
@@ -268,7 +296,7 @@ func (server *execServer) accept() {
 		go func() {
 			defer server.workers.Done()
 			defer func() { <-server.slots }()
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			defer func() { server.mu.Lock(); delete(server.clients, conn); server.mu.Unlock() }()
 			code, err := server.serve(conn)
 			response := execMessage{Version: 1, Kind: "result", Code: code}
@@ -286,7 +314,9 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 	if err != nil || peer.Uid != 0 {
 		return 125, errors.New("exec requires a root-owned client")
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return 125, err
+	}
 	data, files, err := ipc.Receive(conn, 3)
 	if err != nil {
 		return 125, err
@@ -296,7 +326,12 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 	if err := ipc.Decode(data, &request); err != nil {
 		return 125, err
 	}
-	if request.Version == 1 && request.Kind == "copy-root" && request.Generation == server.generation && request.Options == nil && request.Signal == 0 && request.Code == 0 && request.Error == "" && len(files) == 0 {
+	if request.Version == 1 && request.Kind == "copy-root" && request.Generation == server.generation &&
+		request.Options == nil &&
+		request.Signal == 0 &&
+		request.Code == 0 &&
+		request.Error == "" &&
+		len(files) == 0 {
 		lookup, cancel := context.WithTimeout(server.ctx, 5*time.Second)
 		defer cancel()
 		record, err := server.store.Get(lookup, server.id)
@@ -306,10 +341,16 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 		if record.Generation != server.generation || record.State != StateRunning || server.resources.Root == nil {
 			return 125, errors.New("container execution changed before copy")
 		}
-		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			return 125, err
+		}
 		return 0, ipc.Send(conn, execMessage{Version: 1, Kind: "copy-root", Generation: server.generation}, []*os.File{server.resources.Root})
 	}
-	if request.Generation != 0 || request.Version != 1 || request.Kind != "exec" || request.Options == nil || request.Signal != 0 || request.Code != 0 || request.Error != "" || len(files) != 3 {
+	if request.Generation != 0 || request.Version != 1 || request.Kind != "exec" || request.Options == nil ||
+		request.Signal != 0 ||
+		request.Code != 0 ||
+		request.Error != "" ||
+		len(files) != 3 {
 		return 125, errors.New("invalid exec request")
 	}
 	if err := request.Options.Validate(); err != nil {
@@ -330,12 +371,17 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 	if record.State != StateRunning {
 		return 125, errors.New("exec requires a running container")
 	}
-	_ = conn.SetReadDeadline(time.Time{})
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		return 125, err
+	}
 	ctx, cancel := context.WithCancel(server.ctx)
 	defer cancel()
-	signals := make(chan syscall.Signal, 8)
-	ready := make(chan struct{}, 1)
-	readerDone := make(chan struct{})
+	// Keep a bounded signal burst; the reader waits for consumption or cancellation.
+	var (
+		signals    = make(chan syscall.Signal, 8)
+		ready      = make(chan struct{}, 1)
+		readerDone = make(chan struct{})
+	)
 	go func() {
 		defer close(readerDone)
 		defer cancel()
@@ -347,7 +393,8 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 				return
 			}
 			var signal execMessage
-			if ipc.Decode(data, &signal) != nil || signal.Version != 1 || signal.Options != nil || signal.Code != 0 || signal.Error != "" {
+			if ipc.Decode(data, &signal) != nil || signal.Version != 1 || signal.Options != nil || signal.Code != 0 ||
+				signal.Error != "" {
 				return
 			}
 			if signal.Kind == "ready" && signal.Signal == 0 && request.Options.TTY && !readyReceived {
@@ -365,10 +412,12 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 			}
 		}
 	}()
-	var terminal containerruntime.ExecTerminal
+	var terminal runtime.ExecTerminal
 	if request.Options.TTY {
 		terminal = func(terminalCtx context.Context, master *os.File) error {
-			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return err
+			}
 			if err := ipc.Send(conn, execMessage{Version: 1, Kind: "terminal"}, []*os.File{master}); err != nil {
 				return err
 			}
@@ -382,7 +431,7 @@ func (server *execServer) serve(conn *net.UnixConn) (int, error) {
 			}
 		}
 	}
-	code, err := containerruntime.ExecuteInContainer(ctx, server.resources, *request.Options, files[0], files[1], files[2], signals, terminal)
+	code, err := runtime.ExecuteInContainer(ctx, server.resources, *request.Options, files[0], files[1], files[2], signals, terminal)
 	cancel()
 	_ = conn.SetReadDeadline(time.Now())
 	<-readerDone
@@ -401,4 +450,8 @@ func (server *execServer) Close() error {
 	server.mu.Unlock()
 	server.workers.Wait()
 	return nil
+}
+
+func allowedExecSignal(signal syscall.Signal) bool {
+	return signal == syscall.SIGINT || signal == syscall.SIGTERM || signal == syscall.SIGHUP || signal == syscall.SIGQUIT
 }

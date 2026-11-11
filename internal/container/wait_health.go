@@ -31,7 +31,8 @@ func waitHealthExecution(ctx context.Context, initial Record, timeout time.Durat
 			if latest.ID != initial.ID || latest.Generation != initial.Generation {
 				return errors.New("container execution changed before becoming healthy")
 			}
-			if latest.Terminal() || latest.State == StateStopping || latest.Health != nil && latest.Health.Status == HealthStopped {
+			if latest.Terminal() || latest.State == StateStopping ||
+				latest.Health != nil && latest.Health.Status == HealthStopped {
 				return fmt.Errorf("container stopped before becoming healthy (state: %s)", latest.State)
 			}
 			if latest.State == StateRunning && latest.Health != nil && latest.Health.Status == HealthHealthy {

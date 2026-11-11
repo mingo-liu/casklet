@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func collectEvents(t *testing.T, store *Store, query EventQuery) []Event {
@@ -26,8 +27,10 @@ func collectEvents(t *testing.T, store *Store, query EventQuery) []Event {
 	return events
 }
 func TestEventsObserveLifecycleAndRedactPrivateValues(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "observed")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "observed")
+	)
 	if err := store.Update(context.Background(), record.ID, func(r *Record) error {
 		r.State = StateRunning
 		r.Error = "private-error"
@@ -42,7 +45,10 @@ func TestEventsObserveLifecycleAndRedactPrivateValues(t *testing.T) {
 	if len(events) != 3 || events[0].Type != "create" || events[1].Type != "start" || events[2].Type != "health" {
 		t.Fatalf("events %+v", events)
 	}
-	data, _ := json.Marshal(events)
+	data, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, private := range []string{"private-error", "/private/run", "sensitive-command"} {
 		if strings.Contains(string(data), private) {
 			t.Fatal("private event data leaked")
@@ -79,9 +85,11 @@ func TestEventsObserveLifecycleAndRedactPrivateValues(t *testing.T) {
 	}
 }
 func TestEventRetentionAndResumeDetectGaps(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "retention")
-	events := make([]Event, EventHistoryLimit+3)
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "retention")
+		events = make([]Event, EventHistoryLimit+3)
+	)
 	for i := range events {
 		events[i] = newLifecycleEvent(record, "start")
 	}
@@ -90,7 +98,7 @@ func TestEventRetentionAndResumeDetectGaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = store.appendEventsLocked(events)
-	lock.Close()
+	_ = lock.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +117,19 @@ func TestEventRetentionAndResumeDetectGaps(t *testing.T) {
 	}
 }
 func TestEventFollowReleasesMetadataLockAndCancels(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "follow")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "follow")
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	after := uint64(0)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	var once sync.Once
+	var (
+		after   = uint64(0)
+		entered = make(chan struct{})
+		release = make(chan struct{})
+		done    = make(chan error, 1)
+		once    sync.Once
+	)
 	go func() {
 		done <- store.events(ctx, EventQuery{Follow: true, After: &after}, func(Event) error { once.Do(func() { close(entered) }); <-release; return ctx.Err() })
 	}()
@@ -140,14 +152,18 @@ func TestEventFollowReleasesMetadataLockAndCancels(t *testing.T) {
 	}
 }
 func TestEventsRejectUnsafeJournalWithoutBlockingLifecycle(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "unsafe")
-	journal := filepath.Join(store.root, eventJournalName)
+	var (
+		store   = testStore(t)
+		record  = createTestRecord(t, store, "unsafe")
+		journal = filepath.Join(store.root, _eventJournalName)
+	)
 	if err := os.Remove(journal); err != nil {
 		t.Fatal(err)
 	}
 	outside := filepath.Join(t.TempDir(), "outside")
-	os.WriteFile(outside, []byte("sentinel"), 0600)
+	if err := os.WriteFile(outside, []byte("sentinel"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(outside, journal); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +185,7 @@ func TestEventsRejectUnsafeJournalWithoutBlockingLifecycle(t *testing.T) {
 	if err := store.Remove(context.Background(), record.ID); err != nil {
 		t.Fatalf("journal failure prevented removal: %v", err)
 	}
-	if data, _ := os.ReadFile(outside); string(data) != "sentinel" {
+	if data, err := os.ReadFile(outside); err != nil || string(data) != "sentinel" {
 		t.Fatal("followed journal symlink")
 	}
 }
@@ -180,14 +196,16 @@ func observeJournalOpen(t *testing.T, store *Store) func() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unix.Close(fd) })
-	if _, err := unix.InotifyAddWatch(fd, filepath.Join(store.root, eventJournalName), unix.IN_OPEN); err != nil {
+	t.Cleanup(func() { _ = unix.Close(fd) })
+	if _, err := unix.InotifyAddWatch(fd, filepath.Join(store.root, _eventJournalName), unix.IN_OPEN); err != nil {
 		t.Fatal(err)
 	}
 	return func() {
 		t.Helper()
-		deadline := time.Now().Add(time.Second)
-		var data [4096]byte
+		var (
+			deadline = time.Now().Add(time.Second)
+			data     [4096]byte
+		)
 		for time.Now().Before(deadline) {
 			n, err := unix.Read(fd, data[:])
 			if n > 0 {
@@ -204,18 +222,22 @@ func observeJournalOpen(t *testing.T, store *Store) func() {
 func TestEventFollowStartsAtTailAndEmptyCursorDetectsOverrun(t *testing.T) {
 	for _, empty := range []bool{false, true} {
 		t.Run(fmt.Sprint(empty), func(t *testing.T) {
-			store := testStore(t)
-			record := createTestRecord(t, store, "old")
+			var (
+				store  = testStore(t)
+				record = createTestRecord(t, store, "old")
+			)
 			if empty {
-				if err := store.writeJSON(store.root, eventJournalName, eventJournal{Version: 1, Events: []Event{}}, maxEventJournalBytes); err != nil {
+				if err := store.writeJSON(store.root, _eventJournalName, eventJournal{Version: 1, Events: []Event{}}, _maxEventJournalBytes); err != nil {
 					t.Fatal(err)
 				}
 			}
 			opened := observeJournalOpen(t, store)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			done := make(chan error, 1)
-			received := make(chan Event, 1)
+			var (
+				done     = make(chan error, 1)
+				received = make(chan Event, 1)
+			)
 			go func() {
 				done <- store.events(ctx, EventQuery{Follow: true}, func(e Event) error { received <- e; return nil })
 			}()
@@ -230,7 +252,7 @@ func TestEventFollowStartsAtTailAndEmptyCursorDetectsOverrun(t *testing.T) {
 					t.Fatal(err)
 				}
 				err = store.appendEventsLocked(events)
-				lock.Close()
+				_ = lock.Close()
 				if err != nil {
 					t.Fatal(err)
 				}

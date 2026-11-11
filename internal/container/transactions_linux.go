@@ -34,7 +34,7 @@ func (store *Store) transactionLock(ctx context.Context, wait bool) (*os.File, e
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
@@ -42,30 +42,15 @@ func (store *Store) transactionLock(ctx context.Context, wait bool) (*os.File, e
 			return file, nil
 		}
 		if !wait || !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
-	}
-}
-
-func transactionName(name string) bool {
-	for _, prefix := range []string{".create-", ".remove-"} {
-		if id, ok := strings.CutPrefix(name, prefix); ok && validateID(id) == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func closeTransactionFiles(files []*os.File) {
-	for _, file := range files {
-		file.Close()
 	}
 }
 
@@ -109,13 +94,13 @@ func (store *Store) recoverTransactions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer deletion.Close()
+	defer func() { _ = deletion.Close() }()
 	lock, err := store.lock(ctx, true)
 	if err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(store.root)
-	lock.Close()
+	_ = lock.Close()
 	if err != nil {
 		return err
 	}
@@ -129,7 +114,7 @@ func (store *Store) recoverTransactions(ctx context.Context) error {
 			return err
 		}
 		files, err := store.claimTransaction(path)
-		lock.Close()
+		_ = lock.Close()
 		// Creation may have published since ReadDir, or a lease may still be live.
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, unix.EWOULDBLOCK) {
 			continue
@@ -150,4 +135,19 @@ func (store *Store) recoverTransactions(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func transactionName(name string) bool {
+	for _, prefix := range []string{".create-", ".remove-"} {
+		if id, ok := strings.CutPrefix(name, prefix); ok && validateID(id) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func closeTransactionFiles(files []*os.File) {
+	for _, file := range files {
+		_ = file.Close()
+	}
 }

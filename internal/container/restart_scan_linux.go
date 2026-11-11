@@ -20,8 +20,8 @@ func (scan *restartScanner) next(ctx context.Context, store *Store, active map[s
 		return nil, nil
 	}
 	if scan.policies == nil {
-		scan.policies = map[string]string{}
-		scan.seen = map[string]bool{}
+		scan.policies = make(map[string]string)
+		scan.seen = make(map[string]bool)
 	}
 	if len(scan.pending) == 0 {
 		page, err := store.ListPage(ctx, RecordPageOptions{After: scan.after})
@@ -30,7 +30,7 @@ func (scan *restartScanner) next(ctx context.Context, store *Store, active map[s
 		}
 		scan.pending, scan.after, scan.end = page.Records, page.Next, page.Next == ""
 	}
-	ids := []string{}
+	ids := make([]string, 0, capacity)
 	for len(scan.pending) > 0 && len(ids) < capacity {
 		if err := ctx.Err(); err != nil {
 			return nil, err

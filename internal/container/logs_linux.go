@@ -5,15 +5,17 @@ package container
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
 	"golang.org/x/sys/unix"
 )
+
+var _ io.Writer = (*rotatingLog)(nil)
 
 type rotatingLog struct {
 	store     *Store
@@ -22,11 +24,19 @@ type rotatingLog struct {
 	truncated bool
 }
 
-func logName(index int) string {
-	if index == 0 {
-		return "container.log"
-	}
-	return fmt.Sprintf("container.log.%d", index)
+// A cursor pins an inode rather than a pathname, which changes during rotation.
+// If retention overtakes a follower, resume at the oldest still-retained byte.
+type logCursor struct {
+	inode  uint64
+	offset int64
+	pin    *os.File
+}
+
+type logSegment struct {
+	file   *os.File
+	inode  uint64
+	size   int64
+	offset int64
 }
 
 // Metadata lookup is brief; rotation and snapshots use a per-container lock.
@@ -57,12 +67,12 @@ func (store *Store) lockLog(ctx context.Context, id string, shared bool) (*os.Fi
 		if err == nil {
 			err = unix.Flock(int(file.Fd()), operation|unix.LOCK_NB)
 		}
-		lock.Close()
+		_ = lock.Close()
 		if err == nil {
 			return file, record, nil
 		}
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
 			return nil, Record{}, err
@@ -73,6 +83,116 @@ func (store *Store) lockLog(ctx context.Context, id string, shared bool) (*os.Fi
 		case <-ticker.C:
 		}
 	}
+}
+
+func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64) ([]byte, logCursor, error) {
+	return store.logSnapshotTail(ctx, id, cfg, cursor, generation, -1)
+}
+
+// logSnapshotTail selects an initial suffix before allocating or reading its
+// payload. All retained artifacts are still validated, including skipped files.
+func (store *Store) logSnapshotTail(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64, tail int) ([]byte, logCursor, error) {
+	if cursor.offset < 0 {
+		return nil, cursor, errors.New("invalid log cursor offset")
+	}
+	lock, record, err := store.lockLog(ctx, id, true)
+	if err != nil {
+		return nil, cursor, err
+	}
+	defer func() { _ = lock.Close() }()
+	if record.Generation != generation {
+		return nil, cursor, nil
+	}
+	size, files := cfg.LogRetention()
+	segments := make([]logSegment, 0, files)
+	defer func() {
+		for _, segment := range segments {
+			_ = segment.file.Close()
+		}
+	}()
+	var (
+		start = 0
+		total int64
+	)
+	for i := files - 1; i >= 0; i-- {
+		file, err := store.openFile(filepath.Join(store.root, id, logName(i)), unix.O_RDONLY, false)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, cursor, err
+		}
+		var stat unix.Stat_t
+		if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
+			_ = file.Close()
+			return nil, cursor, err
+		}
+		// Permit legacy single-file logs until the next append migrates them.
+		limit := size
+		if i == 0 && limit < MaxLogBytes {
+			limit = MaxLogBytes
+		}
+		total += stat.Size
+		if stat.Size > limit || total > 64<<20 {
+			_ = file.Close()
+			return nil, cursor, errors.New("container log exceeds the retained size limit")
+		}
+		offset := int64(0)
+		if stat.Ino == cursor.inode {
+			start = len(segments)
+			if cursor.offset <= stat.Size {
+				offset = cursor.offset
+			}
+		}
+		segments = append(segments, logSegment{file: file, inode: stat.Ino, size: stat.Size, offset: offset})
+	}
+	if tail >= 0 {
+		start, err = logTailStart(ctx, segments, tail)
+		if err != nil {
+			return nil, cursor, err
+		}
+	}
+	// Sizes are validated under the log lock. Allocate only the unread bytes
+	// once, avoiding per-file growth buffers and repeated concatenation copies.
+	if err := ctx.Err(); err != nil {
+		return nil, cursor, err
+	}
+	var length int64
+	for _, segment := range segments[start:] {
+		length += segment.size - segment.offset
+	}
+	var (
+		data     = make([]byte, length)
+		position int64
+	)
+	for _, segment := range segments[start:] {
+		if err := ctx.Err(); err != nil {
+			return nil, cursor, err
+		}
+		if _, err := segment.file.Seek(segment.offset, io.SeekStart); err != nil {
+			return nil, cursor, err
+		}
+		end := position + segment.size - segment.offset
+		if _, err := io.ReadFull(segment.file, data[position:end]); err != nil {
+			return nil, cursor, err
+		}
+		position = end
+		cursor.inode, cursor.offset = segment.inode, segment.size
+	}
+	if len(segments) > 0 {
+		last := segments[len(segments)-1]
+		// Keep the current inode alive so fast rotation cannot reuse its identity.
+		fd, err := unix.FcntlInt(last.file.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+		if err != nil {
+			return nil, cursor, err
+		}
+		if cursor.pin != nil {
+			_ = cursor.pin.Close()
+		}
+		cursor.pin = os.NewFile(uintptr(fd), last.file.Name())
+		cursor.inode, cursor.offset = last.inode, last.size
+	}
+	return data, cursor, nil
 }
 
 func (log *rotatingLog) Write(data []byte) (int, error) {
@@ -86,7 +206,7 @@ func (log *rotatingLog) Write(data []byte) (int, error) {
 		}
 		return 0, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	size, files := log.cfg.LogRetention()
 	dir := filepath.Join(log.store.root, log.id)
 	// Validate every artifact before deleting or renaming anything.
@@ -98,7 +218,7 @@ func (log *rotatingLog) Write(data []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		file.Close()
+		_ = file.Close()
 	}
 	written := 0
 	for len(data) > 0 {
@@ -108,7 +228,7 @@ func (log *rotatingLog) Write(data []byte) (int, error) {
 		}
 		stat, err := file.Stat()
 		if err != nil {
-			file.Close()
+			_ = file.Close()
 			return written, err
 		}
 		// Old versions retained a single 16 MiB prefix. Keep its newest segment
@@ -123,7 +243,7 @@ func (log *rotatingLog) Write(data []byte) (int, error) {
 				_, err = file.Write(tail)
 			}
 			if err != nil {
-				file.Close()
+				_ = file.Close()
 				return written, err
 			}
 			log.truncated = true
@@ -175,136 +295,22 @@ func (log *rotatingLog) Sync() error {
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	// A supervisor can die between rotating the current file and creating its
 	// replacement. Recover the missing current file even for a silent command.
 	file, err := log.store.openFile(filepath.Join(log.store.root, log.id, logName(0)), unix.O_RDWR, true)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return file.Sync()
 }
 
-// A cursor pins an inode rather than a pathname, which changes during rotation.
-// If retention overtakes a follower, resume at the oldest still-retained byte.
-type logCursor struct {
-	inode  uint64
-	offset int64
-	pin    *os.File
-}
-
-type logSegment struct {
-	file   *os.File
-	inode  uint64
-	size   int64
-	offset int64
-}
-
-func (store *Store) logSnapshot(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64) ([]byte, logCursor, error) {
-	return store.logSnapshotTail(ctx, id, cfg, cursor, generation, -1)
-}
-
-// logSnapshotTail selects an initial suffix before allocating or reading its
-// payload. All retained artifacts are still validated, including skipped files.
-func (store *Store) logSnapshotTail(ctx context.Context, id string, cfg config.Config, cursor logCursor, generation uint64, tail int) ([]byte, logCursor, error) {
-	if cursor.offset < 0 {
-		return nil, cursor, errors.New("invalid log cursor offset")
+func logName(index int) string {
+	if index == 0 {
+		return "container.log"
 	}
-	lock, record, err := store.lockLog(ctx, id, true)
-	if err != nil {
-		return nil, cursor, err
-	}
-	defer lock.Close()
-	if record.Generation != generation {
-		return nil, cursor, nil
-	}
-	size, files := cfg.LogRetention()
-	segments := make([]logSegment, 0, files)
-	defer func() {
-		for _, segment := range segments {
-			segment.file.Close()
-		}
-	}()
-	start := 0
-	var total int64
-	for i := files - 1; i >= 0; i-- {
-		file, err := store.openFile(filepath.Join(store.root, id, logName(i)), unix.O_RDONLY, false)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, cursor, err
-		}
-		var stat unix.Stat_t
-		if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
-			file.Close()
-			return nil, cursor, err
-		}
-		// Permit legacy single-file logs until the next append migrates them.
-		limit := size
-		if i == 0 && limit < MaxLogBytes {
-			limit = MaxLogBytes
-		}
-		total += stat.Size
-		if stat.Size > limit || total > 64<<20 {
-			file.Close()
-			return nil, cursor, errors.New("container log exceeds the retained size limit")
-		}
-		offset := int64(0)
-		if stat.Ino == cursor.inode {
-			start = len(segments)
-			if cursor.offset <= stat.Size {
-				offset = cursor.offset
-			}
-		}
-		segments = append(segments, logSegment{file: file, inode: stat.Ino, size: stat.Size, offset: offset})
-	}
-	if tail >= 0 {
-		start, err = logTailStart(ctx, segments, tail)
-		if err != nil {
-			return nil, cursor, err
-		}
-	}
-	// Sizes are validated under the log lock. Allocate only the unread bytes
-	// once, avoiding per-file growth buffers and repeated concatenation copies.
-	if err := ctx.Err(); err != nil {
-		return nil, cursor, err
-	}
-	var length int64
-	for _, segment := range segments[start:] {
-		length += segment.size - segment.offset
-	}
-	data := make([]byte, length)
-	var position int64
-	for _, segment := range segments[start:] {
-		if err := ctx.Err(); err != nil {
-			return nil, cursor, err
-		}
-		if _, err := segment.file.Seek(segment.offset, io.SeekStart); err != nil {
-			return nil, cursor, err
-		}
-		end := position + segment.size - segment.offset
-		if _, err := io.ReadFull(segment.file, data[position:end]); err != nil {
-			return nil, cursor, err
-		}
-		position = end
-		cursor.inode, cursor.offset = segment.inode, segment.size
-	}
-	if len(segments) > 0 {
-		last := segments[len(segments)-1]
-		// Keep the current inode alive so fast rotation cannot reuse its identity.
-		fd, err := unix.FcntlInt(last.file.Fd(), unix.F_DUPFD_CLOEXEC, 0)
-		if err != nil {
-			return nil, cursor, err
-		}
-		if cursor.pin != nil {
-			cursor.pin.Close()
-		}
-		cursor.pin = os.NewFile(uintptr(fd), last.file.Name())
-		cursor.inode, cursor.offset = last.inode, last.size
-	}
-	return data, cursor, nil
+	return "container.log." + strconv.Itoa(index)
 }
 
 // Search backwards across segment boundaries with one bounded buffer. A final
@@ -313,16 +319,20 @@ func logTailStart(ctx context.Context, segments []logSegment, tail int) (int, er
 	if tail == 0 {
 		return len(segments), ctx.Err()
 	}
-	buffer := make([]byte, 32*1024)
-	finalByte := true
+	var (
+		buffer    = make([]byte, 32*1024)
+		finalByte = true
+	)
 	for index := len(segments) - 1; index >= 0; index-- {
 		segment := &segments[index]
 		for end := segment.size; end > 0; {
 			if err := ctx.Err(); err != nil {
 				return 0, err
 			}
-			begin := max(int64(0), end-int64(len(buffer)))
-			chunk := buffer[:end-begin]
+			var (
+				begin = max(int64(0), end-int64(len(buffer)))
+				chunk = buffer[:end-begin]
+			)
 			if _, err := segment.file.ReadAt(chunk, begin); err != nil {
 				return 0, err
 			}
