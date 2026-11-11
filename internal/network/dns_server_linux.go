@@ -4,11 +4,12 @@ package network
 
 import (
 	"errors"
-	"golang.org/x/sys/unix"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 func startDNS(gateway, address, network string, upstream []string) (*dnsServer, error) {

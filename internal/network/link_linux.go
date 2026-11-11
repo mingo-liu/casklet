@@ -11,20 +11,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func attribute(kind uint16, value []byte) []byte {
-	length := 4 + len(value)
-	result := make([]byte, (length+3)&^3)
-	binary.NativeEndian.PutUint16(result[:2], uint16(length))
-	binary.NativeEndian.PutUint16(result[2:4], kind)
-	copy(result[4:], value)
-	return result
-}
-
-func ownershipGroup(owner string) uint32 {
-	sum := sha256.Sum256([]byte(owner))
-	return 0x4d000000 | (binary.BigEndian.Uint32(sum[:4]) & 0x00ffffff)
-}
-
 // Linux 6.8 applies IFLA_GROUP during creation, but only applies IFLA_IFALIAS
 // on an existing link. The immutable-at-startup group identifies ownership even
 // if the supervisor dies between link creation and its descriptive alias.
@@ -76,4 +62,18 @@ func addLink(name, alias, kind, peer string) error {
 		return fmt.Errorf("create %s link %s: %w", kind, name, unix.Errno(-errno))
 	}
 	return nil
+}
+
+func attribute(kind uint16, value []byte) []byte {
+	length := 4 + len(value)
+	result := make([]byte, (length+3)&^3)
+	binary.NativeEndian.PutUint16(result[:2], uint16(length))
+	binary.NativeEndian.PutUint16(result[2:4], kind)
+	copy(result[4:], value)
+	return result
+}
+
+func ownershipGroup(owner string) uint32 {
+	sum := sha256.Sum256([]byte(owner))
+	return 0x4d000000 | (binary.BigEndian.Uint32(sum[:4]) & 0x00ffffff)
 }

@@ -21,21 +21,11 @@ import (
 
 type Store struct{ root string }
 
-func privateDirectory(path string) error {
-	var st unix.Stat_t
-	if err := unix.Lstat(path, &st); err != nil {
-		return err
-	}
-	if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != 0 || st.Mode&0022 != 0 {
-		return errors.New("network storage requires private root-owned directories")
-	}
-	return nil
-}
 func OpenStore() (*Store, error) {
 	if os.Geteuid() != 0 {
 		return nil, errors.New("named networks require root privileges inside Linux")
 	}
-	for _, p := range []string{"/var/lib/casklet", NamedRoot, runsRoot} {
+	for _, p := range []string{"/var/lib/casklet", NamedRoot, _runsRoot} {
 		if err := os.Mkdir(p, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
@@ -43,120 +33,58 @@ func OpenStore() (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{NamedRoot}, nil
+	return &Store{root: NamedRoot}, nil
 }
-func namedLock(ctx context.Context, path string, how int) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), path)
-	var st unix.Stat_t
-	if err := unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
-		f.Close()
-		return nil, errors.New("unsafe named network lock")
-	}
-	for {
-		if err := ctx.Err(); err != nil {
-			f.Close()
-			return nil, err
-		}
-		err := unix.Flock(fd, how|unix.LOCK_NB)
-		if err == nil {
-			return f, nil
-		}
-		if how == unix.LOCK_SH || !errors.Is(err, unix.EWOULDBLOCK) {
-			f.Close()
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			f.Close()
-			return nil, ctx.Err()
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-func (s *Store) lock(ctx context.Context) (*os.File, error) {
-	if err := privateDirectory(s.root); err != nil {
-		return nil, err
-	}
-	l, err := namedLock(ctx, filepath.Join(s.root, ".lock"), unix.LOCK_EX)
-	if err != nil {
-		return nil, err
-	}
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		l.Close()
-		return nil, err
-	}
-	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), ".network-state-") {
-			continue
-		}
-		p := filepath.Join(s.root, entry.Name())
-		var st unix.Stat_t
-		if err := unix.Lstat(p, &st); err != nil {
-			l.Close()
-			return nil, err
-		}
-		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
-			l.Close()
-			return nil, errors.New("unsafe interrupted network metadata")
-		}
-		if err := os.Remove(p); err != nil {
-			l.Close()
-			return nil, err
-		}
-	}
-	return l, nil
-}
-func namedIdentity(name string) string {
-	sum := sha256.Sum256([]byte(name))
-	return "csn" + hex.EncodeToString(sum[:])[:10]
-}
-func (s *Store) read(name string) (Record, error) {
-	var r Record
-	if err := config.ValidateNetworkName(name); err != nil {
-		return r, err
-	}
-	if err := readJSON(filepath.Join(s.root, name+".json"), &r); err != nil {
-		return r, err
-	}
-	prefix, err := netip.ParsePrefix(r.Subnet)
-	if err != nil || r.Name != name || r.CreatedAt.IsZero() || r.Bridge != namedIdentity(name) || prefix.Bits() != 24 || prefix.Masked() != prefix || !netip.MustParsePrefix("10.232.0.0/16").Contains(prefix.Addr()) || r.Gateway != prefix.Addr().Next().String() {
-		return Record{}, errors.New("invalid named network metadata")
-	}
-	return r, nil
-}
-func (s *Store) list() ([]Record, error) {
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		return nil, err
-	}
-	out := []Record{}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		if !strings.HasSuffix(e.Name(), ".json") {
-			return nil, errors.New("unexpected named network metadata")
-		}
-		r, err := s.read(strings.TrimSuffix(e.Name(), ".json"))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, nil
-}
+
 func (s *Store) Create(ctx context.Context, name string) (Record, error) {
-	return s.create(ctx, name, false)
+	return s.create(ctx, name, false /* exclusive */)
 }
 
 // CreateExclusive refuses to adopt an existing resource during project creation.
 func (s *Store) CreateExclusive(ctx context.Context, name string) (Record, error) {
-	return s.create(ctx, name, true)
+	return s.create(ctx, name, true /* exclusive */)
+}
+
+func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
+	l, err := s.lock(ctx)
+	if err != nil {
+		return Record{}, err
+	}
+	defer l.Close()
+	return s.read(name)
+}
+
+func (s *Store) List(ctx context.Context) ([]Record, error) {
+	l, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer l.Close()
+	return s.list()
+}
+
+func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
+	l, err := s.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer l.Close()
+	if _, err := s.read(name); err != nil {
+		return nil, err
+	}
+	return namedLock(ctx, filepath.Join(s.root, ".lease-"+name), unix.LOCK_SH)
+}
+
+func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
+	return s.remove(ctx, name, time.Time{}, referenced)
+}
+
+// RemoveIfCreated fences a project receipt under the same lock as deletion.
+func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
+	if created.IsZero() {
+		return errors.New("resource removal requires a creation identity")
+	}
+	return s.remove(ctx, name, created, referenced)
 }
 
 func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record, error) {
@@ -180,7 +108,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	used := map[string]bool{}
+	used := make(map[string]bool, len(records))
 	for _, r := range records {
 		used[r.Subnet] = true
 		if r.Bridge == namedIdentity(name) {
@@ -196,48 +124,16 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 		if used[pool] || checkNamedRoutes(routes, pool) != nil {
 			continue
 		}
-		r := Record{name, time.Now().UTC(), namedIdentity(name), pool, fmt.Sprintf("10.232.%d.1", n)}
+		r := Record{
+			Name:      name,
+			CreatedAt: time.Now().UTC(),
+			Bridge:    namedIdentity(name),
+			Subnet:    pool,
+			Gateway:   fmt.Sprintf("10.232.%d.1", n),
+		}
 		return r, writeJSON(filepath.Join(s.root, name+".json"), r)
 	}
 	return Record{}, errors.New("named network subnet pool is exhausted or overlaps host routes")
-}
-func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
-	l, err := s.lock(ctx)
-	if err != nil {
-		return Record{}, err
-	}
-	defer l.Close()
-	return s.read(name)
-}
-func (s *Store) List(ctx context.Context) ([]Record, error) {
-	l, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer l.Close()
-	return s.list()
-}
-func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
-	l, err := s.lock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer l.Close()
-	if _, err := s.read(name); err != nil {
-		return nil, err
-	}
-	return namedLock(ctx, filepath.Join(s.root, ".lease-"+name), unix.LOCK_SH)
-}
-func (s *Store) Remove(ctx context.Context, name string, referenced ReferenceCheck) error {
-	return s.remove(ctx, name, time.Time{}, referenced)
-}
-
-// RemoveIfCreated fences a project receipt under the same lock as deletion.
-func (s *Store) RemoveIfCreated(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
-	if created.IsZero() {
-		return errors.New("resource removal requires a creation identity")
-	}
-	return s.remove(ctx, name, created, referenced)
 }
 
 func (s *Store) remove(ctx context.Context, name string, created time.Time, referenced ReferenceCheck) error {
@@ -302,6 +198,128 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	defer dir.Close()
 	return dir.Sync()
 }
+
+func (s *Store) lock(ctx context.Context) (*os.File, error) {
+	if err := privateDirectory(s.root); err != nil {
+		return nil, err
+	}
+	l, err := namedLock(ctx, filepath.Join(s.root, ".lock"), unix.LOCK_EX)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".network-state-") {
+			continue
+		}
+		p := filepath.Join(s.root, entry.Name())
+		var st unix.Stat_t
+		if err := unix.Lstat(p, &st); err != nil {
+			l.Close()
+			return nil, err
+		}
+		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
+			l.Close()
+			return nil, errors.New("unsafe interrupted network metadata")
+		}
+		if err := os.Remove(p); err != nil {
+			l.Close()
+			return nil, err
+		}
+	}
+	return l, nil
+}
+
+func (s *Store) read(name string) (Record, error) {
+	var r Record
+	if err := config.ValidateNetworkName(name); err != nil {
+		return r, err
+	}
+	if err := readJSON(filepath.Join(s.root, name+".json"), &r); err != nil {
+		return r, err
+	}
+	prefix, err := netip.ParsePrefix(r.Subnet)
+	if err != nil || r.Name != name || r.CreatedAt.IsZero() || r.Bridge != namedIdentity(name) || prefix.Bits() != 24 || prefix.Masked() != prefix || !netip.MustParsePrefix("10.232.0.0/16").Contains(prefix.Addr()) || r.Gateway != prefix.Addr().Next().String() {
+		return Record{}, errors.New("invalid named network metadata")
+	}
+	return r, nil
+}
+
+func (s *Store) list() ([]Record, error) {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, err
+	}
+	out := []Record{}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".json") {
+			return nil, errors.New("unexpected named network metadata")
+		}
+		r, err := s.read(strings.TrimSuffix(e.Name(), ".json"))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func privateDirectory(path string) error {
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		return err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != 0 || st.Mode&0022 != 0 {
+		return errors.New("network storage requires private root-owned directories")
+	}
+	return nil
+}
+
+func namedLock(ctx context.Context, path string, how int) (*os.File, error) {
+	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
+		f.Close()
+		return nil, errors.New("unsafe named network lock")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			f.Close()
+			return nil, err
+		}
+		err := unix.Flock(fd, how|unix.LOCK_NB)
+		if err == nil {
+			return f, nil
+		}
+		if how == unix.LOCK_SH || !errors.Is(err, unix.EWOULDBLOCK) {
+			f.Close()
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func namedIdentity(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return "csn" + hex.EncodeToString(sum[:])[:10]
+}
+
 func namedRecord(name string) (Record, error) {
 	s, err := OpenStore()
 	if err != nil {
@@ -309,6 +327,7 @@ func namedRecord(name string) (Record, error) {
 	}
 	return s.read(name)
 }
+
 func ensureNamedBridge(ctx context.Context, r Record) error {
 	devices, err := links(ctx)
 	if err != nil {
@@ -316,12 +335,13 @@ func ensureNamedBridge(ctx context.Context, r Record) error {
 	}
 	exists := false
 	for _, d := range devices {
-		if d.Name == r.Bridge {
-			if d.Info.Kind != "bridge" || d.Group != ownershipGroup("casklet named "+r.Name) {
-				return errors.New("named bridge exists without casklet ownership")
-			}
-			exists = true
+		if d.Name != r.Bridge {
+			continue
 		}
+		if d.Info.Kind != "bridge" || d.Group != ownershipGroup("casklet named "+r.Name) {
+			return errors.New("named bridge exists without casklet ownership")
+		}
+		exists = true
 	}
 	if !exists {
 		out, err := command(ctx, "ip", "", "-j", "-4", "route", "show", "table", "all")
@@ -346,30 +366,32 @@ func ensureNamedBridge(ctx context.Context, r Record) error {
 	}
 	return os.WriteFile("/proc/sys/net/ipv4/conf/"+r.Bridge+"/route_localnet", []byte("1\n"), 0600)
 }
+
 func removeNamedBridge(ctx context.Context, r Record) error {
 	devices, err := links(ctx)
 	if err != nil {
 		return err
 	}
 	for _, d := range devices {
-		if d.Name == r.Bridge {
-			if d.Info.Kind != "bridge" || d.Group != ownershipGroup("casklet named "+r.Name) {
-				return errors.New("refuse cleanup of an unowned named bridge")
-			}
-			_, err := command(ctx, "ip", "", "link", "delete", r.Bridge)
-			return err
+		if d.Name != r.Bridge {
+			continue
 		}
+		if d.Info.Kind != "bridge" || d.Group != ownershipGroup("casklet named "+r.Name) {
+			return errors.New("refuse cleanup of an unowned named bridge")
+		}
+		_, err := command(ctx, "ip", "", "link", "delete", r.Bridge)
+		return err
 	}
 	return nil
 }
 
 func protectNamedForwarding() error {
-	p := filepath.Join(runsRoot, ".network-shared.json")
+	p := filepath.Join(_runsRoot, ".network-shared.json")
 	var state sharedState
 	if err := readJSON(p, &state); err != nil {
 		return err
 	}
-	path := filepath.Join(runsRoot, ".named-forwarding.json")
+	path := filepath.Join(_runsRoot, ".named-forwarding.json")
 	var saved sharedState
 	err := readJSON(path, &saved)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -388,7 +410,7 @@ func protectNamedForwarding() error {
 }
 
 func restoreNamedForwarding() error {
-	path := filepath.Join(runsRoot, ".named-forwarding.json")
+	path := filepath.Join(_runsRoot, ".named-forwarding.json")
 	var state sharedState
 	if err := readJSON(path, &state); errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -403,12 +425,13 @@ func restoreNamedForwarding() error {
 		return errors.New("invalid named forwarding journal")
 	}
 	if state.BootID == boot && state.Forwarding == "0" {
-		if err := os.WriteFile(forwardingPath, []byte("0\n"), 0600); err != nil {
+		if err := os.WriteFile(_forwardingPath, []byte("0\n"), 0600); err != nil {
 			return err
 		}
 	}
 	return os.Remove(path)
 }
+
 func checkNamedRoutes(data []byte, subnet string) error {
 	var routes []struct {
 		Destination string `json:"dst"`
