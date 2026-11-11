@@ -68,7 +68,10 @@ type Config struct {
 	Command        []string          `json:"command"`
 }
 
-var environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	_environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	_imageID         = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+)
 
 // ValidateRunRequest checks user options before image defaults are available.
 // The CLI validates the reference separately; execution still requires a pinned
@@ -145,7 +148,7 @@ func (c Config) ValidateExecution() error {
 	}
 	for _, assignment := range c.Env {
 		key, _, ok := strings.Cut(assignment, "=")
-		if !ok || !environmentName.MatchString(key) || strings.ContainsRune(assignment, 0) {
+		if !ok || !_environmentName.MatchString(key) || strings.ContainsRune(assignment, 0) {
 			return fmt.Errorf("invalid environment assignment %q: use KEY=VALUE with a POSIX variable name", assignment)
 		}
 	}
@@ -198,30 +201,12 @@ func (c Config) CommandEnvironment() []string {
 		key, _, _ := strings.Cut(assignment, "=")
 		if index, exists := positions[key]; exists {
 			env[index] = assignment
-		} else {
-			positions[key] = len(env)
-			env = append(env, assignment)
+			continue
 		}
+		positions[key] = len(env)
+		env = append(env, assignment)
 	}
 	return env
-}
-
-var imageID = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-
-// ValidateImageID requires a full content identity; paths and prefixes are invalid.
-func ValidateImageID(id string) error {
-	if !imageID.MatchString(id) {
-		return errors.New("image ID must be sha256: followed by 64 lowercase hexadecimal digits")
-	}
-	return nil
-}
-
-// ValidateStopTimeout bounds graceful shutdown, including immediate termination.
-func ValidateStopTimeout(timeout time.Duration) error {
-	if timeout < 0 || timeout > time.Minute {
-		return errors.New("stop timeout must be between 0s and 1m")
-	}
-	return nil
 }
 
 func (c Config) StoppingTimeout() time.Duration {
@@ -268,6 +253,22 @@ func (c Config) ValidateTmpfs() error {
 	tmp, shm := c.TmpfsSizes()
 	if tmp < 1 || tmp > 128<<30 || shm < 1 || shm > 128<<30 {
 		return errors.New("tmpfs capacities must be positive and at most 128 GiB each")
+	}
+	return nil
+}
+
+// ValidateImageID requires a full content identity; paths and prefixes are invalid.
+func ValidateImageID(id string) error {
+	if !_imageID.MatchString(id) {
+		return errors.New("image ID must be sha256: followed by 64 lowercase hexadecimal digits")
+	}
+	return nil
+}
+
+// ValidateStopTimeout bounds graceful shutdown, including immediate termination.
+func ValidateStopTimeout(timeout time.Duration) error {
+	if timeout < 0 || timeout > time.Minute {
+		return errors.New("stop timeout must be between 0s and 1m")
 	}
 	return nil
 }

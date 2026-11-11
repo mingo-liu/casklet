@@ -7,7 +7,7 @@ import (
 )
 
 // Set identically for the client and its embedded engine by make build.
-var version = "dev"
+var _version = "dev"
 
 type Info struct {
 	Version   string `json:"version"`
@@ -19,7 +19,13 @@ type Info struct {
 }
 
 func Current() Info {
-	i := Info{Version: version, Commit: "unknown", GoVersion: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH}
+	i := Info{
+		Version:   _version,
+		Commit:    "unknown",
+		GoVersion: runtime.Version(),
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	}
 	if i.Version == "" {
 		i.Version = "dev"
 	}

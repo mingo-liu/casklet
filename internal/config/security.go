@@ -32,7 +32,7 @@ func ParseIDMapping(value string) (IDMapping, error) {
 		}
 		values[i] = uint32(value)
 	}
-	return IDMapping{values[0], values[1], values[2]}, nil
+	return IDMapping{ContainerID: values[0], HostID: values[1], Size: values[2]}, nil
 }
 
 func MappedID(id uint32, mappings []IDMapping) (uint32, bool) {
@@ -42,29 +42,6 @@ func MappedID(id uint32, mappings []IDMapping) (uint32, bool) {
 		}
 	}
 	return 0, false
-}
-
-func validateMappings(mappings []IDMapping) error {
-	if len(mappings) == 0 || len(mappings) > 340 {
-		return errors.New("provide between 1 and 340 ID mappings")
-	}
-	for i, m := range mappings {
-		if m.Size == 0 || uint64(m.ContainerID)+uint64(m.Size) > math.MaxUint32 || uint64(m.HostID)+uint64(m.Size) > math.MaxUint32 {
-			return errors.New("ID mapping is empty or includes an invalid ID")
-		}
-		for _, previous := range mappings[:i] {
-			overlap := func(a, b uint32, as, bs uint32) bool {
-				return uint64(a) < uint64(b)+uint64(bs) && uint64(b) < uint64(a)+uint64(as)
-			}
-			if overlap(m.ContainerID, previous.ContainerID, m.Size, previous.Size) || overlap(m.HostID, previous.HostID, m.Size, previous.Size) {
-				return errors.New("ID mapping ranges must not overlap")
-			}
-		}
-	}
-	if _, ok := MappedID(0, mappings); !ok {
-		return errors.New("ID mappings must include container ID 0")
-	}
-	return nil
 }
 
 func (c Config) SeccompProfile() string {
@@ -92,10 +69,8 @@ func (c Config) ValidateSecurity() error {
 			}
 		}
 	}
-	if c.UserNS {
-		if c.NetworkMode() != "none" {
-			return errors.New("user namespaces currently require --network none")
-		}
+	if c.UserNS && c.NetworkMode() != "none" {
+		return errors.New("user namespaces currently require --network none")
 	}
 	if !c.UserNS {
 		if len(c.UIDMappings) != 0 || len(c.GIDMappings) != 0 {
@@ -109,7 +84,7 @@ func (c Config) ValidateSecurity() error {
 	if err := validateMappings(c.GIDMappings); err != nil {
 		return fmt.Errorf("GID mappings: %w", err)
 	}
-	user := User{}
+	var user User
 	if c.User != nil {
 		user = *c.User
 	}
@@ -118,6 +93,29 @@ func (c Config) ValidateSecurity() error {
 	}
 	if _, ok := MappedID(user.GID, c.GIDMappings); !ok {
 		return errors.New("container GID is not mapped")
+	}
+	return nil
+}
+
+func validateMappings(mappings []IDMapping) error {
+	if len(mappings) == 0 || len(mappings) > 340 {
+		return errors.New("provide between 1 and 340 ID mappings")
+	}
+	for i, m := range mappings {
+		if m.Size == 0 || uint64(m.ContainerID)+uint64(m.Size) > math.MaxUint32 || uint64(m.HostID)+uint64(m.Size) > math.MaxUint32 {
+			return errors.New("ID mapping is empty or includes an invalid ID")
+		}
+		for _, previous := range mappings[:i] {
+			overlap := func(a, b uint32, as, bs uint32) bool {
+				return uint64(a) < uint64(b)+uint64(bs) && uint64(b) < uint64(a)+uint64(as)
+			}
+			if overlap(m.ContainerID, previous.ContainerID, m.Size, previous.Size) || overlap(m.HostID, previous.HostID, m.Size, previous.Size) {
+				return errors.New("ID mapping ranges must not overlap")
+			}
+		}
+	}
+	if _, ok := MappedID(0, mappings); !ok {
+		return errors.New("ID mappings must include container ID 0")
 	}
 	return nil
 }
