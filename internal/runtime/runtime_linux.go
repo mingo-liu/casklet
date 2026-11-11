@@ -70,8 +70,13 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), startupLimit)
 	defer cancelPrepare()
 	signalDone := make(chan struct{})
-	defer close(signalDone)
+	signalStopped := make(chan struct{})
+	defer func() {
+		close(signalDone)
+		<-signalStopped
+	}()
 	go func() {
+		defer close(signalStopped)
 		for {
 			select {
 			case sig := <-incomingSignals:
@@ -346,18 +351,8 @@ func runWithExec(cfg config.Config, stdin, stdout, stderr *os.File, observer Obs
 	if err := encoder.Encode(message{Kind: "prepare", Config: &cfg, ExecEnabled: executor != nil, Overlay: overlay, DNS: overlayDNS, ImageLease: overlay != nil}); err != nil {
 		return code, fmt.Errorf("configure init: %w", err)
 	}
-	events := make(chan message, 4)
-	go func() {
-		defer close(events)
-		decoder := json.NewDecoder(control)
-		for {
-			var event message
-			if err := decoder.Decode(&event); err != nil {
-				return
-			}
-			events <- event
-		}
-	}()
+	events, stopEvents := startControlEvents(control)
+	defer stopEvents()
 	startupTimer := time.NewTimer(startupLimit)
 	defer startupTimer.Stop()
 	var timeoutTimer, killTimer *time.Timer

@@ -205,7 +205,14 @@ func Init() int {
 	}
 	orphaned := make(chan struct{})
 	stopRequests := make(chan time.Duration, 1)
+	requestsDone := make(chan struct{})
+	defer func() {
+		// This control socket is nonblocking, so a read deadline interrupts Decode.
+		_ = control.SetReadDeadline(time.Now())
+		<-requestsDone
+	}()
 	go func() {
+		defer close(requestsDone)
 		defer close(orphaned)
 		for {
 			var request message
