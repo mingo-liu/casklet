@@ -29,7 +29,13 @@ func testStore(t *testing.T) *Store {
 }
 
 func testConfig() config.Config {
-	return config.Config{RootFS: "/rootfs", Hostname: "test", Memory: 8 * 1024 * 1024, PidsLimit: 8, Command: []string{"/bin/echo", "hello"}}
+	return config.Config{
+		RootFS:    "/rootfs",
+		Hostname:  "test",
+		Memory:    8 * 1024 * 1024,
+		PidsLimit: 8,
+		Command:   []string{"/bin/echo", "hello"},
+	}
 }
 
 func createTestRecord(t *testing.T, store *Store, name string) Record {
@@ -42,16 +48,18 @@ func createTestRecord(t *testing.T, store *Store, name string) Record {
 }
 
 func TestStorePersistsConfigurationAndReferences(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "web")
-	if !containerID.MatchString(record.ID) || record.State != StateCreated {
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "web")
+	)
+	if !_containerID.MatchString(record.ID) || record.State != StateCreated {
 		t.Fatalf("unexpected new record: %+v", record)
 	}
 	bootID, err := currentBootID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.BootID != bootID || !bootIDPattern.MatchString(record.BootID) {
+	if record.BootID != bootID || !_bootIDPattern.MatchString(record.BootID) {
 		t.Fatalf("creation did not persist the current boot ID: %q, want %q", record.BootID, bootID)
 	}
 	reopened, err := newStoreAt(store.root)
@@ -92,8 +100,10 @@ func TestStorePersistsConfigurationAndReferences(t *testing.T) {
 func TestConcurrentNameCreationIsExclusive(t *testing.T) {
 	store := testStore(t)
 	const workers = 16
-	var wg sync.WaitGroup
-	errorsSeen := make(chan error, workers)
+	var (
+		wg         sync.WaitGroup
+		errorsSeen = make(chan error, workers)
+	)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -118,13 +128,17 @@ func TestConcurrentNameCreationIsExclusive(t *testing.T) {
 }
 
 func TestUpdatesAreAtomicAndSerialized(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "web")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "web")
+	)
 	const workers = 24
-	var wg sync.WaitGroup
-	errorsSeen := make(chan error, workers+1)
-	stop := make(chan struct{})
-	observerDone := make(chan struct{})
+	var (
+		wg           sync.WaitGroup
+		errorsSeen   = make(chan error, workers+1)
+		stop         = make(chan struct{})
+		observerDone = make(chan struct{})
+	)
 	go func() {
 		defer close(observerDone)
 		for {
@@ -190,8 +204,10 @@ func TestUpdatesAreAtomicAndSerialized(t *testing.T) {
 }
 
 func TestLeaseBlocksRemovalAndDuplicateSupervision(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "web")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "web")
+	)
 	if err := store.Remove(context.Background(), record.ID); !errors.Is(err, ErrNotTerminal) {
 		t.Fatalf("running record removable: %v", err)
 	}
@@ -199,10 +215,10 @@ func TestLeaseBlocksRemovalAndDuplicateSupervision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if second, err := store.AcquireLease(context.Background(), record.ID); !errors.Is(err, ErrBusy) {
 		if second != nil {
-			second.Close()
+			_ = second.Close()
 		}
 		t.Fatalf("duplicate supervision allowed: %v", err)
 	}
@@ -230,7 +246,7 @@ func TestStoreLockHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	if _, err := store.List(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -241,10 +257,12 @@ func TestStoreLockHonorsCancellation(t *testing.T) {
 func TestMetadataRejectsUnsafeArtifacts(t *testing.T) {
 	for _, kind := range []string{"symlink", "fifo", "directory", "hardlink", "oversized", "public", "malformed", "wrong-id"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
-			record := createTestRecord(t, store, "web")
-			id := record.ID
-			path := filepath.Join(store.root, id, "state.json")
+			var (
+				store  = testStore(t)
+				record = createTestRecord(t, store, "web")
+				id     = record.ID
+				path   = filepath.Join(store.root, id, "state.json")
+			)
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
@@ -273,7 +291,7 @@ func TestMetadataRejectsUnsafeArtifacts(t *testing.T) {
 				if err := file.Truncate(1024 * 1024 * 1024); err != nil {
 					t.Fatal(err)
 				}
-				file.Close()
+				_ = file.Close()
 			case "public", "malformed":
 				if err := os.WriteFile(path, []byte("invalid JSON"), 0600); err != nil {
 					t.Fatal(err)
@@ -303,8 +321,10 @@ func TestMetadataRejectsUnsafeArtifacts(t *testing.T) {
 func TestCoordinationRejectsUnsafeArtifacts(t *testing.T) {
 	for _, kind := range []string{"symlink", "fifo", "hardlink", "public"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
-			path := filepath.Join(store.root, ".lock")
+			var (
+				store = testStore(t)
+				path  = filepath.Join(store.root, ".lock")
+			)
 			switch kind {
 			case "symlink":
 				if err := os.Symlink("missing", path); err != nil {
@@ -338,9 +358,11 @@ func TestCoordinationRejectsUnsafeArtifacts(t *testing.T) {
 }
 
 func TestOversizedConfigurationDoesNotPublishContainer(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
-	cfg.Env = []string{"PAYLOAD=" + strings.Repeat("x", int(maxConfigBytes))}
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
+	cfg.Env = []string{"PAYLOAD=" + strings.Repeat("x", int(_maxConfigBytes))}
 	if _, err := store.Create(context.Background(), cfg, "web"); err == nil {
 		t.Fatal("oversized configuration accepted")
 	}
@@ -356,8 +378,10 @@ func TestOversizedConfigurationDoesNotPublishContainer(t *testing.T) {
 }
 
 func TestLogOpenRejectsLinksAndAppends(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "web")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "web")
+	)
 	for _, text := range []string{"stdout\n", "stderr\n"} {
 		file, err := store.OpenLog(context.Background(), record.ID, true)
 		if err != nil {
@@ -366,13 +390,13 @@ func TestLogOpenRejectsLinksAndAppends(t *testing.T) {
 		if _, err := file.WriteString(text); err != nil {
 			t.Fatal(err)
 		}
-		file.Close()
+		_ = file.Close()
 	}
 	file, err := store.OpenLog(context.Background(), record.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	file.Close()
+	_ = file.Close()
 	path := filepath.Join(store.root, record.ID, "container.log")
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "stdout\nstderr\n" {
@@ -392,9 +416,11 @@ func TestLogOpenRejectsLinksAndAppends(t *testing.T) {
 func TestPrivateStorageRejectsUnsafeDirectories(t *testing.T) {
 	for _, kind := range []string{"root-symlink", "root-public", "container-symlink", "container-public"} {
 		t.Run(kind, func(t *testing.T) {
-			store := testStore(t)
-			record := createTestRecord(t, store, "web")
-			path := store.root
+			var (
+				store  = testStore(t)
+				record = createTestRecord(t, store, "web")
+				path   = store.root
+			)
 			if strings.HasPrefix(kind, "container-") {
 				path = filepath.Join(store.root, record.ID)
 			}
@@ -419,8 +445,10 @@ func TestPrivateStorageRejectsUnsafeDirectories(t *testing.T) {
 }
 
 func TestListingsIgnoreUnpublishedAndRemovedDirectories(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "web")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "web")
+	)
 	for _, prefix := range []string{".create-", ".remove-"} {
 		if err := os.Mkdir(filepath.Join(store.root, prefix+strings.Repeat("b", 32)), 0700); err != nil {
 			t.Fatal(err)
@@ -433,8 +461,10 @@ func TestListingsIgnoreUnpublishedAndRemovedDirectories(t *testing.T) {
 }
 
 func TestImageReferencesRemainUntilRecordRemoval(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
 	cfg.Image = "sha256:" + strings.Repeat("a", 64)
 	record, err := store.Create(context.Background(), cfg, "image-reference")
 	if err != nil {

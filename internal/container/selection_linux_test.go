@@ -15,9 +15,11 @@ import (
 
 func TestListIDsReadsOnlyPinnedRecordsAndPreservesRefresh(t *testing.T) {
 	store, records := paginationStore(t, 256)
-	reads := watchRecordReads(t, store, records)
-	ids := []string{records[255].ID, records[0].ID}
-	calls := []string{}
+	var (
+		reads = watchRecordReads(t, store, records)
+		ids   = []string{records[255].ID, records[0].ID}
+		calls []string
+	)
 	values, err := listIDs(context.Background(), store, ids, func(ctx context.Context, record Record) (Record, error) {
 		calls = append(calls, record.ID)
 		record.Health = &Health{Status: HealthHealthy}
@@ -65,8 +67,10 @@ func TestListIDsRejectsInvalidSelectionsBeforeReading(t *testing.T) {
 
 func TestListIDsOmitsRemovedIDsAndHonorsCancellationAndErrors(t *testing.T) {
 	store, records := paginationStore(t, 2)
-	ids := []string{records[0].ID, strings.Repeat("f", 32), records[1].ID}
-	calls := 0
+	var (
+		ids   = []string{records[0].ID, strings.Repeat("f", 32), records[1].ID}
+		calls = 0
+	)
 	values, err := listIDs(context.Background(), store, ids, func(_ context.Context, record Record) (Record, error) {
 		calls++
 		if record.ID == records[0].ID {

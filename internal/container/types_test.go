@@ -20,8 +20,17 @@ func TestValidateName(t *testing.T) {
 }
 
 func TestRecordValidation(t *testing.T) {
-	id := strings.Repeat("a", 32)
-	valid := Record{Version: 1, ID: id, Name: "web", State: StateCreated, CreatedAt: time.Now(), Command: []string{"/bin/true"}}
+	var (
+		id    = strings.Repeat("a", 32)
+		valid = Record{
+			Version:   1,
+			ID:        id,
+			Name:      "web",
+			State:     StateCreated,
+			CreatedAt: time.Now(),
+			Command:   []string{"/bin/true"},
+		}
+	)
 	if err := validateRecord(valid, id); err != nil {
 		t.Fatal(err)
 	}

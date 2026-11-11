@@ -10,8 +10,10 @@ var errLogBusy = errors.New("log storage lock timed out; output was discarded")
 // Temporary lock contention drops only the current chunk. Permanent storage
 // failures drain the remaining output so the workload cannot block indefinitely.
 func captureLog(input io.Reader, output io.Writer) error {
-	buffer := make([]byte, 32*1024)
-	var writeErr, contentionErr error
+	var (
+		buffer                  = make([]byte, 32*1024)
+		writeErr, contentionErr error
+	)
 	for {
 		n, readErr := input.Read(buffer)
 		if n > 0 && writeErr == nil {
@@ -46,8 +48,10 @@ func copyInitialLog(file io.ReadSeeker, length int64, tail int, out io.Writer) e
 	// Search backwards with bounded memory, then stream only the requested
 	// suffix. Ignore a final newline so it terminates the last line rather
 	// than introducing an extra one. Reads stay within the initial snapshot.
-	buffer := make([]byte, 32*1024)
-	start := int64(0)
+	var (
+		buffer = make([]byte, 32*1024)
+		start  = int64(0)
+	)
 search:
 	for end := length; end > 0; {
 		begin := max(int64(0), end-int64(len(buffer)))
@@ -59,12 +63,13 @@ search:
 			return err
 		}
 		for i := len(chunk) - 1; i >= 0; i-- {
-			if chunk[i] == '\n' && begin+int64(i) != length-1 {
-				tail--
-				if tail == 0 {
-					start = begin + int64(i) + 1
-					break search
-				}
+			if chunk[i] != '\n' || begin+int64(i) == length-1 {
+				continue
+			}
+			tail--
+			if tail == 0 {
+				start = begin + int64(i) + 1
+				break search
 			}
 		}
 		end = begin

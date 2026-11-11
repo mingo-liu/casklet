@@ -6,20 +6,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
-const maxEventJournalBytes int64 = 1 << 20
-const eventJournalName = ".events.json"
-const eventFailureName = ".events-error"
+const (
+	_maxEventJournalBytes int64 = 1 << 20
+	_eventJournalName           = ".events.json"
+	_eventFailureName           = ".events-error"
+)
 
-var eventProjectName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+var _eventProjectName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type eventJournal struct {
 	Version int     `json:"version"`
@@ -33,78 +36,67 @@ type eventSnapshot struct {
 	stopped                           bool
 }
 
-func snapshotEvents(record Record) eventSnapshot {
-	health := ""
-	if current := record.effectiveHealth(); current != nil {
-		health = current.Status
+// Events replays bounded retained history and optionally follows future changes.
+// It releases storage locks before calling emit, including with blocked stdout.
+func Events(ctx context.Context, query EventQuery, emit func(Event) error) error {
+	if err := query.Validate(); err != nil {
+		return err
 	}
-	restartAt := ""
-	if record.RestartAt != nil {
-		restartAt = record.RestartAt.Format(time.RFC3339Nano)
+	store, err := OpenStoreContext(ctx)
+	if err != nil {
+		return err
 	}
-	return eventSnapshot{record.State, health, strings.Join(record.CleanupFailures, ","), restartAt, record.Generation, record.StoppedByUser}
+	return store.events(ctx, query, emit)
 }
-func lifecycleEvents(before eventSnapshot, record Record) []Event {
-	after := snapshotEvents(record)
-	var kinds []string
-	if before.state == "" {
-		kinds = append(kinds, "create")
-	} else {
-		if before.generation != after.generation {
-			kinds = append(kinds, "restart")
-		}
-		if before.state != after.state {
-			kind := map[string]string{StateStarting: "starting", StateRunning: "start", StateStopping: "stopping", StateExited: "exit", StateFailed: "exit"}[after.state]
-			if kind != "" {
-				kinds = append(kinds, kind)
-			}
-		}
-		if !before.stopped && after.stopped {
-			kinds = append(kinds, "stop_requested")
-		}
-		if after.restartAt != "" && after.restartAt != before.restartAt {
-			kinds = append(kinds, "restart_scheduled")
-		}
-		if after.health != "" && before.health != after.health {
-			kinds = append(kinds, "health")
-		}
-		if after.cleanup != "" && before.cleanup != after.cleanup {
-			kinds = append(kinds, "cleanup_failed")
-		}
-	}
-	events := make([]Event, 0, len(kinds))
-	for _, kind := range kinds {
-		events = append(events, newLifecycleEvent(record, kind))
-	}
-	return events
-}
+
 func newLifecycleEvent(record Record, kind string) Event {
-	event := Event{SchemaVersion: 1, Time: time.Now().UTC(), ID: record.ID, Name: record.Name, Type: kind, Generation: record.Generation, State: record.State, ExitCode: record.ExitCode, ExitReason: record.ExitReason, CleanupFailures: append([]string(nil), record.CleanupFailures...)}
+	event := Event{
+		SchemaVersion:   1,
+		Time:            time.Now().UTC(),
+		ID:              record.ID,
+		Name:            record.Name,
+		Type:            kind,
+		Generation:      record.Generation,
+		State:           record.State,
+		ExitCode:        record.ExitCode,
+		ExitReason:      record.ExitReason,
+		CleanupFailures: append([]string(nil), record.CleanupFailures...),
+	}
 	if current := record.effectiveHealth(); current != nil {
 		event.Health = current.Status
 	}
 	for key, target := range map[string]*string{"io.casklet.project.name": &event.Project, "io.casklet.project.service": &event.Service} {
-		if value := record.Labels[key]; eventProjectName.MatchString(value) {
+		if value := record.Labels[key]; _eventProjectName.MatchString(value) {
 			*target = value
 		}
 	}
 	return event
 }
+
 func (store *Store) readEventsLocked() (eventJournal, error) {
-	journal := eventJournal{Version: 1, Events: []Event{}}
-	err := store.readJSON(filepath.Join(store.root, eventJournalName), maxEventJournalBytes, &journal)
+	var (
+		journal = eventJournal{Version: 1, Events: []Event{}}
+		err     = store.readJSON(filepath.Join(store.root, _eventJournalName), _maxEventJournalBytes, &journal)
+	)
 	if errors.Is(err, os.ErrNotExist) {
 		return eventJournal{Version: 1, Events: []Event{}}, nil
 	}
 	if err != nil {
 		return journal, err
 	}
-	if journal.Version != 1 || len(journal.Events) > EventHistoryLimit || len(journal.Events) == 0 && journal.Last != 0 {
+	if journal.Version != 1 || len(journal.Events) > EventHistoryLimit ||
+		len(journal.Events) == 0 && journal.Last != 0 {
 		return journal, errors.New("invalid event journal")
 	}
 	previous := uint64(0)
 	for i, event := range journal.Events {
-		if event.SchemaVersion != 1 || validateID(event.ID) != nil || ValidateName(event.Name) != nil || event.Time.IsZero() || !eventTypes[event.Type] || event.Sequence == 0 || i > 0 && event.Sequence != previous+1 || event.ExitCode != nil && (*event.ExitCode < 0 || *event.ExitCode > 255) || validateCleanupFailures(event.CleanupFailures) != nil {
+		if event.SchemaVersion != 1 || validateID(event.ID) != nil || ValidateName(event.Name) != nil ||
+			event.Time.IsZero() ||
+			!_eventTypes[event.Type] ||
+			event.Sequence == 0 ||
+			i > 0 && event.Sequence != previous+1 ||
+			event.ExitCode != nil && (*event.ExitCode < 0 || *event.ExitCode > 255) ||
+			validateCleanupFailures(event.CleanupFailures) != nil {
 			return journal, errors.New("invalid event journal entry")
 		}
 		switch event.State {
@@ -117,7 +109,8 @@ func (store *Store) readEventsLocked() (eventJournal, error) {
 		default:
 			return journal, errors.New("invalid event health")
 		}
-		if event.Project != "" && !eventProjectName.MatchString(event.Project) || event.Service != "" && !eventProjectName.MatchString(event.Service) {
+		if event.Project != "" && !_eventProjectName.MatchString(event.Project) ||
+			event.Service != "" && !_eventProjectName.MatchString(event.Service) {
 			return journal, errors.New("invalid event project identity")
 		}
 		if err := validateExitStatus(event.ExitReason, event.ExitReason == "oom_killed"); err != nil {
@@ -153,7 +146,7 @@ func (store *Store) appendEventsLocked(events []Event) error {
 	if len(journal.Events) > EventHistoryLimit {
 		journal.Events = journal.Events[len(journal.Events)-EventHistoryLimit:]
 	}
-	return store.writeJSON(store.root, eventJournalName, journal, maxEventJournalBytes)
+	return store.writeJSON(store.root, _eventJournalName, journal, _maxEventJournalBytes)
 }
 
 // Observation must not prevent stopping workloads or reclaiming resources.
@@ -161,7 +154,7 @@ func (store *Store) appendEventsLocked(events []Event) error {
 // unsafe artifact, and leave operator acknowledgement explicit.
 func (store *Store) publishEventsLocked(events []Event) {
 	if err := store.appendEventsLocked(events); err != nil {
-		marker, markerErr := store.openFile(filepath.Join(store.root, eventFailureName), unix.O_WRONLY, true)
+		marker, markerErr := store.openFile(filepath.Join(store.root, _eventFailureName), unix.O_WRONLY, true)
 		if markerErr == nil {
 			markerErr = marker.Truncate(0)
 			if markerErr == nil {
@@ -170,42 +163,32 @@ func (store *Store) publishEventsLocked(events []Event) {
 			if markerErr == nil {
 				markerErr = marker.Sync()
 			}
-			marker.Close()
+			_ = marker.Close()
 			if markerErr == nil {
 				markerErr = syncDirectory(store.root)
 			}
 		}
-		fmt.Fprintf(os.Stderr, "casklet: lifecycle event recording failed; history may be incomplete: %v\n", errors.Join(err, markerErr))
+		_, _ = fmt.Fprintf(os.Stderr, "casklet: lifecycle event recording failed; history may be incomplete: %v\n", errors.Join(err, markerErr))
 	}
 }
 
 func (store *Store) writeStateEvents(id string, before eventSnapshot, record Record) error {
-	if err := store.writeJSON(filepath.Join(store.root, id), "state.json", record, maxRecordBytes); err != nil {
+	if err := store.writeJSON(filepath.Join(store.root, id), "state.json", record, _maxRecordBytes); err != nil {
 		return err
 	}
 	store.publishEventsLocked(lifecycleEvents(before, record))
 	return nil
 }
 
-// Events replays bounded retained history and optionally follows future changes.
-// It releases storage locks before calling emit, including with blocked stdout.
-func Events(ctx context.Context, query EventQuery, emit func(Event) error) error {
-	if err := query.Validate(); err != nil {
-		return err
-	}
-	store, err := OpenStoreContext(ctx)
-	if err != nil {
-		return err
-	}
-	return store.events(ctx, query, emit)
-}
 func (store *Store) events(ctx context.Context, query EventQuery, emit func(Event) error) error {
 	if err := query.Validate(); err != nil {
 		return err
 	}
-	cursor := uint64(0)
-	initialized := false
-	observed := false
+	var (
+		cursor      = uint64(0)
+		initialized = false
+		observed    = false
+	)
 	if query.After != nil {
 		cursor = *query.After
 		initialized = true
@@ -217,18 +200,18 @@ func (store *Store) events(ctx context.Context, query EventQuery, emit func(Even
 		if err != nil {
 			return err
 		}
-		marker, markerErr := store.openFile(filepath.Join(store.root, eventFailureName), unix.O_RDONLY, false)
+		marker, markerErr := store.openFile(filepath.Join(store.root, _eventFailureName), unix.O_RDONLY, false)
 		if markerErr == nil {
-			marker.Close()
-			lock.Close()
+			_ = marker.Close()
+			_ = lock.Close()
 			return errors.New("lifecycle event history is incomplete after a recording failure; inspect VM storage before resetting history")
 		}
 		if !errors.Is(markerErr, os.ErrNotExist) {
-			lock.Close()
+			_ = lock.Close()
 			return markerErr
 		}
 		journal, err := store.readEventsLocked()
-		lock.Close()
+		_ = lock.Close()
 		if err != nil {
 			return err
 		}
@@ -268,4 +251,66 @@ func (store *Store) events(ctx context.Context, query EventQuery, emit func(Even
 		case <-ticker.C:
 		}
 	}
+}
+
+func snapshotEvents(record Record) eventSnapshot {
+	health := ""
+	if current := record.effectiveHealth(); current != nil {
+		health = current.Status
+	}
+	restartAt := ""
+	if record.RestartAt != nil {
+		restartAt = record.RestartAt.Format(time.RFC3339Nano)
+	}
+	return eventSnapshot{
+		state:      record.State,
+		health:     health,
+		cleanup:    strings.Join(record.CleanupFailures, ","),
+		restartAt:  restartAt,
+		generation: record.Generation,
+		stopped:    record.StoppedByUser,
+	}
+}
+
+func lifecycleEvents(before eventSnapshot, record Record) []Event {
+	var (
+		after = snapshotEvents(record)
+		kinds []string
+	)
+	if before.state == "" {
+		kinds = append(kinds, "create")
+	} else {
+		if before.generation != after.generation {
+			kinds = append(kinds, "restart")
+		}
+		if before.state != after.state {
+			kind := map[string]string{
+				StateStarting: "starting",
+				StateRunning:  "start",
+				StateStopping: "stopping",
+				StateExited:   "exit",
+				StateFailed:   "exit",
+			}[after.state]
+			if kind != "" {
+				kinds = append(kinds, kind)
+			}
+		}
+		if !before.stopped && after.stopped {
+			kinds = append(kinds, "stop_requested")
+		}
+		if after.restartAt != "" && after.restartAt != before.restartAt {
+			kinds = append(kinds, "restart_scheduled")
+		}
+		if after.health != "" && before.health != after.health {
+			kinds = append(kinds, "health")
+		}
+		if after.cleanup != "" && before.cleanup != after.cleanup {
+			kinds = append(kinds, "cleanup_failed")
+		}
+	}
+	events := make([]Event, 0, len(kinds))
+	for _, kind := range kinds {
+		events = append(events, newLifecycleEvent(record, kind))
+	}
+	return events
 }

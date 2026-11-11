@@ -20,12 +20,27 @@ func testFilters(t *testing.T, expressions ...string) []Filter {
 
 func TestContainerFiltersIntersectLabelsStatesAndHealth(t *testing.T) {
 	records := []Record{
-		{ID: "a", State: StateRunning, Labels: map[string]string{"project": "demo", "role": "api", "empty": ""}, Health: &Health{Status: HealthHealthy}},
-		{ID: "b", State: StateExited, Labels: map[string]string{"project": "demo", "role": "db"}, Health: &Health{Status: HealthHealthy}},
+		{
+			ID:     "a",
+			State:  StateRunning,
+			Labels: map[string]string{"project": "demo", "role": "api", "empty": ""},
+			Health: &Health{Status: HealthHealthy},
+		},
+		{
+			ID:     "b",
+			State:  StateExited,
+			Labels: map[string]string{"project": "demo", "role": "db"},
+			Health: &Health{Status: HealthHealthy},
+		},
 		{ID: "c", State: StateRunning, Labels: map[string]string{"project": "other"}},
-		{ID: "d", State: StateRunning, Labels: map[string]string{"project": "a=b"}, Health: &Health{Status: HealthUnhealthy}},
+		{
+			ID:     "d",
+			State:  StateRunning,
+			Labels: map[string]string{"project": "a=b"},
+			Health: &Health{Status: HealthUnhealthy},
+		},
 	}
-	for _, tt := range []struct {
+	tests := []struct {
 		expr []string
 		ids  []string
 	}{
@@ -41,9 +56,12 @@ func TestContainerFiltersIntersectLabelsStatesAndHealth(t *testing.T) {
 		{[]string{"health=unhealthy"}, []string{"d"}},
 		{[]string{"status=running", "status=exited"}, nil},
 		{[]string{"label=project=demo", "label=project=other"}, nil},
-	} {
-		filtered := FilterRecords(records, testFilters(t, tt.expr...))
-		var ids []string
+	}
+	for _, tt := range tests {
+		var (
+			filtered = FilterRecords(records, testFilters(t, tt.expr...))
+			ids      []string
+		)
 		for _, record := range filtered {
 			ids = append(ids, record.ID)
 		}

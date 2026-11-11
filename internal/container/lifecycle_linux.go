@@ -13,37 +13,13 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 	"github.com/mingo-liu/casklet/internal/image"
 	"github.com/mingo-liu/casklet/internal/rootfs"
-	containerruntime "github.com/mingo-liu/casklet/internal/runtime"
+	"github.com/mingo-liu/casklet/internal/runtime"
 	"golang.org/x/sys/unix"
 )
 
-func lockReference(ctx context.Context, ref string) (*Store, Record, *os.File, error) {
-	store, err := managementStore(ctx)
-	if err != nil {
-		return nil, Record{}, nil, err
-	}
-	record, err := store.Get(ctx, ref)
-	if err != nil {
-		return nil, record, nil, err
-	}
-	operation, err := store.AcquireOperation(ctx, record.ID)
-	if err != nil {
-		return nil, record, nil, err
-	}
-	latest, err := store.Get(ctx, record.ID)
-	cfg, cfgErr := store.Config(ctx, record.ID)
-	if err == nil && cfgErr != nil {
-		err = cfgErr
-	}
-	if err != nil || latest.Generation != record.Generation && cfg.RestartMode() == "no" {
-		operation.Close()
-		if err == nil {
-			err = errors.New("container execution changed; retry the operation")
-		}
-		return nil, latest, nil, err
-	}
-	return store, latest, operation, nil
-}
+// StartPreflight checks external resources while the immutable container's
+// operation lock is held. A failed check must not publish a new generation.
+type StartPreflight func(context.Context, []config.PortMapping) error
 
 func Stop(ctx context.Context, ref string) (Record, error) { return StopWithTimeout(ctx, ref, nil) }
 
@@ -57,7 +33,7 @@ func StopWithTimeout(ctx context.Context, ref string, timeout *time.Duration) (R
 	if err != nil {
 		return record, err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := markUserStopped(ctx, store, record.ID); err != nil {
 		return record, err
 	}
@@ -69,7 +45,7 @@ func Remove(ctx context.Context, ref string) error {
 	if err != nil {
 		return err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	return removeLocked(ctx, store, record)
 }
 
@@ -79,16 +55,12 @@ func StartExisting(ctx context.Context, ref string) (Record, error) {
 	return StartExistingWithPreflight(ctx, ref, nil)
 }
 
-// StartPreflight checks external resources while the immutable container's
-// operation lock is held. A failed check must not publish a new generation.
-type StartPreflight func(context.Context, []config.PortMapping) error
-
 func StartExistingWithPreflight(ctx context.Context, ref string, preflight StartPreflight) (Record, error) {
 	store, record, operation, err := lockReference(ctx, ref)
 	if err != nil {
 		return record, err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	record, err = refreshRecord(ctx, store, record, false)
 	if err != nil {
 		return record, err
@@ -125,7 +97,7 @@ func RestartWithPreflight(ctx context.Context, ref string, timeout *time.Duratio
 	if err != nil {
 		return record, err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := markUserStopped(ctx, store, record.ID); err != nil {
 		return record, err
 	}
@@ -134,86 +106,6 @@ func RestartWithPreflight(ctx context.Context, ref string, timeout *time.Duratio
 		return record, err
 	}
 	return startStopped(ctx, store, record, preflight)
-}
-
-func startStopped(ctx context.Context, store *Store, record Record, preflight StartPreflight) (Record, error) {
-	return startStoppedWithPolicy(ctx, store, record, preflight, false)
-}
-func startStoppedWithPolicy(ctx context.Context, store *Store, record Record, preflight StartPreflight, automatic bool) (Record, error) {
-	ctx, cancel := context.WithTimeout(ctx, detachedStartupLimit)
-	defer cancel()
-	status, err := inspectUnit(ctx, record.ID, record.Generation)
-	if err != nil {
-		return record, err
-	}
-	if status.live() {
-		if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
-			return record, err
-		}
-	}
-	if record.RunPath != "" {
-		if err := containerruntime.RecoverRun(ctx, record.RunPath); err != nil {
-			return record, err
-		}
-	}
-	if status.ActiveState == "failed" {
-		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID, record.Generation)); err != nil {
-			return record, err
-		}
-	}
-	cfg, err := store.Config(ctx, record.ID)
-	if err != nil {
-		return record, err
-	}
-	retained, err := store.RootFS(ctx, record.ID)
-	if err != nil {
-		return record, err
-	}
-	candidate, needsImage, err := retainedRootCandidate(cfg, retained)
-	if err != nil {
-		return record, err
-	}
-	if needsImage {
-		images, err := image.OpenStore()
-		if err != nil {
-			return record, err
-		}
-		_, tree, lease, err := images.Acquire(ctx, cfg.Image)
-		if err != nil {
-			return record, err
-		}
-		defer lease.Close()
-		candidate = tree
-	}
-	if _, err := rootfs.Validate(candidate); err != nil {
-		return record, err
-	}
-	if err := rootfs.CheckUnmounted(retained); err != nil {
-		return record, err
-	}
-	if err := rootfs.ValidateMountSources(cfg.Mounts, candidate); err != nil {
-		return record, err
-	}
-	if preflight != nil {
-		if err := preflight(ctx, cfg.Publish); err != nil {
-			return record, err
-		}
-	}
-	// The old supervisor lease fences endpoint cleanup and the generation reset.
-	lease, err := store.AcquireLease(ctx, record.ID)
-	if err != nil {
-		return record, err
-	}
-	err = store.CleanupExecSocket(record.ID)
-	lease.Close()
-	if err != nil {
-		return record, err
-	}
-	next, err := store.BeginExecution(ctx, record.ID, record.Generation, automatic)
-	if err != nil {
-		return record, err
-	}
-	return launchExecution(ctx, store, next)
 }
 
 // Wait pins an execution number before polling. Receipts survive later starts;
@@ -267,8 +159,10 @@ func (store *Store) cleanupRootFSStages(id string) error {
 		if !strings.HasPrefix(entry.Name(), ".rootfs-") {
 			continue
 		}
-		stage := filepath.Join(path, entry.Name())
-		var stat unix.Stat_t
+		var (
+			stage = filepath.Join(path, entry.Name())
+			stat  unix.Stat_t
+		)
 		if err := unix.Lstat(stage, &stat); err != nil {
 			return err
 		}
@@ -283,6 +177,115 @@ func (store *Store) cleanupRootFSStages(id string) error {
 		}
 	}
 	return nil
+}
+
+func lockReference(ctx context.Context, ref string) (*Store, Record, *os.File, error) {
+	store, err := managementStore(ctx)
+	if err != nil {
+		return nil, Record{}, nil, err
+	}
+	record, err := store.Get(ctx, ref)
+	if err != nil {
+		return nil, record, nil, err
+	}
+	operation, err := store.AcquireOperation(ctx, record.ID)
+	if err != nil {
+		return nil, record, nil, err
+	}
+	latest, err := store.Get(ctx, record.ID)
+	cfg, cfgErr := store.Config(ctx, record.ID)
+	if err == nil && cfgErr != nil {
+		err = cfgErr
+	}
+	if err != nil || latest.Generation != record.Generation && cfg.RestartMode() == "no" {
+		_ = operation.Close()
+		if err == nil {
+			err = errors.New("container execution changed; retry the operation")
+		}
+		return nil, latest, nil, err
+	}
+	return store, latest, operation, nil
+}
+
+func startStopped(ctx context.Context, store *Store, record Record, preflight StartPreflight) (Record, error) {
+	return startStoppedWithPolicy(ctx, store, record, preflight, false)
+}
+
+func startStoppedWithPolicy(ctx context.Context, store *Store, record Record, preflight StartPreflight, automatic bool) (Record, error) {
+	ctx, cancel := context.WithTimeout(ctx, _detachedStartupLimit)
+	defer cancel()
+	status, err := inspectUnit(ctx, record.ID, record.Generation)
+	if err != nil {
+		return record, err
+	}
+	if status.live() {
+		if err := stopUnit(ctx, record.ID, record.Generation); err != nil {
+			return record, err
+		}
+	}
+	if record.RunPath != "" {
+		if err := runtime.RecoverRun(ctx, record.RunPath); err != nil {
+			return record, err
+		}
+	}
+	if status.ActiveState == "failed" {
+		if _, err := systemdCommand(ctx, "systemctl", "reset-failed", unitName(record.ID, record.Generation)); err != nil {
+			return record, err
+		}
+	}
+	cfg, err := store.Config(ctx, record.ID)
+	if err != nil {
+		return record, err
+	}
+	retained, err := store.RootFS(ctx, record.ID)
+	if err != nil {
+		return record, err
+	}
+	candidate, needsImage, err := retainedRootCandidate(cfg, retained)
+	if err != nil {
+		return record, err
+	}
+	if needsImage {
+		images, err := image.OpenStore()
+		if err != nil {
+			return record, err
+		}
+		_, tree, lease, err := images.Acquire(ctx, cfg.Image)
+		if err != nil {
+			return record, err
+		}
+		defer func() { _ = lease.Close() }()
+		candidate = tree
+	}
+	if _, err := rootfs.Validate(candidate); err != nil {
+		return record, err
+	}
+	if err := rootfs.CheckUnmounted(retained); err != nil {
+		return record, err
+	}
+	if err := rootfs.ValidateMountSources(cfg.Mounts, candidate); err != nil {
+		return record, err
+	}
+	if preflight != nil {
+		if err := preflight(ctx, cfg.Publish); err != nil {
+			return record, err
+		}
+	}
+	// The old supervisor lease fences endpoint cleanup and the generation reset.
+	lease, err := store.AcquireLease(ctx, record.ID)
+	if err != nil {
+		return record, err
+	}
+	err = store.CleanupExecSocket(record.ID)
+	_ = lease.Close()
+	if err != nil {
+		return record, err
+	}
+	next, err := store.BeginExecution(ctx, record.ID, record.Generation, automatic)
+	if err != nil {
+		return record, err
+	}
+	return launchExecution(ctx, store, next)
 }
 
 func markUserStopped(ctx context.Context, store *Store, id string) error {

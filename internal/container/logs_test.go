@@ -9,9 +9,11 @@ import (
 )
 
 func TestCaptureLogDrainsAllOutput(t *testing.T) {
-	want := bytes.Repeat([]byte("data"), 128*1024)
-	input := bytes.NewReader(want)
-	var output bytes.Buffer
+	var (
+		want   = bytes.Repeat([]byte("data"), 128*1024)
+		input  = bytes.NewReader(want)
+		output bytes.Buffer
+	)
 	if err := captureLog(input, &output); err != nil {
 		t.Fatal(err)
 	}
@@ -39,10 +41,12 @@ func (writer *logFailureWriter) Write(data []byte) (int, error) {
 }
 
 func TestCaptureLogDrainsAfterWriteFailure(t *testing.T) {
-	failure := errors.New("storage unavailable")
-	input := bytes.NewReader(bytes.Repeat([]byte("data"), 128*1024))
-	output := &logFailureWriter{failAt: 1, failure: failure}
-	err := captureLog(input, output)
+	var (
+		failure = errors.New("storage unavailable")
+		input   = bytes.NewReader(bytes.Repeat([]byte("data"), 128*1024))
+		output  = &logFailureWriter{failAt: 1, failure: failure}
+		err     = captureLog(input, output)
+	)
 	if !errors.Is(err, failure) {
 		t.Fatalf("write failure was lost: %v", err)
 	}
@@ -52,24 +56,30 @@ func TestCaptureLogDrainsAfterWriteFailure(t *testing.T) {
 }
 
 func TestCaptureLogResumesAfterTemporaryLockFailure(t *testing.T) {
-	input := bytes.NewReader(bytes.Repeat([]byte("x"), 3*32*1024))
-	output := &logFailureWriter{failAt: 1, failure: errLogBusy}
+	var (
+		input  = bytes.NewReader(bytes.Repeat([]byte("x"), 3*32*1024))
+		output = &logFailureWriter{failAt: 1, failure: errLogBusy}
+	)
 	if err := captureLog(input, output); !errors.Is(err, errLogBusy) {
 		t.Fatalf("lost contention diagnostic: %v", err)
 	}
 	if input.Len() != 0 || output.calls != 3 {
 		t.Fatalf("capture did not resume: unread=%d, writes=%d", input.Len(), output.calls)
 	}
-	readFailure := errors.New("final read failed")
-	err := captureLog(&logFinalErrorReader{data: []byte("last"), err: readFailure}, &logFailureWriter{failAt: 1, failure: errLogBusy})
+	var (
+		readFailure = errors.New("final read failed")
+		err         = captureLog(&logFinalErrorReader{data: []byte("last"), err: readFailure}, &logFailureWriter{failAt: 1, failure: errLogBusy})
+	)
 	if !errors.Is(err, readFailure) || !errors.Is(err, errLogBusy) {
 		t.Fatalf("final contention or input failure lost: %v", err)
 	}
 }
 
 func TestCaptureLogRejectsShortWrites(t *testing.T) {
-	input := bytes.NewReader(bytes.Repeat([]byte("x"), 128*1024))
-	output := &logFailureWriter{failAt: 1, short: true}
+	var (
+		input  = bytes.NewReader(bytes.Repeat([]byte("x"), 128*1024))
+		output = &logFailureWriter{failAt: 1, short: true}
+	)
 	if err := captureLog(input, output); !errors.Is(err, io.ErrShortWrite) {
 		t.Fatalf("short write error = %v", err)
 	}
@@ -93,10 +103,12 @@ func (reader *logFinalErrorReader) Read(buffer []byte) (int, error) {
 }
 
 func TestCaptureLogPreservesFinalBytesAndErrors(t *testing.T) {
-	readFailure := errors.New("input failed")
-	writeFailure := errors.New("output failed")
-	var output bytes.Buffer
-	err := captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &output)
+	var (
+		readFailure  = errors.New("input failed")
+		writeFailure = errors.New("output failed")
+		output       bytes.Buffer
+		err          = captureLog(&logFinalErrorReader{data: []byte("last bytes"), err: readFailure}, &output)
+	)
 	if !errors.Is(err, readFailure) || output.String() != "last bytes" {
 		t.Fatalf("final bytes or read failure lost: %q, %v", output.String(), err)
 	}
@@ -112,30 +124,48 @@ func TestCaptureLogPreservesFinalBytesAndErrors(t *testing.T) {
 }
 
 func TestCopyInitialLogTailAndSnapshotPosition(t *testing.T) {
-	for _, tt := range []struct {
+	tests := []struct {
 		name string
 		data string
 		tail int
 		want string
 	}{
-		{"entire", "one\ntwo\nthree\n", -1, "one\ntwo\nthree\n"},
-		{"no initial lines", "one\ntwo\n", 0, ""},
-		{"one terminated", "one\ntwo\nthree\n", 1, "three\n"},
-		{"two terminated", "one\ntwo\nthree\n", 2, "two\nthree\n"},
-		{"one unterminated", "one\ntwo\nthree", 1, "three"},
-		{"two unterminated", "one\ntwo\nthree", 2, "two\nthree"},
-		{"single newline", "\n", 1, "\n"},
-		{"trailing empty line", "one\n\n", 1, "\n"},
-		{"more lines than available", "one\ntwo\n", 20, "one\ntwo\n"},
-		{"empty", "", 3, ""},
-		{"long line", strings.Repeat("x", 128*1024), 1, strings.Repeat("x", 128*1024)},
-		{"long terminated line", "first\n" + strings.Repeat("x", 128*1024) + "\n", 1, strings.Repeat("x", 128*1024) + "\n"},
-		{"newline at block start", "first\n" + strings.Repeat("x", 32*1024-1) + "\n", 1, strings.Repeat("x", 32*1024-1) + "\n"},
-		{"newline across blocks", "first\n" + strings.Repeat("x", 32*1024) + "\n", 1, strings.Repeat("x", 32*1024) + "\n"},
-	} {
+		{name: "entire", data: "one\ntwo\nthree\n", tail: -1, want: "one\ntwo\nthree\n"},
+		{name: "no initial lines", data: "one\ntwo\n", tail: 0, want: ""},
+		{name: "one terminated", data: "one\ntwo\nthree\n", tail: 1, want: "three\n"},
+		{name: "two terminated", data: "one\ntwo\nthree\n", tail: 2, want: "two\nthree\n"},
+		{name: "one unterminated", data: "one\ntwo\nthree", tail: 1, want: "three"},
+		{name: "two unterminated", data: "one\ntwo\nthree", tail: 2, want: "two\nthree"},
+		{name: "single newline", data: "\n", tail: 1, want: "\n"},
+		{name: "trailing empty line", data: "one\n\n", tail: 1, want: "\n"},
+		{name: "more lines than available", data: "one\ntwo\n", tail: 20, want: "one\ntwo\n"},
+		{name: "empty", data: "", tail: 3, want: ""},
+		{name: "long line", data: strings.Repeat("x", 128*1024), tail: 1, want: strings.Repeat("x", 128*1024)},
+		{
+			name: "long terminated line",
+			data: "first\n" + strings.Repeat("x", 128*1024) + "\n",
+			tail: 1,
+			want: strings.Repeat("x", 128*1024) + "\n",
+		},
+		{
+			name: "newline at block start",
+			data: "first\n" + strings.Repeat("x", 32*1024-1) + "\n",
+			tail: 1,
+			want: strings.Repeat("x", 32*1024-1) + "\n",
+		},
+		{
+			name: "newline across blocks",
+			data: "first\n" + strings.Repeat("x", 32*1024) + "\n",
+			tail: 1,
+			want: strings.Repeat("x", 32*1024) + "\n",
+		},
+	}
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			file := strings.NewReader(tt.data + "later\n")
-			var output bytes.Buffer
+			var (
+				file   = strings.NewReader(tt.data + "later\n")
+				output bytes.Buffer
+			)
 			if err := copyInitialLog(file, int64(len(tt.data)), tt.tail, &output); err != nil {
 				t.Fatal(err)
 			}
@@ -152,6 +182,7 @@ func TestCopyInitialLogTailAndSnapshotPosition(t *testing.T) {
 
 type countingLogReader struct {
 	*bytes.Reader
+
 	readBytes int
 }
 
@@ -164,8 +195,10 @@ func (reader *countingLogReader) Read(data []byte) (int, error) {
 func TestCopyInitialLogTailReadsOnlySuffix(t *testing.T) {
 	data := bytes.Repeat([]byte("old entry\n"), 100000)
 	data = append(data, []byte("last entry\n")...)
-	file := &countingLogReader{Reader: bytes.NewReader(data)}
-	var output bytes.Buffer
+	var (
+		file   = &countingLogReader{Reader: bytes.NewReader(data)}
+		output bytes.Buffer
+	)
 	if err := copyInitialLog(file, int64(len(data)), 1, &output); err != nil {
 		t.Fatal(err)
 	}

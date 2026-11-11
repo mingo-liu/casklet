@@ -13,38 +13,11 @@ import (
 	"github.com/mingo-liu/casklet/internal/config"
 )
 
-// Snapshot reads state and configuration under one lock, so removal cannot split them.
-func (store *Store) Snapshot(ctx context.Context, ref string) (Record, config.Config, error) {
-	lock, err := store.lock(ctx, true)
-	if err != nil {
-		return Record{}, config.Config{}, err
-	}
-	defer lock.Close()
-	record, err := store.resolveLocked(ref)
-	if err != nil {
-		return Record{}, config.Config{}, err
-	}
-	var cfg config.Config
-	if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), maxConfigBytes, &cfg); err != nil {
-		return Record{}, config.Config{}, err
-	}
-	if err := cfg.ValidateExecution(); err != nil {
-		// Validation errors can quote malformed environment assignments.
-		return Record{}, config.Config{}, errors.New("invalid stored container configuration")
-	}
-	return record, cfg, nil
-}
-
-func refreshedSnapshot(ctx context.Context, store *Store, ref string) (Record, config.Config, error) {
-	record, err := store.Get(ctx, ref)
-	if err == nil {
-		record, err = refreshRecord(ctx, store, record, false)
-	}
-	if err != nil {
-		return Record{}, config.Config{}, err
-	}
-	// Resolve once: a concurrently reused name must never select a different container.
-	return store.Snapshot(ctx, record.ID)
+type statsSample struct {
+	result     Statistics
+	generation uint64
+	reader     *cgroup.MetricsReader
+	first      cgroup.Metrics
 }
 
 func Inspect(ctx context.Context, ref string) (Inspection, error) {
@@ -89,16 +62,43 @@ func StatsMany(ctx context.Context, ids []string, interval time.Duration) ([]Sta
 	return sampleStatistics(ctx, store, ids, interval)
 }
 
-type statsSample struct {
-	result     Statistics
-	generation uint64
-	reader     *cgroup.MetricsReader
-	first      cgroup.Metrics
+// Snapshot reads state and configuration under one lock, so removal cannot split them.
+func (store *Store) Snapshot(ctx context.Context, ref string) (Record, config.Config, error) {
+	lock, err := store.lock(ctx, true)
+	if err != nil {
+		return Record{}, config.Config{}, err
+	}
+	defer func() { _ = lock.Close() }()
+	record, err := store.resolveLocked(ref)
+	if err != nil {
+		return Record{}, config.Config{}, err
+	}
+	var cfg config.Config
+	if err := store.readJSON(filepath.Join(store.root, record.ID, "config.json"), _maxConfigBytes, &cfg); err != nil {
+		return Record{}, config.Config{}, err
+	}
+	if err := cfg.ValidateExecution(); err != nil {
+		// Validation errors can quote malformed environment assignments.
+		return Record{}, config.Config{}, errors.New("invalid stored container configuration")
+	}
+	return record, cfg, nil
 }
 
 func (sample *statsSample) unavailable(reason string) {
 	sample.result.MemoryBytes, sample.result.CPUPercent, sample.result.CPUUsageUsec = nil, nil, nil
 	sample.result.MemoryUnavailable, sample.result.CPUUnavailable = reason, reason
+}
+
+func refreshedSnapshot(ctx context.Context, store *Store, ref string) (Record, config.Config, error) {
+	record, err := store.Get(ctx, ref)
+	if err == nil {
+		record, err = refreshRecord(ctx, store, record, false)
+	}
+	if err != nil {
+		return Record{}, config.Config{}, err
+	}
+	// Resolve once: a concurrently reused name must never select a different container.
+	return store.Snapshot(ctx, record.ID)
 }
 
 func sampleStatistics(ctx context.Context, store *Store, ids []string, interval time.Duration) ([]Statistics, error) {
@@ -109,7 +109,7 @@ func sampleStatistics(ctx context.Context, store *Store, ids []string, interval 
 	defer func() {
 		for i := range samples {
 			if samples[i].reader != nil {
-				samples[i].reader.Close()
+				_ = samples[i].reader.Close()
 			}
 		}
 	}()
@@ -141,7 +141,7 @@ func sampleStatistics(ctx context.Context, store *Store, ids []string, interval 
 		}
 		if filepath.Clean(record.Cgroup) != record.Cgroup || !strings.HasPrefix(record.Cgroup, "/sys/fs/cgroup/") ||
 			filepath.Base(filepath.Dir(record.Cgroup)) != unitName(record.ID, record.Generation) ||
-			!workloadName.MatchString(filepath.Base(record.Cgroup)) {
+			!_workloadName.MatchString(filepath.Base(record.Cgroup)) {
 			sample.unavailable("invalid workload cgroup identity")
 			continue
 		}
@@ -168,31 +168,36 @@ func sampleStatistics(ctx context.Context, store *Store, ids []string, interval 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if sample.reader != nil {
-			second := sample.reader.Sample()
-			latest, err := store.Get(ctx, sample.result.ID)
-			sample.result.SampledAt, sample.result.Interval = second.At.UTC(), second.At.Sub(sample.first.At).String()
-			if errors.Is(err, ErrNotFound) {
-				sample.result.State = "removed"
-				sample.unavailable("container was removed")
-			} else if err != nil {
-				return nil, err
-			} else {
-				sample.result.State = latest.State
-				if latest.Terminal() {
-					sample.unavailable("container is completed; live metrics are not retained")
-				} else if latest.Generation != sample.generation {
-					sample.unavailable("container execution changed during sampling")
-				} else {
-					sample.result.MemoryBytes, sample.result.CPUUsageUsec = second.MemoryBytes, second.CPUUsageUsec
-					sample.result.CPUPercent = cpuPercent(sample.first.CPUUsageUsec, second.CPUUsageUsec, second.At.Sub(sample.first.At))
-					if sample.result.MemoryBytes == nil {
-						sample.result.MemoryUnavailable = "memory counter is unavailable or invalid"
-					}
-					if sample.result.CPUPercent == nil {
-						sample.result.CPUUnavailable = "CPU counters are unavailable, invalid, or reset"
-					}
-				}
+		if sample.reader == nil {
+			results[i] = sample.result
+			continue
+		}
+		second := sample.reader.Sample()
+		latest, err := store.Get(ctx, sample.result.ID)
+		sample.result.SampledAt, sample.result.Interval = second.At.UTC(), second.At.Sub(sample.first.At).String()
+		if errors.Is(err, ErrNotFound) {
+			sample.result.State = "removed"
+			sample.unavailable("container was removed")
+			results[i] = sample.result
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		sample.result.State = latest.State
+		switch {
+		case latest.Terminal():
+			sample.unavailable("container is completed; live metrics are not retained")
+		case latest.Generation != sample.generation:
+			sample.unavailable("container execution changed during sampling")
+		default:
+			sample.result.MemoryBytes, sample.result.CPUUsageUsec = second.MemoryBytes, second.CPUUsageUsec
+			sample.result.CPUPercent = cpuPercent(sample.first.CPUUsageUsec, second.CPUUsageUsec, second.At.Sub(sample.first.At))
+			if sample.result.MemoryBytes == nil {
+				sample.result.MemoryUnavailable = "memory counter is unavailable or invalid"
+			}
+			if sample.result.CPUPercent == nil {
+				sample.result.CPUUnavailable = "CPU counters are unavailable, invalid, or reset"
 			}
 		}
 		results[i] = sample.result

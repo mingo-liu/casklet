@@ -42,7 +42,8 @@ func (h *Health) validate() error {
 		return errors.New("invalid recorded health results")
 	}
 	for _, check := range h.Checks {
-		if check.StartedAt.IsZero() || check.FinishedAt.Before(check.StartedAt) || check.ExitCode < 0 || check.ExitCode > 255 {
+		if check.StartedAt.IsZero() || check.FinishedAt.Before(check.StartedAt) || check.ExitCode < 0 ||
+			check.ExitCode > 255 {
 			return errors.New("invalid recorded health result")
 		}
 	}

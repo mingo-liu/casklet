@@ -10,13 +10,15 @@ import (
 )
 
 func TestHealthWaitDeadlineBoundsInitialSnapshotLock(t *testing.T) {
-	store := testStore(t)
-	record := createTestRecord(t, store, "blocked-readiness")
+	var (
+		store  = testStore(t)
+		record = createTestRecord(t, store, "blocked-readiness")
+	)
 	lock, err := store.lock(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	started := time.Now()
 	err = withHealthWaitDeadline(context.Background(), 20*time.Millisecond, func(ctx context.Context) error {
 		_, _, err := store.Snapshot(ctx, record.ID)

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,7 +19,7 @@ type Filter struct {
 func ParseFilter(expression string) (Filter, error) {
 	kind, value, ok := strings.Cut(expression, "=")
 	if !ok {
-		return Filter{}, fmt.Errorf("filter requires label=KEY[=VALUE], status=STATE, or health=STATUS")
+		return Filter{}, errors.New("filter requires label=KEY[=VALUE], status=STATE, or health=STATUS")
 	}
 	f := Filter{kind: kind, value: value}
 	switch kind {
@@ -35,35 +36,18 @@ func ParseFilter(expression string) (Filter, error) {
 		switch value {
 		case StateCreated, StateStarting, StateRunning, StateStopping, StateExited, StateFailed:
 		default:
-			return Filter{}, fmt.Errorf("status filter must be created, starting, running, stopping, exited, or failed")
+			return Filter{}, errors.New("status filter must be created, starting, running, stopping, exited, or failed")
 		}
 	case "health":
 		switch value {
 		case "none", HealthStarting, HealthHealthy, HealthUnhealthy, HealthStopped:
 		default:
-			return Filter{}, fmt.Errorf("health filter must be none, starting, healthy, unhealthy, or stopped")
+			return Filter{}, errors.New("health filter must be none, starting, healthy, unhealthy, or stopped")
 		}
 	default:
 		return Filter{}, fmt.Errorf("unknown container filter %q; use label, status, or health", kind)
 	}
 	return f, nil
-}
-
-func (f Filter) matches(record Record) bool {
-	switch f.kind {
-	case "label":
-		value, present := record.Labels[f.key]
-		return present && (!f.exact || value == f.value)
-	case "status":
-		return record.State == f.value
-	case "health":
-		health := record.effectiveHealth()
-		if health == nil {
-			return f.value == "none"
-		}
-		return health.Status == f.value
-	}
-	return false
 }
 
 // FilterRecords preserves listing order and requires every predicate to match.
@@ -82,4 +66,21 @@ func FilterRecords(records []Record, filters []Filter) []Record {
 		}
 	}
 	return selected
+}
+
+func (f Filter) matches(record Record) bool {
+	switch f.kind {
+	case "label":
+		value, present := record.Labels[f.key]
+		return present && (!f.exact || value == f.value)
+	case "status":
+		return record.State == f.value
+	case "health":
+		health := record.effectiveHealth()
+		if health == nil {
+			return f.value == "none"
+		}
+		return health.Status == f.value
+	}
+	return false
 }

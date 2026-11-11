@@ -20,7 +20,9 @@ func restartDecision(r Record, cfg config.Config, boot string) (bool, uint64) {
 		return false, r.RestartCount
 	}
 	count := r.RestartCount
-	if newBoot && r.RestartBootID != boot || r.RestartAt == nil && r.StartedAt != nil && r.FinishedAt != nil && r.FinishedAt.Sub(*r.StartedAt) >= 10*time.Second {
+	if newBoot && r.RestartBootID != boot ||
+		r.RestartAt == nil && r.StartedAt != nil && r.FinishedAt != nil &&
+			r.FinishedAt.Sub(*r.StartedAt) >= 10*time.Second {
 		count = 0
 	}
 	if limit > 0 && count >= limit {
@@ -28,6 +30,7 @@ func restartDecision(r Record, cfg config.Config, boot string) (bool, uint64) {
 	}
 	return true, count
 }
+
 func restartDelay(count uint64) time.Duration {
 	if count >= 5 {
 		return 30 * time.Second

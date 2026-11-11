@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const restartUnit = "casklet-restarts.service"
+const _restartUnit = "casklet-restarts.service"
 
 // RestartManager runs only in its fixed systemd service. At most four container
 // operations run concurrently; each remains serialized with user mutations.
@@ -29,43 +29,49 @@ func RestartManager() int {
 	}
 	valid := false
 	for _, line := range strings.Split(string(data), "\n") {
-		if p, ok := strings.CutPrefix(line, "0::"); ok && filepath.Base(p) == restartUnit {
+		if p, ok := strings.CutPrefix(line, "0::"); ok && filepath.Base(p) == _restartUnit {
 			valid = true
 		}
 	}
 	if !valid {
-		fmt.Fprintln(os.Stderr, "casklet: restart manager requires its dedicated systemd service")
+		_, _ = fmt.Fprintln(os.Stderr, "casklet: restart manager requires its dedicated systemd service")
 		return 125
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	store, err := managementStore(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "casklet:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "casklet:", err)
 		return 125
 	}
 	type result struct {
 		id  string
 		err error
 	}
-	completed := make(chan result, 4)
-	active := map[string]bool{}
-	lastError := map[string]time.Time{}
-	var workers sync.WaitGroup
+	// Each of at most four workers publishes once, including during shutdown.
+	var (
+		completed = make(chan result, 4)
+		active    = make(map[string]bool)
+		lastError = make(map[string]time.Time)
+		workers   sync.WaitGroup
+	)
 	defer workers.Wait()
-	scanner := restartScanner{}
-	ticker := time.NewTicker(250 * time.Millisecond)
+	var (
+		scanner restartScanner
+		ticker  = time.NewTicker(250 * time.Millisecond)
+	)
 	defer ticker.Stop()
 	report := func(id string, err error) {
 		if err == nil {
 			delete(lastError, id)
 			return
 		}
-		if errors.Is(err, ErrBusy) || errors.Is(err, ErrNotFound) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, ErrBusy) || errors.Is(err, ErrNotFound) || errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) {
 			return
 		}
 		if time.Since(lastError[id]) >= 30*time.Second {
-			fmt.Fprintf(os.Stderr, "casklet: automatic restart %s: %v\n", id, err)
+			_, _ = fmt.Fprintf(os.Stderr, "casklet: automatic restart %s: %v\n", id, err)
 			lastError[id] = time.Now()
 		}
 	}
@@ -92,7 +98,7 @@ func RestartManager() int {
 				workers.Add(1)
 				go func(id string) {
 					defer workers.Done()
-					completed <- result{id, reconcileRestart(ctx, store, id)}
+					completed <- result{id: id, err: reconcileRestart(ctx, store, id)}
 				}(id)
 			}
 		}
@@ -106,7 +112,7 @@ func reconcileRestart(ctx context.Context, store *Store, id string) error {
 	if err != nil {
 		return err
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	record, err := store.Get(ctx, id)
 	if err != nil {
 		return err

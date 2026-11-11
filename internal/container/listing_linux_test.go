@@ -12,9 +12,11 @@ import (
 )
 
 func TestListingReadsSavedPortsWithoutRecordMigration(t *testing.T) {
-	store := testStore(t)
-	ctx := context.Background()
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		ctx   = context.Background()
+		cfg   = testConfig()
+	)
 	cfg.Network = "bridge"
 	cfg.Publish = []config.PortMapping{
 		{HostIP: "127.0.0.1", HostPort: 6379, ContainerPort: 6379, Protocol: "tcp"},

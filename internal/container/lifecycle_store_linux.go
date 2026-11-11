@@ -24,11 +24,11 @@ func (store *Store) AcquireOperation(ctx context.Context, id string) (*os.File, 
 		return nil, err
 	}
 	if _, err := store.readRecord(id); err != nil {
-		lock.Close()
+		_ = lock.Close()
 		return nil, err
 	}
 	file, err := store.openFile(filepath.Join(store.root, id, ".operation"), unix.O_RDWR, true)
-	lock.Close()
+	_ = lock.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (store *Store) AcquireOperation(ctx context.Context, id string) (*os.File, 
 	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB)
@@ -44,20 +44,16 @@ func (store *Store) AcquireOperation(ctx context.Context, id string) (*os.File, 
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 	}
-}
-
-func receiptName(generation uint64) string {
-	return "exit-" + strconv.FormatUint(generation, 10) + ".json"
 }
 
 func (store *Store) Completion(ctx context.Context, id string, generation uint64) (ExecutionResult, bool, error) {
@@ -65,15 +61,17 @@ func (store *Store) Completion(ctx context.Context, id string, generation uint64
 	if err != nil {
 		return ExecutionResult{}, false, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	record, err := store.readRecord(id)
 	if err != nil {
 		return ExecutionResult{}, false, err
 	}
 	var result ExecutionResult
-	err = store.readJSON(filepath.Join(store.root, id, receiptName(generation)), maxRecordBytes, &result)
+	err = store.readJSON(filepath.Join(store.root, id, receiptName(generation)), _maxRecordBytes, &result)
 	if err == nil {
-		if result.Generation != generation || result.ExitCode != nil && (*result.ExitCode < 0 || *result.ExitCode > 255) || validateCleanupFailures(result.CleanupFailures) != nil || validateExitStatus(result.ExitReason, result.OOMKilled) != nil {
+		if result.Generation != generation || result.ExitCode != nil && (*result.ExitCode < 0 || *result.ExitCode > 255) ||
+			validateCleanupFailures(result.CleanupFailures) != nil ||
+			validateExitStatus(result.ExitReason, result.OOMKilled) != nil {
 			return result, false, errors.New("invalid execution receipt")
 		}
 		return result, true, nil
@@ -95,7 +93,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	record, err := store.readRecord(id)
 	if err != nil {
 		return err
@@ -118,11 +116,15 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if err := validateRecord(record, id); err != nil {
 		return err
 	}
-	path := filepath.Join(store.root, id)
-	var saved ExecutionResult
-	receiptErr := store.readJSON(filepath.Join(path, receiptName(generation)), maxRecordBytes, &saved)
+	var (
+		path       = filepath.Join(store.root, id)
+		saved      ExecutionResult
+		receiptErr = store.readJSON(filepath.Join(path, receiptName(generation)), _maxRecordBytes, &saved)
+	)
 	if receiptErr == nil {
-		if saved.Generation != generation || saved.ExitCode != nil && (*saved.ExitCode < 0 || *saved.ExitCode > 255) || validateCleanupFailures(saved.CleanupFailures) != nil || validateExitStatus(saved.ExitReason, saved.OOMKilled) != nil {
+		if saved.Generation != generation || saved.ExitCode != nil && (*saved.ExitCode < 0 || *saved.ExitCode > 255) ||
+			validateCleanupFailures(saved.CleanupFailures) != nil ||
+			validateExitStatus(saved.ExitReason, saved.OOMKilled) != nil {
 			return errors.New("invalid execution receipt identity")
 		}
 		record.StartedAt, record.FinishedAt, record.ExitCode = saved.StartedAt, saved.FinishedAt, saved.ExitCode
@@ -140,7 +142,7 @@ func (store *Store) Complete(ctx context.Context, id string, generation uint64, 
 	if !errors.Is(receiptErr, os.ErrNotExist) {
 		return receiptErr
 	}
-	if err := store.writeJSON(path, receiptName(generation), executionResult(record), maxRecordBytes); err != nil {
+	if err := store.writeJSON(path, receiptName(generation), executionResult(record), _maxRecordBytes); err != nil {
 		return err
 	}
 	return store.writeStateEvents(id, before, record)
@@ -152,7 +154,7 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	if err != nil {
 		return Record{}, err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	record, err := store.readRecord(id)
 	if err != nil {
 		return record, err
@@ -168,12 +170,12 @@ func (store *Store) BeginExecution(ctx context.Context, id string, generation ui
 	if err != nil {
 		return record, err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if err := unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return record, ErrBusy
 	}
 	previous := executionResult(record)
-	if err := store.writeJSON(filepath.Join(store.root, id), receiptName(generation), previous, maxRecordBytes); err != nil {
+	if err := store.writeJSON(filepath.Join(store.root, id), receiptName(generation), previous, _maxRecordBytes); err != nil {
 		return record, err
 	}
 	boot, err := currentBootID()
@@ -216,7 +218,7 @@ func (store *Store) RootFS(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if _, err := store.readRecord(id); err != nil {
 		return "", err
 	}
@@ -224,8 +226,10 @@ func (store *Store) RootFS(ctx context.Context, id string) (string, error) {
 }
 
 func (store *Store) CleanupExecSocket(id string) error {
-	path := filepath.Join(store.root, id, "exec.sock")
-	var stat unix.Stat_t
+	var (
+		path = filepath.Join(store.root, id, "exec.sock")
+		stat unix.Stat_t
+	)
 	if err := unix.Lstat(path, &stat); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -236,4 +240,8 @@ func (store *Store) CleanupExecSocket(id string) error {
 		return fmt.Errorf("unsafe stale exec endpoint: %s", path)
 	}
 	return os.Remove(path)
+}
+
+func receiptName(generation uint64) string {
+	return "exit-" + strconv.FormatUint(generation, 10) + ".json"
 }

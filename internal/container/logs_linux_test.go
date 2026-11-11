@@ -19,6 +19,7 @@ import (
 
 type contentionLogWriter struct {
 	*rotatingLog
+
 	timedOut chan struct{}
 }
 
@@ -43,8 +44,10 @@ func TestLogCaptureResumesAfterLockTimeout(t *testing.T) {
 func testLogCaptureResumesAfterLockTimeout(t *testing.T, metadata bool) {
 	t.Helper()
 	store, record, cfg, log := rotationFixture(t, 3)
-	var lock *os.File
-	var err error
+	var (
+		lock *os.File
+		err  error
+	)
 	if metadata {
 		lock, err = store.lock(context.Background(), false)
 	} else {
@@ -53,13 +56,15 @@ func testLogCaptureResumesAfterLockTimeout(t *testing.T, metadata bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func(file *os.File) { _ = file.Close() }(lock)
 	reader, writer := io.Pipe()
-	defer reader.Close()
-	defer writer.Close()
-	timedOut := make(chan struct{})
-	done := make(chan error, 1)
-	go func() { done <- captureLog(reader, contentionLogWriter{log, timedOut}) }()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	var (
+		timedOut = make(chan struct{})
+		done     = make(chan error, 1)
+	)
+	go func() { done <- captureLog(reader, contentionLogWriter{rotatingLog: log, timedOut: timedOut}) }()
 	if _, err := writer.Write([]byte("discarded during contention\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +73,11 @@ func testLogCaptureResumesAfterLockTimeout(t *testing.T, metadata bool) {
 	case <-time.After(7 * time.Second):
 		t.Fatal("log lock wait was not bounded")
 	}
-	lock.Close()
+	_ = lock.Close()
 	if _, err := writer.Write([]byte("saved after recovery\n")); err != nil {
 		t.Fatal(err)
 	}
-	writer.Close()
+	_ = writer.Close()
 	select {
 	case err := <-done:
 		if !errors.Is(err, errLogBusy) || !log.truncated {
@@ -85,7 +90,7 @@ func testLogCaptureResumesAfterLockTimeout(t *testing.T, metadata bool) {
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != "saved after recovery\n" {
 		t.Fatalf("capture did not resume: %q", got)
 	}
-	defer cursor.pin.Close()
+	defer func() { _ = cursor.pin.Close() }()
 }
 
 func TestLogLockDoesNotBlockMetadataOrOtherContainers(t *testing.T) {
@@ -98,7 +103,7 @@ func TestLogLockDoesNotBlockMetadataOrOtherContainers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func(file *os.File) { _ = file.Close() }(lock)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := store.Update(ctx, record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
@@ -113,7 +118,7 @@ func TestLogLockDoesNotBlockMetadataOrOtherContainers(t *testing.T) {
 	if err := store.Remove(short, record.ID); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("removal bypassed live log lock: %v", err)
 	}
-	lock.Close()
+	_ = lock.Close()
 	if err := store.Remove(ctx, record.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -163,13 +168,13 @@ func TestLegacyRunningLogUsesMetadataLockUntilCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func(file *os.File) { _ = file.Close() }(lock)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := store.Update(ctx, record.ID, func(*Record) error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("legacy snapshot did not fence the old writer: %v", err)
 	}
-	lock.Close()
+	_ = lock.Close()
 	if err := store.Update(context.Background(), record.ID, func(r *Record) error { r.State = StateExited; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -177,18 +182,18 @@ func TestLegacyRunningLogUsesMetadataLockUntilCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func(file *os.File) { _ = file.Close() }(lock)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := store.Update(ctx, record.ID, func(*Record) error { return nil }); err != nil {
 		t.Fatalf("completed legacy snapshot still blocked metadata: %v", err)
 	}
-	lock.Close()
+	_ = lock.Close()
 	operation, err := store.AcquireOperation(ctx, record.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	next, err := store.BeginExecution(ctx, record.ID, record.Generation)
 	if err != nil || !next.LogLocking {
 		t.Fatalf("restarted legacy record did not enable log locking: %+v, %v", next, err)
@@ -197,8 +202,10 @@ func TestLegacyRunningLogUsesMetadataLockUntilCompletion(t *testing.T) {
 
 func rotationFixture(t *testing.T, files int) (*Store, Record, config.Config, *rotatingLog) {
 	t.Helper()
-	store := testStore(t)
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
 	cfg.LogMaxSize, cfg.LogMaxFiles = 1024, files
 	record, err := store.Create(context.Background(), cfg, "logs")
 	if err != nil {
@@ -230,9 +237,11 @@ func TestLogRotationRetainsRecentBytesAcrossWritesAndStarts(t *testing.T) {
 			if _, err := log.Write([]byte(input[2000:])); err != nil {
 				t.Fatal(err)
 			}
-			var cursor logCursor
-			got := snapshotLogs(t, store, record, cfg, &cursor)
-			defer cursor.pin.Close()
+			var (
+				cursor logCursor
+				got    = snapshotLogs(t, store, record, cfg, &cursor)
+			)
+			defer func() { _ = cursor.pin.Close() }()
 			want := input[(5-files)*1024:]
 			if got != want || !log.truncated {
 				t.Fatalf("retained %d bytes; want %d; discarded=%v", len(got), len(want), log.truncated)
@@ -241,8 +250,10 @@ func TestLogRotationRetainsRecentBytesAcrossWritesAndStarts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var total int64
-			count := 0
+			var (
+				total int64
+				count = 0
+			)
 			for _, entry := range entries {
 				if strings.HasPrefix(entry.Name(), "container.log") {
 					stat, err := entry.Info()
@@ -268,16 +279,18 @@ func TestLogFollowAcrossRotationAndRetentionOverrun(t *testing.T) {
 	var cursor logCursor
 	defer func() {
 		if cursor.pin != nil {
-			cursor.pin.Close()
+			_ = cursor.pin.Close()
 		}
 	}()
-	write := func(data string) {
-		t.Helper()
-		if _, err := log.Write([]byte(data)); err != nil {
-			t.Fatal(err)
+	var (
+		write = func(data string) {
+			t.Helper()
+			if _, err := log.Write([]byte(data)); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	first := strings.Repeat("a", 1000)
+		first = strings.Repeat("a", 1000)
+	)
 	write(first)
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != first {
 		t.Fatal("initial snapshot lost output")
@@ -291,9 +304,11 @@ func TestLogFollowAcrossRotationAndRetentionOverrun(t *testing.T) {
 		t.Fatal("follow repeated unchanged output")
 	}
 	write(strings.Repeat("c", 6*1024) + "final\n")
-	var initial logCursor
-	retained := snapshotLogs(t, store, record, cfg, &initial)
-	defer initial.pin.Close()
+	var (
+		initial  logCursor
+		retained = snapshotLogs(t, store, record, cfg, &initial)
+	)
+	defer func() { _ = initial.pin.Close() }()
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != retained {
 		t.Fatal("slow follow did not resume at retained output")
 	}
@@ -316,9 +331,11 @@ func TestLogTailSpansRotatedFiles(t *testing.T) {
 	if _, err := log.Write([]byte(data)); err != nil {
 		t.Fatal(err)
 	}
-	var cursor logCursor
-	snapshot := snapshotLogs(t, store, record, cfg, &cursor)
-	defer cursor.pin.Close()
+	var (
+		cursor   logCursor
+		snapshot = snapshotLogs(t, store, record, cfg, &cursor)
+	)
+	defer func() { _ = cursor.pin.Close() }()
 	var out bytes.Buffer
 	if err := copyInitialLog(strings.NewReader(snapshot), int64(len(snapshot)), 3, &out); err != nil {
 		t.Fatal(err)
@@ -332,8 +349,10 @@ func TestLogTailSpansRotatedFiles(t *testing.T) {
 }
 
 func TestLargeLogSnapshotPreservesSegmentsAndCursorSuffix(t *testing.T) {
-	store := testStore(t)
-	cfg := testConfig()
+	var (
+		store = testStore(t)
+		cfg   = testConfig()
+	)
 	cfg.LogMaxSize, cfg.LogMaxFiles = 128<<10, 3
 	record, err := store.Create(context.Background(), cfg, "large-log")
 	if err != nil {
@@ -350,7 +369,7 @@ func TestLargeLogSnapshotPreservesSegmentsAndCursorSuffix(t *testing.T) {
 	var cursor logCursor
 	defer func() {
 		if cursor.pin != nil {
-			cursor.pin.Close()
+			_ = cursor.pin.Close()
 		}
 	}()
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != expected.String() {
@@ -359,8 +378,10 @@ func TestLargeLogSnapshotPreservesSegmentsAndCursorSuffix(t *testing.T) {
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != "" {
 		t.Fatal("unchanged large snapshot repeated output")
 	}
-	log := &rotatingLog{store: store, id: record.ID, cfg: cfg}
-	suffix := strings.Repeat("suffix\n", 6000)
+	var (
+		log    = &rotatingLog{store: store, id: record.ID, cfg: cfg}
+		suffix = strings.Repeat("suffix\n", 6000)
+	)
 	if _, err := log.Write([]byte(suffix)); err != nil {
 		t.Fatal(err)
 	}
@@ -377,8 +398,10 @@ func TestLogRotationRejectsUnsafeArtifactsWithoutMutating(t *testing.T) {
 			if err := os.WriteFile(outside, []byte("preserved"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(store.root, record.ID, logName(2))
-			var err error
+			var (
+				path = filepath.Join(store.root, record.ID, logName(2))
+				err  error
+			)
 			switch kind {
 			case "symlink":
 				err = os.Symlink(outside, path)
@@ -419,9 +442,11 @@ func TestLogRotationMigratesLegacyPrefixAndIgnoresTruncationFlag(t *testing.T) {
 	if _, err := log.Write([]byte("new output\n")); err != nil {
 		t.Fatal(err)
 	}
-	var cursor logCursor
-	got := snapshotLogs(t, store, record, cfg, &cursor)
-	defer cursor.pin.Close()
+	var (
+		cursor logCursor
+		got    = snapshotLogs(t, store, record, cfg, &cursor)
+	)
+	defer func() { _ = cursor.pin.Close() }()
 	if got != old[len(old)-1024:]+"new output\n" {
 		t.Fatal("legacy migration lost recent or new output")
 	}
@@ -444,7 +469,7 @@ func TestLogSnapshotsAndRotationAreConcurrent(t *testing.T) {
 	var cursor logCursor
 	defer func() {
 		if cursor.pin != nil {
-			cursor.pin.Close()
+			_ = cursor.pin.Close()
 		}
 	}()
 	for i := 0; i < 30; i++ {
@@ -487,7 +512,7 @@ func TestLogRotationRecoversMissingCurrentFileForSilentCommand(t *testing.T) {
 	if got := snapshotLogs(t, store, record, cfg, &cursor); got != "retained\n" {
 		t.Fatalf("recovered logs = %q", got)
 	}
-	defer cursor.pin.Close()
+	defer func() { _ = cursor.pin.Close() }()
 	if stat, err := os.Stat(filepath.Join(dir, logName(0))); err != nil || stat.Size() != 0 {
 		t.Fatalf("current file was not restored: %v", err)
 	}

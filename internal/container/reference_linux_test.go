@@ -13,10 +13,12 @@ import (
 
 func recordWithID(t *testing.T, store *Store, id, name string) Record {
 	t.Helper()
-	record := createTestRecord(t, store, name)
-	path := filepath.Join(store.root, record.ID)
+	var (
+		record = createTestRecord(t, store, name)
+		path   = filepath.Join(store.root, record.ID)
+	)
 	record.ID = id
-	if err := store.writeJSON(path, "state.json", record, maxRecordBytes); err != nil {
+	if err := store.writeJSON(path, "state.json", record, _maxRecordBytes); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(path, filepath.Join(store.root, id)); err != nil {
@@ -27,9 +29,11 @@ func recordWithID(t *testing.T, store *Store, id, name string) Record {
 
 func TestContainerPrefixAmbiguityAndNamePrecedence(t *testing.T) {
 	store, ctx := testStore(t), context.Background()
-	prefix := "406e742c72ac"
-	first := recordWithID(t, store, prefix+strings.Repeat("a", 20), "first")
-	second := recordWithID(t, store, prefix+strings.Repeat("b", 20), "second")
+	var (
+		prefix = "406e742c72ac"
+		first  = recordWithID(t, store, prefix+strings.Repeat("a", 20), "first")
+		second = recordWithID(t, store, prefix+strings.Repeat("b", 20), "second")
+	)
 	for _, ref := range []string{prefix, prefix[:1]} {
 		if _, err := store.Get(ctx, ref); !errors.Is(err, ErrAmbiguousID) {
 			t.Fatalf("ambiguous lookup %s: %v", ref, err)
