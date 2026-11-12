@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/mingo-liu/casklet/internal/ipc"
 )
 
 // Credential exchange bounds and framing.
@@ -143,8 +145,21 @@ func Decode(r io.Reader, registry string) (Credential, error) {
 
 // DecodeContext bounds a stalled host handshake and closes a pipe on caller
 // cancellation so the guest CLI can honor forwarded signals during preparation.
+// Pollable file duplicates keep caller descriptors open and restore their flags.
 // Other readers must finish their reads independently; Close need not interrupt Read.
 func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credential, error) {
+	closer, _ := r.(io.Closer)
+	if file, ok := r.(*os.File); ok {
+		closer = nil
+		stream, release, err := ipc.InterruptibleFile(file)
+		if err != nil {
+			return Credential{}, fmt.Errorf("prepare credential input: %w", err)
+		}
+		defer release()
+		if stream != nil {
+			r, closer = stream, stream
+		}
+	}
 	type result struct {
 		credential Credential
 		err        error
@@ -158,9 +173,9 @@ func DecodeContext(ctx context.Context, r io.Reader, registry string) (Credentia
 	case decoded := <-done:
 		return decoded.credential, decoded.err
 	case <-ctx.Done():
-		if closer, ok := r.(io.Closer); ok {
+		if closer != nil {
 			_ = closer.Close()
-			switch r.(type) {
+			switch closer.(type) {
 			case net.Conn, *os.File, *io.PipeReader:
 				//lint:ignore S1005 Cancellation takes precedence over the completed decode error.
 				_ = <-done

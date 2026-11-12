@@ -1,6 +1,6 @@
 //go:build linux || darwin
 
-package remote
+package ipc
 
 import (
 	"errors"
@@ -10,10 +10,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Inherited descriptors may not be registered with Go's poller. Rewrap a
-// nonblocking duplicate so Close wakes Read, then restore the caller's shared
-// status flags after the handshake reader has finished.
-func portCheckFile(original *os.File) (*os.File, func(), error) {
+// InterruptibleFile wraps a nonblocking duplicate so Close wakes Read on an
+// inherited pipe or socket. A nil stream means the file cannot be polled.
+// Release only after the reader finishes; it restores the caller's shared flags
+// and leaves the original file open.
+func InterruptibleFile(original *os.File) (*os.File, func(), error) {
 	raw, err := original.SyscallConn()
 	if err != nil {
 		return nil, nil, err

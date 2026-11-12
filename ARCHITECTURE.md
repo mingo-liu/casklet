@@ -263,6 +263,11 @@ handling with an additional redirect guard; registry-declared token endpoints ar
 explicit credential targets while other redirects lose authorization headers.
 Authenticated pull errors are sanitized before presentation.
 
+Credential and host-port handshakes share `ipc`'s pollable file duplication.
+Cancellation interrupts and joins inherited-pipe readers, then restores the
+caller's original descriptor flags without closing its file. Unpollable files
+and custom readers own their read lifetime independently.
+
 The guest image adapter uses go-containerregistry for OCI/Docker registry transport,
 anonymous and authenticated Basic/Bearer challenges, manifest lists, and compression. It does not invoke
 Docker Engine. Downloads select the native Linux platform and verify each layer's
