@@ -20,20 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func macTaskConfig(t *testing.T, name, task string) string {
-	t.Helper()
-	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
-		"migrate": map[string]any{"task": true, "run": map[string]any{"mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
-		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"env": []string{"PRIVATE=must-not-appear-in-events"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}, "health-cmd": "test -f /data/count", "health-interval": "100ms", "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
-	}}
-	data, _ := json.Marshal(doc)
-	filename := filepath.Join(hostDirectory(t), "tasks.json")
-	if err := os.WriteFile(filename, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
-	return filename
-}
 func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	client(t)
 	name := fmt.Sprintf("tasks-%x", time.Now().UnixNano())
@@ -82,7 +68,7 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(history))
 	var last uint64
-	seen := map[string]bool{}
+	seen := make(map[string]bool)
 	for decoder.More() {
 		var e container.Event
 		if err := decoder.Decode(&e); err != nil {
@@ -109,7 +95,7 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	if err := follow.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { follow.Process.Kill(); follow.Wait() }()
+	defer func() { _ = follow.Process.Kill(); _ = follow.Wait() }()
 	observed := make(chan error, 1)
 	go func() {
 		var e container.Event
@@ -138,17 +124,19 @@ func TestProjectOperationsTasksAndLifecycleEvents(t *testing.T) {
 	}
 	success(t, "project", "exec", name, "api", "--", "true")
 }
+
 func TestProjectTaskFailureAndDeadlineThroughMac(t *testing.T) {
 	client(t)
-	for _, tc := range []struct {
+	tests := []struct {
 		command, timeout string
 		code             int
-	}{{"exit 7", "30s", 7}, {"sleep 300", "1s", 124}} {
+	}{{"exit 7", "30s", 7}, {"sleep 300", "1s", 124}}
+	for _, tt := range tests {
 		name := fmt.Sprintf("task-fail-%x", time.Now().UnixNano())
-		file := macTaskConfig(t, name, tc.command)
-		_, stderr, code := command(t, "project", "up", "--config", file, "--timeout", tc.timeout)
-		if code != tc.code {
-			t.Fatalf("task status %d expected %d: %s", code, tc.code, stderr)
+		file := macTaskConfig(t, name, tt.command)
+		_, stderr, code := command(t, "project", "up", "--config", file, "--timeout", tt.timeout)
+		if code != tt.code {
+			t.Fatalf("task status %d expected %d: %s", code, tt.code, stderr)
 		}
 		if out := success(t, "project", "ps", "--json", name); out != "[]\n" {
 			t.Fatalf("task rollback %s", out)
@@ -163,8 +151,8 @@ func TestEventsCancelWithFullHostOutputPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	fd := int(writer.Fd())
 	if err := unix.SetNonblock(fd, true); err != nil {
 		t.Fatal(err)
@@ -205,9 +193,25 @@ func TestEventsCancelWithFullHostOutputPipe(t *testing.T) {
 			t.Fatalf("event cancellation %v %s", err, &diagnostic)
 		}
 	case <-time.After(5 * time.Second):
-		cmd.Process.Kill()
-		<-done
+		_ = cmd.Process.Kill()
+		//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+		_ = <-done
 		t.Fatal("blocked event output prevented cancellation")
 	}
 	success(t, "exec", id, "--", "true")
+}
+
+func macTaskConfig(t *testing.T, name, task string) string {
+	t.Helper()
+	doc := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
+		"migrate": map[string]any{"task": true, "run": map[string]any{"mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sh", "-c", task}}},
+		"api":     map[string]any{"depends-on": map[string]string{"migrate": "completed"}, "run": map[string]any{"env": []string{"PRIVATE=must-not-appear-in-events"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}, "health-cmd": "test -f /data/count", "health-interval": "100ms", "command": []string{"/bin/sh", "-c", "test -f /data/count || exit 23; exec sleep 300"}}},
+	}}
+	data, _ := json.Marshal(doc)
+	filename := filepath.Join(hostDirectory(t), "tasks.json")
+	if err := os.WriteFile(filename, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
+	return filename
 }

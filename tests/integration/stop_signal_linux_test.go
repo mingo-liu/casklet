@@ -4,10 +4,11 @@ package integration
 
 import (
 	"context"
-	"github.com/mingo-liu/casklet/internal/image"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mingo-liu/casklet/internal/image"
 )
 
 func TestManagedStopSignalOverrideAndRestart(t *testing.T) {
@@ -42,7 +43,9 @@ func TestOCIStopSignalIsRetainedAfterRegistryDisappears(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		store.Remove(context.Background(), id, func(context.Context, string) (bool, error) { return false, nil })
+		if err := store.Remove(context.Background(), id, func(context.Context, string) (bool, error) { return false, nil }); err != nil {
+			t.Fatal(err)
+		}
 	})
 	closeRegistry()
 	for _, override := range []bool{false, true} {

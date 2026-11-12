@@ -50,7 +50,7 @@ func (s *Store) Inspect(ctx context.Context, name string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return s.read(name)
 }
 
@@ -59,7 +59,7 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return s.list()
 }
 
@@ -68,7 +68,7 @@ func (s *Store) Acquire(ctx context.Context, name string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if _, err := s.read(name); err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (s *Store) create(ctx context.Context, name string, exclusive bool) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	if r, err := s.read(name); err == nil {
 		if exclusive {
 			return Record{}, os.ErrExist
@@ -141,7 +141,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	r, err := s.read(name)
 	if !created.IsZero() && errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -157,7 +157,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer lease.Close()
+	defer func() { _ = lease.Close() }()
 	if err := unix.Flock(int(lease.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return ErrInUse
 	}
@@ -175,7 +175,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer coordination.Close()
+	defer func() { _ = coordination.Close() }()
 	records, err := allocations()
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func (s *Store) remove(ctx context.Context, name string, created time.Time, refe
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 
@@ -209,7 +209,7 @@ func (s *Store) lock(ctx context.Context) (*os.File, error) {
 	}
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
-		l.Close()
+		_ = l.Close()
 		return nil, err
 	}
 	for _, entry := range entries {
@@ -219,15 +219,15 @@ func (s *Store) lock(ctx context.Context) (*os.File, error) {
 		p := filepath.Join(s.root, entry.Name())
 		var st unix.Stat_t
 		if err := unix.Lstat(p, &st); err != nil {
-			l.Close()
+			_ = l.Close()
 			return nil, err
 		}
 		if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
-			l.Close()
+			_ = l.Close()
 			return nil, errors.New("unsafe interrupted network metadata")
 		}
 		if err := os.Remove(p); err != nil {
-			l.Close()
+			_ = l.Close()
 			return nil, err
 		}
 	}
@@ -290,12 +290,12 @@ func namedLock(ctx context.Context, path string, how int) (*os.File, error) {
 	f := os.NewFile(uintptr(fd), path)
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != 0 || st.Mode&0077 != 0 || st.Nlink != 1 {
-		f.Close()
+		_ = f.Close()
 		return nil, errors.New("unsafe named network lock")
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
 		err := unix.Flock(fd, how|unix.LOCK_NB)
@@ -303,12 +303,12 @@ func namedLock(ctx context.Context, path string, how int) (*os.File, error) {
 			return f, nil
 		}
 		if how == unix.LOCK_SH || !errors.Is(err, unix.EWOULDBLOCK) {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			f.Close()
+			_ = f.Close()
 			return nil, ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}

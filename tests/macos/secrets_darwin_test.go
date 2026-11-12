@@ -15,11 +15,15 @@ func TestMacSecretFilesProjectRestartAndCleanup(t *testing.T) {
 	client(t)
 	dir := hostDirectory(t)
 	source := filepath.Join(dir, "token")
-	os.WriteFile(source, []byte("private-first"), 0600)
+	if err := os.WriteFile(source, []byte("private-first"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	file := filepath.Join(dir, "project.json")
 	name := fmt.Sprintf("secrets-%x", time.Now().UnixNano())
 	doc := fmt.Sprintf(`{"name":%q,"networks":[],"services":{"app":{"run":{"network":"none","secret":["source=token,target=token"],"read-only":true,"user":"1000:1000","command":["/bin/sleep","300"]}}}}`, name)
-	os.WriteFile(file, []byte(doc), 0600)
+	if err := os.WriteFile(file, []byte(doc), 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { command(t, "project", "down", "--volumes", name) })
 	success(t, "project", "up", "--config", file, "--wait")
 	ref := "cp-" + name + "-app"
@@ -29,7 +33,9 @@ func TestMacSecretFilesProjectRestartAndCleanup(t *testing.T) {
 	if _, _, code := command(t, "exec", ref, "--", "/bin/sh", "-c", "echo change > /run/secrets/token"); code == 0 {
 		t.Fatal("secret writable")
 	}
-	os.WriteFile(source, []byte("private-second"), 0600)
+	if err := os.WriteFile(source, []byte("private-second"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if got := success(t, "exec", ref, "--", "/bin/cat", "/run/secrets/token"); got != "private-first" {
 		t.Fatalf("running value changed: %q", got)
 	}
@@ -44,7 +50,9 @@ func TestMacSecretFilesProjectRestartAndCleanup(t *testing.T) {
 		t.Fatal("cp exposed secret")
 	}
 	success(t, "project", "stop", name, "app")
-	os.Remove(source)
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, code := command(t, "project", "start", name, "app"); code == 0 {
 		t.Fatal("missing source accepted")
 	}

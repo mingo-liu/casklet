@@ -73,7 +73,7 @@ func (l *Lease) Close() {
 		l.dns = nil
 	}
 	for _, socket := range l.sockets {
-		socket.Close()
+		_ = socket.Close()
 	}
 	l.sockets = nil
 }
@@ -88,7 +88,7 @@ func Resolvers(explicit []string) ([]string, error) {
 			continue
 		}
 		servers := ParseResolvers(file)
-		file.Close()
+		_ = file.Close()
 		if len(servers) != 0 {
 			return servers, nil
 		}
@@ -136,7 +136,7 @@ func SetupConfigured(ctx context.Context, path string, namespace *os.File, cfg c
 	if err != nil {
 		return nil, err
 	}
-	defer coordination.Close()
+	defer func() { _ = coordination.Close() }()
 	records, err := allocations()
 	if err != nil {
 		return nil, err
@@ -311,7 +311,7 @@ func Cleanup(path string) error {
 	if err != nil {
 		return err
 	}
-	defer coordination.Close()
+	defer func() { _ = coordination.Close() }()
 	records, err := allocations()
 	if err != nil {
 		return err
@@ -481,12 +481,12 @@ func lock(ctx context.Context) (*os.File, error) {
 	file := os.NewFile(uintptr(fd), "network-lock")
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Uid != 0 || stat.Mode&0022 != 0 || stat.Nlink != 1 {
-		file.Close()
+		_ = file.Close()
 		return nil, errors.New("invalid network coordination lock")
 	}
 	for {
 		if err := ctx.Err(); err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB)
@@ -494,12 +494,12 @@ func lock(ctx context.Context) (*os.File, error) {
 			return file, nil
 		}
 		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EINTR) {
-			file.Close()
+			_ = file.Close()
 			return nil, err
 		}
 		select {
 		case <-ctx.Done():
-			file.Close()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
@@ -512,7 +512,7 @@ func readJSON(path string, value any) error {
 		return err
 	}
 	file := os.NewFile(uintptr(fd), "network-state")
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -545,7 +545,7 @@ func writeJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	_, writeErr := file.Write(data)
 	syncErr := file.Sync()
 	closeErr := file.Close()
@@ -559,7 +559,7 @@ func writeJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	return dir.Sync()
 }
 

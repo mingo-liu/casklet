@@ -36,155 +36,6 @@ type backgroundRecord struct {
 	RunPath         string     `json:"run_path"`
 }
 
-func backgroundCommand(ctx context.Context, args ...string) (int, string, string, error) {
-	var stdout, stderr strings.Builder
-	cmd := exec.CommandContext(ctx, binary, args...)
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	code := 0
-	if err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			return -1, stdout.String(), stderr.String(), err
-		}
-		code = exit.ExitCode()
-	}
-	if ctx.Err() != nil {
-		return code, stdout.String(), stderr.String(), ctx.Err()
-	}
-	return code, stdout.String(), stderr.String(), nil
-}
-
-func backgroundCLI(t *testing.T, args ...string) (int, string, string) {
-	t.Helper()
-	require(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	code, out, stderr, err := backgroundCommand(ctx, args...)
-	if err != nil {
-		t.Fatalf("management command %q: %v stdout=%q stderr=%q", args, err, out, stderr)
-	}
-	return code, out, stderr
-}
-
-func backgroundSuccess(t *testing.T, args ...string) string {
-	t.Helper()
-	code, out, stderr := backgroundCLI(t, args...)
-	if code != 0 {
-		t.Fatalf("management command %q exit=%d stdout=%q stderr=%q", args, code, out, stderr)
-	}
-	return out
-}
-
-func backgroundName(t *testing.T) string {
-	t.Helper()
-	require(t)
-	name := fmt.Sprintf("integration-%d-%d", os.Getpid(), sequence.Add(1))
-	// Register cleanup before startup so failed launches and failed assertions do not leak units.
-	t.Cleanup(func() {
-		for _, operation := range []string{"stop", "rm"} {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			_, _, _, err := backgroundCommand(ctx, operation, name)
-			cancel()
-			if err != nil {
-				t.Errorf("cleanup %s %s: %v", operation, name, err)
-			}
-		}
-	})
-	return name
-}
-
-func detachedArguments(name string, options []string, command ...string) []string {
-	args := []string{"run", "--detach", "--name", name, "--rootfs", template}
-	args = append(args, options...)
-	args = append(args, "--")
-	return append(args, command...)
-}
-
-func backgroundID(t *testing.T, output string) string {
-	t.Helper()
-	id := strings.TrimSpace(output)
-	if decoded, err := hex.DecodeString(id); err != nil || len(decoded) != 16 || output != id+"\n" {
-		t.Fatalf("detached startup must print only a full container ID: %q", output)
-	}
-	return id
-}
-
-func startBackground(t *testing.T, name string, options []string, command ...string) string {
-	t.Helper()
-	return backgroundID(t, backgroundSuccess(t, detachedArguments(name, options, command...)...))
-}
-
-func backgroundRecords(t *testing.T, all bool) []backgroundRecord {
-	t.Helper()
-	args := []string{"ps", "--json"}
-	if all {
-		args = append(args, "--all")
-	}
-	out := backgroundSuccess(t, args...)
-	var records []backgroundRecord
-	if err := json.Unmarshal([]byte(out), &records); err != nil || strings.TrimSpace(out) == "null" {
-		t.Fatalf("ps must return a JSON array: %q: %v", out, err)
-	}
-	return records
-}
-
-func findBackground(records []backgroundRecord, reference string) (backgroundRecord, bool) {
-	for _, record := range records {
-		if record.ID == reference || record.Name == reference {
-			return record, true
-		}
-	}
-	return backgroundRecord{}, false
-}
-
-func waitBackground(t *testing.T, reference string, states ...string) backgroundRecord {
-	t.Helper()
-	deadline := time.Now().Add(12 * time.Second)
-	var latest backgroundRecord
-	for time.Now().Before(deadline) {
-		if record, ok := findBackground(backgroundRecords(t, true), reference); ok {
-			latest = record
-			for _, state := range states {
-				if record.State == state {
-					return record
-				}
-			}
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("container %s did not reach %v: %+v", reference, states, latest)
-	return backgroundRecord{}
-}
-
-func assertBackgroundExit(t *testing.T, record backgroundRecord, expected int) {
-	t.Helper()
-	if record.State != "exited" || record.ExitCode == nil || *record.ExitCode != expected || record.StartedAt == nil || record.FinishedAt == nil {
-		t.Fatalf("expected completed container exit=%d, got %+v", expected, record)
-	}
-	if record.CreatedAt.IsZero() || record.StartedAt.Before(record.CreatedAt) || record.FinishedAt.Before(*record.StartedAt) {
-		t.Fatalf("invalid lifecycle timestamps: %+v", record)
-	}
-}
-
-func assertBackgroundUnitStopped(t *testing.T, id string) {
-	t.Helper()
-	unit := "casklet-" + id + ".service"
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for {
-		out, err := exec.CommandContext(ctx, "systemctl", "show", unit, "--property=ActiveState", "--value").Output()
-		if ctx.Err() != nil {
-			t.Fatalf("background service remains active after terminal state: %s: %q", unit, out)
-		}
-		state := strings.TrimSpace(string(out))
-		if err != nil || (state != "active" && state != "deactivating") {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
 func TestBackgroundLifecycle(t *testing.T) {
 	name := backgroundName(t)
 	args := detachedArguments(name, nil, "/bin/sh", "-c", "echo ready; sleep 30")
@@ -284,9 +135,9 @@ func TestBackgroundFollowCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stdout.Close()
+	defer func() { _ = stdout.Close() }()
 	var stderr strings.Builder
-	cmd := exec.CommandContext(ctx, binary, "logs", "-f", id)
+	cmd := exec.CommandContext(ctx, _binary, "logs", "-f", id)
 	cmd.Stdout, cmd.Stderr = stdout, &stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -298,7 +149,8 @@ func TestBackgroundFollowCancellation(t *testing.T) {
 		cancel()
 		if !waited {
 			select {
-			case <-finished:
+			//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+			case _ = <-finished:
 			case <-time.After(time.Second):
 			}
 		}
@@ -441,7 +293,7 @@ func TestBackgroundConcurrentNames(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, detachedArguments(name, nil, "/bin/sleep", "30")...)
-			results <- result{name, out, stderr, code, err}
+			results <- result{name: name, stdout: out, stderr: stderr, code: code, err: err}
 		}(name)
 	}
 	ids := make(map[string]bool)
@@ -489,7 +341,7 @@ func TestBackgroundConcurrentManagement(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "stop", reference)
-			results <- result{out, stderr, code, err}
+			results <- result{stdout: out, stderr: stderr, code: code, err: err}
 		}(reference)
 	}
 	for i := 0; i < 5; i++ {
@@ -508,7 +360,7 @@ func TestBackgroundConcurrentManagement(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		code, out, stderr, err := backgroundCommand(ctx, "rm", name)
-		results <- result{out, stderr, code, err}
+		results <- result{stdout: out, stderr: stderr, code: code, err: err}
 	}()
 	for i := 0; i < 10; i++ {
 		backgroundRecords(t, true)
@@ -617,13 +469,13 @@ func TestBackgroundPreviousBootReconciliation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	if _, err := file.Write(data); err != nil {
-		file.Close()
+		_ = file.Close()
 		t.Fatal(err)
 	}
 	if err := file.Sync(); err != nil {
-		file.Close()
+		_ = file.Close()
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
@@ -641,7 +493,7 @@ func TestBackgroundPreviousBootReconciliation(t *testing.T) {
 func TestBackgroundCanceledStartup(t *testing.T) {
 	name := backgroundName(t)
 	source := t.TempDir()
-	if out, err := exec.Command("cp", "-a", template+"/.", source).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cp", "-a", _template+"/.", source).CombinedOutput(); err != nil {
 		t.Fatalf("copy template: %v: %s", err, out)
 	}
 	payload := filepath.Join(source, "startup-payload")
@@ -665,7 +517,7 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	var stdout, stderr strings.Builder
-	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd := exec.CommandContext(ctx, _binary, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -678,7 +530,8 @@ func TestBackgroundCanceledStartup(t *testing.T) {
 		cancel()
 		if !waited {
 			select {
-			case <-finished:
+			//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+			case _ = <-finished:
 			case <-time.After(time.Second):
 				t.Error("canceled startup launcher did not terminate during cleanup")
 			}
@@ -801,5 +654,154 @@ func TestBackgroundLogRotationFollow(t *testing.T) {
 	inspect := backgroundSuccess(t, "inspect", id)
 	if !strings.Contains(inspect, `"log_max_size": 1024`) || !strings.Contains(inspect, `"log_max_files": 3`) {
 		t.Fatalf("retention missing from inspection: %s", inspect)
+	}
+}
+
+func backgroundCommand(ctx context.Context, args ...string) (int, string, string, error) {
+	var stdout, stderr strings.Builder
+	cmd := exec.CommandContext(ctx, _binary, args...)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	code := 0
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			return -1, stdout.String(), stderr.String(), err
+		}
+		code = exit.ExitCode()
+	}
+	if ctx.Err() != nil {
+		return code, stdout.String(), stderr.String(), ctx.Err()
+	}
+	return code, stdout.String(), stderr.String(), nil
+}
+
+func backgroundCLI(t *testing.T, args ...string) (int, string, string) {
+	t.Helper()
+	require(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	code, out, stderr, err := backgroundCommand(ctx, args...)
+	if err != nil {
+		t.Fatalf("management command %q: %v stdout=%q stderr=%q", args, err, out, stderr)
+	}
+	return code, out, stderr
+}
+
+func backgroundSuccess(t *testing.T, args ...string) string {
+	t.Helper()
+	code, out, stderr := backgroundCLI(t, args...)
+	if code != 0 {
+		t.Fatalf("management command %q exit=%d stdout=%q stderr=%q", args, code, out, stderr)
+	}
+	return out
+}
+
+func backgroundName(t *testing.T) string {
+	t.Helper()
+	require(t)
+	name := fmt.Sprintf("integration-%d-%d", os.Getpid(), _sequence.Add(1))
+	// Register cleanup before startup so failed launches and failed assertions do not leak units.
+	t.Cleanup(func() {
+		for _, operation := range []string{"stop", "rm"} {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			_, _, _, err := backgroundCommand(ctx, operation, name)
+			cancel()
+			if err != nil {
+				t.Errorf("cleanup %s %s: %v", operation, name, err)
+			}
+		}
+	})
+	return name
+}
+
+func detachedArguments(name string, options []string, command ...string) []string {
+	args := []string{"run", "--detach", "--name", name, "--rootfs", _template}
+	args = append(args, options...)
+	args = append(args, "--")
+	return append(args, command...)
+}
+
+func backgroundID(t *testing.T, output string) string {
+	t.Helper()
+	id := strings.TrimSpace(output)
+	if decoded, err := hex.DecodeString(id); err != nil || len(decoded) != 16 || output != id+"\n" {
+		t.Fatalf("detached startup must print only a full container ID: %q", output)
+	}
+	return id
+}
+
+func startBackground(t *testing.T, name string, options []string, command ...string) string {
+	t.Helper()
+	return backgroundID(t, backgroundSuccess(t, detachedArguments(name, options, command...)...))
+}
+
+func backgroundRecords(t *testing.T, all bool) []backgroundRecord {
+	t.Helper()
+	args := []string{"ps", "--json"}
+	if all {
+		args = append(args, "--all")
+	}
+	out := backgroundSuccess(t, args...)
+	var records []backgroundRecord
+	if err := json.Unmarshal([]byte(out), &records); err != nil || strings.TrimSpace(out) == "null" {
+		t.Fatalf("ps must return a JSON array: %q: %v", out, err)
+	}
+	return records
+}
+
+func findBackground(records []backgroundRecord, reference string) (backgroundRecord, bool) {
+	for _, record := range records {
+		if record.ID == reference || record.Name == reference {
+			return record, true
+		}
+	}
+	return backgroundRecord{}, false
+}
+
+func waitBackground(t *testing.T, reference string, states ...string) backgroundRecord {
+	t.Helper()
+	deadline := time.Now().Add(12 * time.Second)
+	var latest backgroundRecord
+	for time.Now().Before(deadline) {
+		if record, ok := findBackground(backgroundRecords(t, true), reference); ok {
+			latest = record
+			for _, state := range states {
+				if record.State == state {
+					return record
+				}
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("container %s did not reach %v: %+v", reference, states, latest)
+	return backgroundRecord{}
+}
+
+func assertBackgroundExit(t *testing.T, record backgroundRecord, expected int) {
+	t.Helper()
+	if record.State != "exited" || record.ExitCode == nil || *record.ExitCode != expected || record.StartedAt == nil || record.FinishedAt == nil {
+		t.Fatalf("expected completed container exit=%d, got %+v", expected, record)
+	}
+	if record.CreatedAt.IsZero() || record.StartedAt.Before(record.CreatedAt) || record.FinishedAt.Before(*record.StartedAt) {
+		t.Fatalf("invalid lifecycle timestamps: %+v", record)
+	}
+}
+
+func assertBackgroundUnitStopped(t *testing.T, id string) {
+	t.Helper()
+	unit := "casklet-" + id + ".service"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		out, err := exec.CommandContext(ctx, "systemctl", "show", unit, "--property=ActiveState", "--value").Output()
+		if ctx.Err() != nil {
+			t.Fatalf("background service remains active after terminal state: %s: %q", unit, out)
+		}
+		state := strings.TrimSpace(string(out))
+		if err != nil || (state != "active" && state != "deactivating") {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }

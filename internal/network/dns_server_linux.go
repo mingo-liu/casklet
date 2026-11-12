@@ -54,7 +54,7 @@ func activeRun(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
 		return false, err

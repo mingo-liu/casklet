@@ -14,7 +14,7 @@ import (
 
 func TestLaunchAutomaticScope(t *testing.T) {
 	require(t)
-	for _, test := range []struct {
+	tests := []struct {
 		name, input, output string
 		options, command    []string
 		code                int
@@ -31,16 +31,17 @@ func TestLaunchAutomaticScope(t *testing.T) {
 		{
 			name: "delegation", command: []string{"/bin/cat", "/proc/self/cgroup"},
 		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			args := append([]string{"run", "--rootfs", template}, test.options...)
+			args := append([]string{"run", "--rootfs", _template}, tt.options...)
 			args = append(args, "--")
-			args = append(args, test.command...)
-			cmd := exec.CommandContext(ctx, binary, args...)
+			args = append(args, tt.command...)
+			cmd := exec.CommandContext(ctx, _binary, args...)
 			cmd.Env = append(os.Environ(), "CASKLET_SCOPE_LAUNCHED=")
-			cmd.Stdin = strings.NewReader(test.input)
+			cmd.Stdin = strings.NewReader(tt.input)
 			var stdout, stderr strings.Builder
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err := cmd.Run()
@@ -52,28 +53,28 @@ func TestLaunchAutomaticScope(t *testing.T) {
 				}
 				code = exit.ExitCode()
 			}
-			if ctx.Err() != nil || code != test.code {
+			if ctx.Err() != nil || code != tt.code {
 				t.Fatalf("exit=%d error=%v stdout=%q stderr=%q", code, ctx.Err(), stdout.String(), stderr.String())
 			}
-			if test.name == "delegation" {
+			if tt.name == "delegation" {
 				if !strings.Contains(stdout.String(), ".scope/container-") {
 					t.Fatalf("workload is outside an automatic delegated scope: %q", stdout.String())
 				}
-			} else if stdout.String() != test.output {
-				t.Fatalf("stdout=%q; want %q", stdout.String(), test.output)
+			} else if stdout.String() != tt.output {
+				t.Fatalf("stdout=%q; want %q", stdout.String(), tt.output)
 			}
-			if test.code == 7 && stderr.String() != "diagnostic\n" {
+			if tt.code == 7 && stderr.String() != "diagnostic\n" {
 				t.Fatalf("stderr=%q", stderr.String())
 			}
 		})
 	}
-	backgroundSuccess(t, "doctor", "--rootfs", template)
+	backgroundSuccess(t, "doctor", "--rootfs", _template)
 }
 
 func TestLaunchScopeFailureDoesNotRecurse(t *testing.T) {
 	require(t)
 	t.Setenv("CASKLET_SCOPE_LAUNCHED", "1")
-	code, out, stderr := backgroundCLI(t, "doctor", "--rootfs", template)
+	code, out, stderr := backgroundCLI(t, "doctor", "--rootfs", _template)
 	if code != 125 || out != "" || !strings.Contains(stderr, "automatic cgroup delegation failed:") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}

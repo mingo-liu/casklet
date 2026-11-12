@@ -5,37 +5,14 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"github.com/mingo-liu/casklet/internal/image"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/container"
+	"github.com/mingo-liu/casklet/internal/image"
 )
-
-func healthInspection(t *testing.T, id string) container.Inspection {
-	t.Helper()
-	var i container.Inspection
-	if err := json.Unmarshal([]byte(backgroundSuccess(t, "inspect", id)), &i); err != nil {
-		t.Fatal(err)
-	}
-	return i
-}
-func awaitHealth(t *testing.T, id, status string) container.Inspection {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		i := healthInspection(t, id)
-		if i.Health != nil && i.Health.Status == status {
-			return i
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("health did not become %s: %+v", status, i.Health)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
 
 func TestHealthProbeTransitionsIsolationAndRestart(t *testing.T) {
 	require(t)
@@ -151,5 +128,29 @@ func TestOCIExecFormHealthcheck(t *testing.T) {
 	i := awaitHealth(t, id, container.HealthHealthy)
 	if i.Config.Healthcheck.Test[0] != "CMD" {
 		t.Fatal(i)
+	}
+}
+
+func healthInspection(t *testing.T, id string) container.Inspection {
+	t.Helper()
+	var i container.Inspection
+	if err := json.Unmarshal([]byte(backgroundSuccess(t, "inspect", id)), &i); err != nil {
+		t.Fatal(err)
+	}
+	return i
+}
+
+func awaitHealth(t *testing.T, id, status string) container.Inspection {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		i := healthInspection(t, id)
+		if i.Health != nil && i.Health.Status == status {
+			return i
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("health did not become %s: %+v", status, i.Health)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

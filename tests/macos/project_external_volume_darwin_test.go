@@ -78,7 +78,7 @@ func TestProjectRestoredExternalVolumeAcrossOwnershipAndMigration(t *testing.T) 
 	if err := json.Unmarshal([]byte(success(t, "project", "up", "--config", file, "--json")), &first); err != nil || len(first) != 1 {
 		t.Fatalf("restored up: %+v %v", first, err)
 	}
-	if output := success(t, "exec", "cp-"+name+"-app", "--", "/bin/sh", "-c", macTmpfsCapacityProbe+" && cat /data/message"); output != "restored" {
+	if output := success(t, "exec", "cp-"+name+"-app", "--", "/bin/sh", "-c", _macTmpfsCapacityProbe+" && cat /data/message"); output != "restored" {
 		t.Fatalf("data: %q", output)
 	}
 	if err := json.Unmarshal([]byte(success(t, "project", "up", "--config", file, "--json")), &second); err != nil || len(second) != 1 || second[0].ID != first[0].ID || second[0].Generation != first[0].Generation {

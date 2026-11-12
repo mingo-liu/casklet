@@ -44,7 +44,9 @@ func TestImageSharedBlobCacheAndPruneThroughCLI(t *testing.T) {
 		if err := writer.Close(); err != nil {
 			t.Fatal(err)
 		}
-		result, err := tarball.LayerFromReader(bytes.NewReader(data.Bytes()))
+		result, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(data.Bytes())), nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +100,7 @@ func TestImageSharedBlobCacheAndPruneThroughCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { backgroundSuccess(t, "image", "cache", "limit", strconv.FormatInt(original.MaxBytes, 10)) })
-	ids := []string{}
+	var ids []string
 	for i, ref := range refs {
 		code, out, stderr := start(t, "", "image", "pull", "--progress=plain", ref).wait(t)
 		id := strings.TrimSpace(out)
@@ -115,7 +117,7 @@ func TestImageSharedBlobCacheAndPruneThroughCLI(t *testing.T) {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(filepath.Join(tree, "order"))
-		lease.Close()
+		_ = lease.Close()
 		if err != nil || string(data) != []string{"first", "second"}[i] {
 			t.Fatalf("ordered extraction: %q %v", data, err)
 		}
@@ -142,7 +144,7 @@ func TestImageSharedBlobCacheAndPruneThroughCLI(t *testing.T) {
 			t.Fatal("independent prune removed image", err)
 		}
 		_, err = os.Stat(filepath.Join(tree, "order"))
-		lease.Close()
+		_ = lease.Close()
 		if err != nil {
 			t.Fatal(err)
 		}

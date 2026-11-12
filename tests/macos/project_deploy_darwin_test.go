@@ -16,30 +16,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/project"
 )
 
-func macProjectConfig(t *testing.T, name string, ready bool) string {
-	t.Helper()
-	probe := "wget -T 1 -qO- http://127.0.0.1:8080"
-	if !ready {
-		probe = "exit 1"
-	}
-	document := map[string]any{
-		"name": name, "volumes": []string{"data"},
-		"services": map[string]any{
-			"db":  map[string]any{"run": map[string]any{"network-alias": []string{"database", "primary"}, "mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
-			"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"command": []string{"/bin/sleep", "300"}}},
-		},
-	}
-	data, err := json.Marshal(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(hostDirectory(t), "project.json")
-	if err := os.WriteFile(file, data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	return file
-}
-
 func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	client(t)
 	name := fmt.Sprintf("deploy-%x", time.Now().UnixNano())
@@ -72,7 +48,7 @@ func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	if err := json.Unmarshal(original, &reordered); err != nil {
 		t.Fatal(err)
 	}
-	reordered["services"].(map[string]any)["db"].(map[string]any)["run"].(map[string]any)["network-alias"] = []string{"primary", "database"}
+	requireType[map[string]any](t, requireType[map[string]any](t, requireType[map[string]any](t, reordered["services"])["db"])["run"])["network-alias"] = []string{"primary", "database"}
 	updated, err := json.Marshal(reordered)
 	if err != nil {
 		t.Fatal(err)
@@ -102,15 +78,19 @@ func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	if err := json.Unmarshal(data, &changed); err != nil {
 		t.Fatal(err)
 	}
-	services := changed["services"].(map[string]any)
-	services["api"].(map[string]any)["run"].(map[string]any)["memory"] = "256m"
+	services := requireType[map[string]any](t, changed["services"])
+	requireType[map[string]any](t, requireType[map[string]any](t, services["api"])["run"])["memory"] = "256m"
 	drift, _ := json.Marshal(changed)
-	os.WriteFile(file, drift, 0600)
+	if err := os.WriteFile(file, drift, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, _, code := command(t, "project", "up", "--config", file); code != 125 {
 		t.Fatalf("accepted drift: %d", code)
 	}
 	success(t, "exec", api, "--", "/bin/true")
-	os.WriteFile(file, data, 0600)
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
 	success(t, "project", "down", name)
 	success(t, "volume", "inspect", "cp-"+name+"-data")
 	if output := success(t, "project", "ps", "--json", name); output != "[]\n" {
@@ -120,7 +100,9 @@ func TestProjectDeploymentReadinessReuseAndVolumeRetention(t *testing.T) {
 	if output := success(t, "exec", "cp-"+name+"-db", "--", "cat", "/data/message"); output != "saved" {
 		t.Fatalf("volume data lost %q", output)
 	}
-	os.Remove(file)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
 	success(t, "project", "down", "--volumes", name)
 	if _, _, code := command(t, "volume", "inspect", "cp-"+name+"-data"); code != 125 {
 		t.Fatalf("explicit removal: %d", code)
@@ -153,6 +135,30 @@ func TestProjectCancellationCleansOnlyNewResources(t *testing.T) {
 	}
 }
 
+func macProjectConfig(t *testing.T, name string, ready bool) string {
+	t.Helper()
+	probe := "wget -T 1 -qO- http://127.0.0.1:8080"
+	if !ready {
+		probe = "exit 1"
+	}
+	document := map[string]any{
+		"name": name, "volumes": []string{"data"},
+		"services": map[string]any{
+			"db":  map[string]any{"run": map[string]any{"network-alias": []string{"database", "primary"}, "mount": []string{"type=volume,source=data,target=/data"}, "health-cmd": probe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sh", "-c", "mkdir -p /srv; printf ready > /srv/index.html; exec httpd -f -p 8080 -h /srv"}}},
+			"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"command": []string{"/bin/sleep", "300"}}},
+		},
+	}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(hostDirectory(t), "project.json")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
 func projectCancellation(t *testing.T, wait bool) {
 	binary := client(t)
 	name := fmt.Sprintf("cancel-%x", time.Now().UnixNano())
@@ -169,7 +175,7 @@ func projectCancellation(t *testing.T, wait bool) {
 		if err := json.Unmarshal(data, &document); err != nil {
 			t.Fatal(err)
 		}
-		delete(document["services"].(map[string]any)["api"].(map[string]any), "depends-on")
+		delete(requireType[map[string]any](t, requireType[map[string]any](t, document["services"])["api"]), "depends-on")
 		data, err = json.Marshal(document)
 		if err != nil {
 			t.Fatal(err)
@@ -191,8 +197,9 @@ func projectCancellation(t *testing.T, wait bool) {
 	finished := false
 	t.Cleanup(func() {
 		if !finished {
-			cmd.Process.Kill()
-			<-done
+			_ = cmd.Process.Kill()
+			//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+			_ = <-done
 		}
 	})
 	ready := false

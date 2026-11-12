@@ -88,8 +88,8 @@ func TestOCIArchiveOfflineMacBinaryTransportAndRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer reader.Close()
-			defer writer.Close()
+			defer func() { _ = reader.Close() }()
+			defer func() { _ = writer.Close() }()
 			var diagnostic bytes.Buffer
 			cmd.Stderr = &diagnostic
 			if action == "load" {

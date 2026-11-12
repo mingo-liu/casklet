@@ -28,144 +28,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/image"
 )
 
-// The registry fixture uses a relocated static toolbox instead of bin/busybox.
-// No network registry, Docker Engine, or external image is required by CI.
-func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) {
-	return ociRegistryFixtureWithAuth(t, false, healthTests...)
-}
-
-func ociRegistryFixtureWithAuth(t *testing.T, authenticated bool, healthTests ...[]string) (string, func()) {
-	t.Helper()
-	require(t)
-	source := executionTemplate(t)
-	var data bytes.Buffer
-	writer := tar.NewWriter(&data)
-	err := filepath.WalkDir(source, func(filename string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, filename)
-		if err != nil {
-			return err
-		}
-		if rel == "." || rel == "bin/busybox" || rel == "etc/passwd" || rel == "etc/group" {
-			return nil
-		}
-		info, err := os.Lstat(filename)
-		if err != nil {
-			return err
-		}
-		link := ""
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err = os.Readlink(filename)
-			if err != nil {
-				return err
-			}
-			if link == "busybox" {
-				link = "/usr/bin/toolbox"
-			}
-		}
-		h, err := tar.FileInfoHeader(info, link)
-		if err != nil {
-			return err
-		}
-		h.Name = filepath.ToSlash(rel)
-		h.Uid, h.Gid = 0, 0
-		if err := writer.WriteHeader(h); err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			f, err := os.Open(filename)
-			if err != nil {
-				return err
-			}
-			_, copyErr := io.Copy(writer, f)
-			f.Close()
-			return copyErr
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	toolbox, err := os.ReadFile(filepath.Join(source, "bin/busybox"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range []struct {
-		name     string
-		body     []byte
-		uid, gid int
-		kind     byte
-		mode     int64
-	}{
-		{"usr/bin/toolbox", toolbox, 0, 0, tar.TypeReg, 0755},
-		{"etc/passwd", []byte("root:x:0:0:root:/:/bin/sh\napp:x:123:456:app:/data:/bin/sh\n"), 0, 0, tar.TypeReg, 0644},
-		{"etc/group", []byte("data:x:456:\n"), 0, 0, tar.TypeReg, 0644},
-		{"data", nil, 123, 456, tar.TypeDir, 0755},
-	} {
-		h := &tar.Header{Name: file.name, Size: int64(len(file.body)), Typeflag: file.kind, Mode: file.mode, Uid: file.uid, Gid: file.gid}
-		// Each fixture starts cold even when earlier test runs left download blobs.
-		h.PAXRecords = map[string]string{"casklet.fixture": source}
-		if err := writer.WriteHeader(h); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := writer.Write(file.body); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	layer, err := tarball.LayerFromReader(bytes.NewReader(data.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	img, err := mutate.AppendLayers(empty.Image, layer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cf, err := img.ConfigFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cf.OS = "linux"
-	cf.Architecture = runtime.GOARCH
-	cf.Config = v1.Config{Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`printf '%s:%s:%s\n' "$IMAGE_VALUE" "$1" "$PWD"`, "entry", "default"}, Env: []string{"IMAGE_VALUE=image", "PATH=/usr/bin:/bin"}, WorkingDir: "/new-work", User: "app:data", StopSignal: "SIGUSR1"}
-	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD-SHELL", `test "$(id -u):$(id -g)" = 123:456 && test "$IMAGE_VALUE:$PWD" = image:/new-work`}, Interval: 50 * time.Millisecond, Timeout: time.Second, Retries: 2}
-	if len(healthTests) > 0 {
-		cf.Config.Healthcheck.Test = healthTests[0]
-	}
-	cf.Config.Shell = []string{"/bin/sh", "-ec"}
-	img, err = mutate.ConfigFile(img, cf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var authEnabled atomic.Bool
-	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if authEnabled.Load() {
-			user, password, valid := r.BasicAuth()
-			if !valid || user != "casklet-test" || password != "casklet-fixture-token" {
-				w.Header().Set("WWW-Authenticate", `Basic realm="casklet-test"`)
-				http.Error(w, "casklet-fixture-token reflected by registry", http.StatusUnauthorized)
-				return
-			}
-		}
-		handler.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-	ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + "/casklet/app:test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := remote.Write(ref, img); err != nil {
-		t.Fatal(err)
-	}
-	authEnabled.Store(authenticated)
-	return ref.Name(), server.Close
-}
-
 func TestOCIImageAutomaticPullDefaultsOwnershipAndRetainedRestart(t *testing.T) {
 	ref, closeRegistry := ociRegistryFixture(t)
 	code, out, stderr := start(t, "", "run", "--image", ref).wait(t)
@@ -264,4 +126,144 @@ func TestOCIRootEntrypointCapabilities(t *testing.T) {
 	if err := store.Remove(context.Background(), record.ID, func(context.Context, string) (bool, error) { return false, nil }); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The registry fixture uses a relocated static toolbox instead of bin/busybox.
+// No network registry, Docker Engine, or external image is required by CI.
+func ociRegistryFixture(t *testing.T, healthTests ...[]string) (string, func()) {
+	return ociRegistryFixtureWithAuth(t, false, healthTests...)
+}
+
+func ociRegistryFixtureWithAuth(t *testing.T, authenticated bool, healthTests ...[]string) (string, func()) {
+	t.Helper()
+	require(t)
+	source := executionTemplate(t)
+	var data bytes.Buffer
+	writer := tar.NewWriter(&data)
+	err := filepath.WalkDir(source, func(filename string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source, filename)
+		if err != nil {
+			return err
+		}
+		if rel == "." || rel == "bin/busybox" || rel == "etc/passwd" || rel == "etc/group" {
+			return nil
+		}
+		info, err := os.Lstat(filename)
+		if err != nil {
+			return err
+		}
+		link := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err = os.Readlink(filename)
+			if err != nil {
+				return err
+			}
+			if link == "busybox" {
+				link = "/usr/bin/toolbox"
+			}
+		}
+		h, err := tar.FileInfoHeader(info, link)
+		if err != nil {
+			return err
+		}
+		h.Name = filepath.ToSlash(rel)
+		h.Uid, h.Gid = 0, 0
+		if err := writer.WriteHeader(h); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			f, err := os.Open(filename)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(writer, f)
+			_ = f.Close()
+			return copyErr
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolbox, err := os.ReadFile(filepath.Join(source, "bin/busybox"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []struct {
+		name     string
+		body     []byte
+		uid, gid int
+		kind     byte
+		mode     int64
+	}{
+		{name: "usr/bin/toolbox", body: toolbox, uid: 0, gid: 0, kind: tar.TypeReg, mode: 0755},
+		{name: "etc/passwd", body: []byte("root:x:0:0:root:/:/bin/sh\napp:x:123:456:app:/data:/bin/sh\n"), uid: 0, gid: 0, kind: tar.TypeReg, mode: 0644},
+		{name: "etc/group", body: []byte("data:x:456:\n"), uid: 0, gid: 0, kind: tar.TypeReg, mode: 0644},
+		{name: "data", body: nil, uid: 123, gid: 456, kind: tar.TypeDir, mode: 0755},
+	} {
+		h := &tar.Header{Name: file.name, Size: int64(len(file.body)), Typeflag: file.kind, Mode: file.mode, Uid: file.uid, Gid: file.gid}
+		// Each fixture starts cold even when earlier test runs left download blobs.
+		h.PAXRecords = map[string]string{"casklet.fixture": source}
+		if err := writer.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(file.body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(data.Bytes())), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := mutate.AppendLayers(empty.Image, layer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf, err := img.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf.OS = "linux"
+	cf.Architecture = runtime.GOARCH
+	cf.Config = v1.Config{Entrypoint: []string{"/bin/sh", "-c"}, Cmd: []string{`printf '%s:%s:%s\n' "$IMAGE_VALUE" "$1" "$PWD"`, "entry", "default"}, Env: []string{"IMAGE_VALUE=image", "PATH=/usr/bin:/bin"}, WorkingDir: "/new-work", User: "app:data", StopSignal: "SIGUSR1"}
+	cf.Config.Healthcheck = &v1.HealthConfig{Test: []string{"CMD-SHELL", `test "$(id -u):$(id -g)" = 123:456 && test "$IMAGE_VALUE:$PWD" = image:/new-work`}, Interval: 50 * time.Millisecond, Timeout: time.Second, Retries: 2}
+	if len(healthTests) > 0 {
+		cf.Config.Healthcheck.Test = healthTests[0]
+	}
+	cf.Config.Shell = []string{"/bin/sh", "-ec"}
+	img, err = mutate.ConfigFile(img, cf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authEnabled atomic.Bool
+	handler := registry.New(registry.Logger(log.New(io.Discard, "", 0)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authEnabled.Load() {
+			user, password, valid := r.BasicAuth()
+			if !valid || user != "casklet-test" || password != "casklet-fixture-token" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="casklet-test"`)
+				http.Error(w, "casklet-fixture-token reflected by registry", http.StatusUnauthorized)
+				return
+			}
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	ref, err := name.ParseReference(strings.TrimPrefix(server.URL, "http://") + "/casklet/app:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(ref, img); err != nil {
+		t.Fatal(err)
+	}
+	authEnabled.Store(authenticated)
+	return ref.Name(), server.Close
 }

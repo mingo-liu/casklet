@@ -12,32 +12,26 @@ import (
 	"time"
 )
 
-func executionTemplate(t *testing.T) string {
-	t.Helper()
-	require(t)
-	source := t.TempDir()
-	if out, err := exec.Command("cp", "-a", template+"/.", source).CombinedOutput(); err != nil {
-		t.Fatalf("copy execution template: %v: %s", err, out)
-	}
-	if err := os.Chmod(source, 0755); err != nil {
-		t.Fatal(err)
-	}
-	return source
-}
-
-func writeTemplateFile(t *testing.T, source, name, content string, mode os.FileMode) {
-	t.Helper()
-	file := filepath.Join(source, name)
-	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file, []byte(content), mode); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(file, mode); err != nil {
-		t.Fatal(err)
-	}
-}
+const _checkIdentity = `
+set -eu
+for status in /proc/self/status /proc/1/status; do
+  awk -v uid="$1" -v gid="$2" '
+    /^Uid:/ { for (i=2; i<=5; i++) if ($i != uid) exit 1; seen++ }
+    /^Gid:/ { for (i=2; i<=5; i++) if ($i != gid) exit 1; seen++ }
+    /^Groups:/ { if (NF != 1) exit 1; seen++ }
+    /^Cap(Inh|Prm|Eff|Bnd|Amb):/ { if ($2 !~ /^0+$/) exit 1; seen++ }
+    /^NoNewPrivs:/ { if ($2 != 1) exit 1; seen++ }
+    END { if (seen != 9) exit 1 }
+  ' "$status"
+done
+printf writable > /tmp/user-write
+[ "$(cat /tmp/user-write)" = writable ]
+if [ "$1" != 0 ]; then
+  if cat /root-private >/dev/null 2>&1; then exit 1; fi
+else
+  [ "$(cat /root-private)" = root-private ]
+fi
+echo identity-ok`
 
 func TestCommandEnvironment(t *testing.T) {
 	out := success(t, []string{"--env", "EMPTY=", "--env", "VALUE=first", "--env", "VALUE=last=part", "--env", "HOME=/custom-home"}, "/bin/sh", "-c", `
@@ -88,43 +82,23 @@ func TestWorkingDirectory(t *testing.T) {
 	}
 }
 
-const checkIdentity = `
-set -eu
-for status in /proc/self/status /proc/1/status; do
-  awk -v uid="$1" -v gid="$2" '
-    /^Uid:/ { for (i=2; i<=5; i++) if ($i != uid) exit 1; seen++ }
-    /^Gid:/ { for (i=2; i<=5; i++) if ($i != gid) exit 1; seen++ }
-    /^Groups:/ { if (NF != 1) exit 1; seen++ }
-    /^Cap(Inh|Prm|Eff|Bnd|Amb):/ { if ($2 !~ /^0+$/) exit 1; seen++ }
-    /^NoNewPrivs:/ { if ($2 != 1) exit 1; seen++ }
-    END { if (seen != 9) exit 1 }
-  ' "$status"
-done
-printf writable > /tmp/user-write
-[ "$(cat /tmp/user-write)" = writable ]
-if [ "$1" != 0 ]; then
-  if cat /root-private >/dev/null 2>&1; then exit 1; fi
-else
-  [ "$(cat /root-private)" = root-private ]
-fi
-echo identity-ok`
-
 func TestNumericUser(t *testing.T) {
 	source := executionTemplate(t)
 	writeTemplateFile(t, source, "root-private", "root-private", 0600)
-	for _, test := range []struct {
+	tests := []struct {
 		name, user, uid, gid string
 	}{
-		{"default-root", "", "0", "0"},
-		{"implicit-group", "1000", "1000", "1000"},
-		{"explicit-group", "1000:1234", "1000", "1234"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+		{name: "default-root", user: "", uid: "0", gid: "0"},
+		{name: "implicit-group", user: "1000", uid: "1000", gid: "1000"},
+		{name: "explicit-group", user: "1000:1234", uid: "1000", gid: "1234"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			options := []string{"--rootfs", source}
-			if test.user != "" {
-				options = append(options, "--user", test.user)
+			if tt.user != "" {
+				options = append(options, "--user", tt.user)
 			}
-			if out := success(t, options, "/bin/sh", "-c", checkIdentity, "sh", test.uid, test.gid); out != "identity-ok\n" {
+			if out := success(t, options, "/bin/sh", "-c", _checkIdentity, "sh", tt.uid, tt.gid); out != "identity-ok\n" {
 				t.Fatalf("unexpected identity output %q", out)
 			}
 		})
@@ -136,7 +110,7 @@ func TestNumericUser(t *testing.T) {
 
 func TestNonrootProcessLifecycle(t *testing.T) {
 	t.Run("signal-trap", func(t *testing.T) {
-		call := start(t, "", "run", "--rootfs", template, "--user", "1000", "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 0' TERM; echo ready; while :; do sleep 1; done")
+		call := start(t, "", "run", "--rootfs", _template, "--user", "1000", "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 0' TERM; echo ready; while :; do sleep 1; done")
 		pid := call.supervisor(t)
 		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 			t.Fatal(err)
@@ -221,5 +195,32 @@ func TestCombinedExecutionOptions(t *testing.T) {
 	options := []string{"--rootfs", source, "--user", "1000:1234", "--read-only", "--workdir", "/workspace", "--env", "VALUE=combined", "--env", "PATH=/workspace:/bin"}
 	if out := success(t, options, "check"); out != "combined-ok\n" {
 		t.Fatalf("combined execution options output %q", out)
+	}
+}
+
+func executionTemplate(t *testing.T) string {
+	t.Helper()
+	require(t)
+	source := t.TempDir()
+	if out, err := exec.Command("cp", "-a", _template+"/.", source).CombinedOutput(); err != nil {
+		t.Fatalf("copy execution template: %v: %s", err, out)
+	}
+	if err := os.Chmod(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func writeTemplateFile(t *testing.T, source, name, content string, mode os.FileMode) {
+	t.Helper()
+	file := filepath.Join(source, name)
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(content), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(file, mode); err != nil {
+		t.Fatal(err)
 	}
 }

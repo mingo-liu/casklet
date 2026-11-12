@@ -43,7 +43,7 @@ func BenchmarkProjectReadinessSampling(b *testing.B) {
 	for _, count := range []int{16, 64} {
 		b.Run(fmt.Sprint(count), func(b *testing.B) {
 			name := fmt.Sprintf("sample-%x", time.Now().UnixNano())
-			services := map[string]any{}
+			services := make(map[string]any, count)
 			for i := 0; i < count; i++ {
 				services[fmt.Sprintf("s%02d", i)] = map[string]any{"run": map[string]any{"network": "none", "command": []string{"/bin/sleep", "300"}}}
 			}
@@ -81,7 +81,7 @@ func BenchmarkProjectReadinessSampling(b *testing.B) {
 							if err := json.Unmarshal(call(statusArgs...), &values); err != nil || len(values) != count {
 								b.Fatal("invalid batch sample", err)
 							}
-							identities := map[string]project.ServiceStatus{}
+							identities := make(map[string]project.ServiceStatus, len(values))
 							for _, value := range values {
 								identities[value.ID] = value
 							}

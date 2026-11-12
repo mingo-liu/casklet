@@ -26,7 +26,7 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 	closeRegistry()
 	archive := []byte(backgroundSuccess(t, "image", "save", id))
 	backgroundSuccess(t, "image", "rm", id)
-	cmd := exec.Command(binary, "image", "load")
+	cmd := exec.Command(_binary, "image", "load")
 	cmd.Stdin = bytes.NewReader(archive)
 	var output, diagnostic bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &diagnostic
@@ -38,7 +38,7 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 	imageRun := map[string]any{"image": id, "network": "none", "command": []string{"sleep 300"}, "mount": []string{"type=volume,source=data,target=/data,readonly"}}
 	document := map[string]any{"name": name, "networks": []string{}, "volumes": []string{"data"}, "services": map[string]any{
 		"app":    map[string]any{"run": imageRun},
-		"writer": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sleep", "300"}, "mount": []string{"type=volume,source=data,target=/data"}}},
+		"writer": map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "command": []string{"/bin/sleep", "300"}, "mount": []string{"type=volume,source=data,target=/data"}}},
 	}}
 	file := filepath.Join(t.TempDir(), "project.json")
 	save := func() {
@@ -84,9 +84,9 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 		if err := json.Unmarshal([]byte(data), &records); err != nil {
 			t.Fatal(err)
 		}
-		result := map[string]deploymentIdentity{}
+		result := make(map[string]deploymentIdentity, len(records))
 		for _, record := range records {
-			result[record.Labels[project.LabelService]] = deploymentIdentity{record.ID, record.Name, record.State, record.Generation, record.Labels}
+			result[record.Labels[project.LabelService]] = deploymentIdentity{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, Labels: record.Labels}
 		}
 		return result
 	}

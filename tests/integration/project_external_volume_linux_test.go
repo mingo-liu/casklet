@@ -31,7 +31,7 @@ func TestProjectRestoredExternalVolumeThroughLinuxEngine(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "project.json")
 	writeConfig := func(projectName, actual string, unhealthy bool) {
 		t.Helper()
-		run := map[string]any{"tmp-size": "32m", "shm-size": "96m", "rootfs": template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "300"}}
+		run := map[string]any{"tmp-size": "32m", "shm-size": "96m", "rootfs": _template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "300"}}
 		if unhealthy {
 			run["health-cmd"], run["health-interval"] = "exit 1", "50ms"
 		}
@@ -61,7 +61,7 @@ func TestProjectRestoredExternalVolumeThroughLinuxEngine(t *testing.T) {
 	backgroundSuccess(t, "volume", "rm", volumeName)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "volume", "restore", volumeName)
+	cmd := exec.CommandContext(ctx, _binary, "volume", "restore", volumeName)
 	cmd.Stdin = bytes.NewReader(archive)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("restore: %v %s", err, output)
@@ -79,7 +79,7 @@ func TestProjectRestoredExternalVolumeThroughLinuxEngine(t *testing.T) {
 	if err := json.Unmarshal([]byte(backgroundSuccess(t, "project", "up", "--config", file, "--json")), &first); err != nil || len(first) != 1 {
 		t.Fatalf("restored up: %+v %v", first, err)
 	}
-	if output := backgroundSuccess(t, "exec", "cp-"+name+"-app", "--", "/bin/sh", "-c", tmpfsCapacityProbe+" && cat /data/message"); output != "restored" {
+	if output := backgroundSuccess(t, "exec", "cp-"+name+"-app", "--", "/bin/sh", "-c", _tmpfsCapacityProbe+" && cat /data/message"); output != "restored" {
 		t.Fatalf("data: %q", output)
 	}
 	if err := json.Unmarshal([]byte(backgroundSuccess(t, "project", "up", "--config", file, "--json")), &second); err != nil || len(second) != 1 || second[0].ID != first[0].ID || second[0].Generation != first[0].Generation {

@@ -18,22 +18,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func bindOption(source, target string, readonly bool) string {
-	value := "type=bind,source=" + source + ",target=" + target
-	if readonly {
-		value += ",readonly"
-	}
-	return value
-}
-
-func assertSourceFile(t *testing.T, source, name, want string) {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(source, name))
-	if err != nil || string(data) != want {
-		t.Fatalf("source file %s: content=%q error=%v", name, data, err)
-	}
-}
-
 func TestBindMountPersistence(t *testing.T) {
 	require(t)
 	source := t.TempDir()
@@ -84,7 +68,7 @@ touch /tmp/writable`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stat := info.Sys().(*syscall.Stat_t)
+	stat := requireType[*syscall.Stat_t](t, info.Sys())
 	if stat.Uid != 1000 || stat.Gid != 1234 {
 		t.Fatalf("bind file owner=%d:%d", stat.Uid, stat.Gid)
 	}
@@ -259,5 +243,21 @@ if touch /data/new 2>/dev/null; then exit 1; fi
 awk '$5 == "/data" { print $6 }' /proc/self/mountinfo | grep '^ro,.*noexec'`)
 	if err := os.WriteFile(filepath.Join(source, "host-write"), []byte("denied"), 0600); !os.IsPermission(err) && !errors.Is(err, unix.EROFS) {
 		t.Fatalf("source mount lost read-only restriction: %v", err)
+	}
+}
+
+func bindOption(source, target string, readonly bool) string {
+	value := "type=bind,source=" + source + ",target=" + target
+	if readonly {
+		value += ",readonly"
+	}
+	return value
+}
+
+func assertSourceFile(t *testing.T, source, name, want string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(source, name))
+	if err != nil || string(data) != want {
+		t.Fatalf("source file %s: content=%q error=%v", name, data, err)
 	}
 }

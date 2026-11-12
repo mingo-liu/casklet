@@ -38,18 +38,18 @@ func newDNS(gateway, source string, upstream []string, lookup func(string) (net.
 	}
 	tcp, ok := listener.(*net.TCPListener)
 	if !ok {
-		listener.Close()
+		_ = listener.Close()
 		return nil, errors.New("DNS listener is not TCP")
 	}
 	address, ok := tcp.Addr().(*net.TCPAddr)
 	if !ok {
-		tcp.Close()
+		_ = tcp.Close()
 		return nil, errors.New("DNS listener has a non-TCP address")
 	}
 	port := address.Port
 	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP(gateway), Port: port})
 	if err != nil {
-		tcp.Close()
+		_ = tcp.Close()
 		return nil, err
 	}
 	s := &dnsServer{
@@ -76,11 +76,11 @@ func (s *dnsServer) Quiesce() {
 	s.quiesce.Do(func() {
 		s.cancel()
 		close(s.stop)
-		s.udp.SetReadDeadline(time.Now())
-		s.tcp.SetDeadline(time.Now())
+		_ = s.udp.SetReadDeadline(time.Now())
+		_ = s.tcp.SetDeadline(time.Now())
 		s.mu.Lock()
 		for c := range s.conns {
-			c.Close()
+			_ = c.Close()
 		}
 		s.mu.Unlock()
 		s.wg.Wait()
@@ -90,8 +90,8 @@ func (s *dnsServer) Quiesce() {
 func (s *dnsServer) Close() {
 	s.once.Do(func() {
 		s.Quiesce()
-		s.udp.Close()
-		s.tcp.Close()
+		_ = s.udp.Close()
+		_ = s.tcp.Close()
 	})
 }
 
@@ -112,7 +112,7 @@ func (s *dnsServer) serveUDP() {
 			defer s.wg.Done()
 			defer func() { <-s.slots }()
 			if answer := s.answer(packet, false /* tcp */); answer != nil {
-				s.udp.WriteToUDP(answer, peer)
+				_, _ = s.udp.WriteToUDP(answer, peer)
 			}
 		}()
 	}
@@ -127,7 +127,7 @@ func (s *dnsServer) serveTCP() {
 		}
 		peer, ok := c.RemoteAddr().(*net.TCPAddr)
 		if !ok || !s.allowed(peer.IP) || !s.acquire() {
-			c.Close()
+			_ = c.Close()
 			continue
 		}
 		if !s.track(c) {
@@ -139,7 +139,7 @@ func (s *dnsServer) serveTCP() {
 			defer s.wg.Done()
 			defer func() { <-s.slots }()
 			defer s.release(c)
-			c.SetDeadline(time.Now().Add(3 * time.Second))
+			_ = c.SetDeadline(time.Now().Add(3 * time.Second))
 			var frame [2]byte
 			if _, err := io.ReadFull(c, frame[:]); err != nil {
 				return
@@ -157,7 +157,7 @@ func (s *dnsServer) serveTCP() {
 				return
 			}
 			binary.BigEndian.PutUint16(frame[:], uint16(len(answer)))
-			c.Write(append(frame[:], answer...))
+			_, _ = c.Write(append(frame[:], answer...))
 		}()
 	}
 }
@@ -203,7 +203,7 @@ func (s *dnsServer) answer(packet []byte, tcp bool) []byte {
 		if !s.track(c) {
 			return nil
 		}
-		c.SetDeadline(time.Now().Add(time.Second))
+		_ = c.SetDeadline(time.Now().Add(time.Second))
 		var answer []byte
 		if tcp {
 			var header [2]byte
@@ -242,7 +242,7 @@ func (s *dnsServer) track(c net.Conn) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ctx.Err() != nil {
-		c.Close()
+		_ = c.Close()
 		return false
 	}
 	s.conns[c] = true
@@ -250,7 +250,7 @@ func (s *dnsServer) track(c net.Conn) bool {
 }
 
 func (s *dnsServer) release(c net.Conn) {
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.conns, c)

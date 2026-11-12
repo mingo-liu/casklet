@@ -8,7 +8,7 @@ import (
 )
 
 func TestDoctorJSON(t *testing.T) {
-	code, out, stderr := start(t, "", "doctor", "--rootfs", template, "--json").wait(t)
+	code, out, stderr := start(t, "", "doctor", "--rootfs", _template, "--json").wait(t)
 	var report struct {
 		OK            bool  `json:"ok"`
 		SchemaVersion int   `json:"schema_version"`

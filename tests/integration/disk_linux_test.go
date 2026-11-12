@@ -5,12 +5,13 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"github.com/mingo-liu/casklet/internal/storage"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mingo-liu/casklet/internal/storage"
+	"golang.org/x/sys/unix"
 )
 
 func TestDiskUsageAndUnusedImagePrune(t *testing.T) {
@@ -41,9 +42,13 @@ func TestDiskScanSkipsSameFilesystemBindMounts(t *testing.T) {
 	require(t)
 	root := t.TempDir()
 	source := t.TempDir()
-	os.WriteFile(filepath.Join(source, "external"), make([]byte, 1<<20), 0600)
+	if err := os.WriteFile(filepath.Join(source, "external"), make([]byte, 1<<20), 0600); err != nil {
+		t.Fatal(err)
+	}
 	target := filepath.Join(root, "mounted")
-	os.Mkdir(target, 0755)
+	if err := os.Mkdir(target, 0755); err != nil {
+		t.Fatal(err)
+	}
 	before, err := storage.AllocatedBytes(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +56,7 @@ func TestDiskScanSkipsSameFilesystemBindMounts(t *testing.T) {
 	if err := unix.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Unmount(target, 0)
+	defer func() { _ = unix.Unmount(target, 0) }()
 	after, err := storage.AllocatedBytes(context.Background(), root)
 	if err != nil || after > before {
 		t.Fatalf("counted mounted data: %d > %d (%v)", after, before, err)

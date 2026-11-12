@@ -6,6 +6,31 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-11-12: Adopt the Uber Go Style Guide across the project
+
+Reviewed all 19 internal packages, command entry points, both platform test
+harnesses and their helper programs. Aligned declarations, imports, names,
+initialization, errors and tables while preserving serialized field names,
+empty-collection encoding, command syntax and resource ownership. Added pinned
+goimports, revive, staticcheck and errcheck checks through `make lint` and the
+Darwin/Linux CI matrix. Platform-only callers, bounded concurrency and deliberate
+test probes retain their documented exceptions.
+
+Boundary fixes validate rootfs ownership metadata, copy returned history maps
+and parsed argument slices, and interrupt and join transport readers. Inherited
+port-check input uses a pollable duplicate, preserving the caller's descriptor
+and restoring shared flags after the reader finishes. A real inherited-stdin
+regression verifies cancellation, successful replies and subsequent caller reads.
+The terminal signal fixture explicitly enables SIGINT and waits for readiness,
+so background test runners cannot pass an ignored disposition to its child.
+
+Validation: Darwin and native Linux unit tests, vet, race and lint checks;
+four complete root race package suites; all 176 privileged Linux integration
+tests without skips through the daily-state preservation wrapper, including
+the pinned legacy engine; 21 script tests and actionlint. Stamped native macOS
+build identity and amd64 cross-build checks passed. The final integration PR
+records the disposable macOS VM run and cross-target CI results.
+
 
 ## 2026-10-28: Retain deployment revisions and explicitly roll back
 

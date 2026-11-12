@@ -27,7 +27,7 @@ func TestMachineContextCancellationCleansRemoteWorkload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer input.Close()
+	defer func() { _ = input.Close() }()
 	output, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

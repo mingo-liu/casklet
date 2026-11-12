@@ -20,63 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func importImage(t *testing.T, source string) string {
-	t.Helper()
-	id := strings.TrimSpace(backgroundSuccess(t, "image", "import", source))
-	if err := image.ValidateID(id); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		code, out, stderr, err := backgroundCommand(ctx, "image", "rm", id)
-		if err != nil || (code != 0 && !strings.Contains(stderr, "image not found")) {
-			t.Errorf("remove test image %s: exit=%d stdout=%q stderr=%q error=%v", id, code, out, stderr, err)
-		}
-	})
-	return id
-}
-
-func imageTemplate(t *testing.T) string {
-	t.Helper()
-	source := executionTemplate(t)
-	// Each test owns a unique content identity and can delete it independently.
-	writeTemplateFile(t, source, "image-marker", fmt.Sprintf("marker-%d-%d", os.Getpid(), sequence.Add(1)), 0644)
-	return source
-}
-
-func runImage(t *testing.T, id string, options []string, command ...string) (int, string, string) {
-	t.Helper()
-	args := append([]string{"run", "--image", id}, options...)
-	args = append(args, "--")
-	args = append(args, command...)
-	return start(t, "", args...).wait(t)
-}
-
-func imageSuccess(t *testing.T, id string, options []string, command ...string) string {
-	t.Helper()
-	code, out, stderr := runImage(t, id, options, command...)
-	if code != 0 {
-		t.Fatalf("image run exit=%d stdout=%q stderr=%q", code, out, stderr)
-	}
-	return out
-}
-
-func startImageContainer(t *testing.T, name, id string, command ...string) string {
-	t.Helper()
-	args := []string{"run", "--detach", "--name", name, "--image", id, "--"}
-	args = append(args, command...)
-	return backgroundID(t, backgroundSuccess(t, args...))
-}
-
-func assertImageInUse(t *testing.T, id string) {
-	t.Helper()
-	code, _, stderr := backgroundCLI(t, "image", "rm", id)
-	if code != 125 || !strings.Contains(stderr, "referenced") {
-		t.Fatalf("referenced image deletion: exit=%d stderr=%q", code, stderr)
-	}
-}
-
 func TestImageImportIdentityAndForeground(t *testing.T) {
 	require(t)
 	source := imageTemplate(t)
@@ -284,14 +227,14 @@ func TestImageConcurrentCreationAndRemoval(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "run", "--detach", "--name", name, "--image", id, "--", "/bin/sleep", "300")
-			launched <- result{code, out, stderr, err}
+			launched <- result{code: code, out: out, stderr: stderr, err: err}
 		}()
 		go func() {
 			<-ready
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			code, out, stderr, err := backgroundCommand(ctx, "image", "rm", id)
-			removed <- result{code, out, stderr, err}
+			removed <- result{code: code, out: out, stderr: stderr, err: err}
 		}()
 		close(ready)
 		launch, remove := <-launched, <-removed
@@ -354,4 +297,61 @@ func TestImageSupervisorRecoveryRetainsReference(t *testing.T) {
 	backgroundSuccess(t, "rm", containerID)
 	imageSuccess(t, id, nil, "/bin/true")
 	backgroundSuccess(t, "image", "rm", id)
+}
+
+func importImage(t *testing.T, source string) string {
+	t.Helper()
+	id := strings.TrimSpace(backgroundSuccess(t, "image", "import", source))
+	if err := image.ValidateID(id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		code, out, stderr, err := backgroundCommand(ctx, "image", "rm", id)
+		if err != nil || (code != 0 && !strings.Contains(stderr, "image not found")) {
+			t.Errorf("remove test image %s: exit=%d stdout=%q stderr=%q error=%v", id, code, out, stderr, err)
+		}
+	})
+	return id
+}
+
+func imageTemplate(t *testing.T) string {
+	t.Helper()
+	source := executionTemplate(t)
+	// Each test owns a unique content identity and can delete it independently.
+	writeTemplateFile(t, source, "image-marker", fmt.Sprintf("marker-%d-%d", os.Getpid(), _sequence.Add(1)), 0644)
+	return source
+}
+
+func runImage(t *testing.T, id string, options []string, command ...string) (int, string, string) {
+	t.Helper()
+	args := append([]string{"run", "--image", id}, options...)
+	args = append(args, "--")
+	args = append(args, command...)
+	return start(t, "", args...).wait(t)
+}
+
+func imageSuccess(t *testing.T, id string, options []string, command ...string) string {
+	t.Helper()
+	code, out, stderr := runImage(t, id, options, command...)
+	if code != 0 {
+		t.Fatalf("image run exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	return out
+}
+
+func startImageContainer(t *testing.T, name, id string, command ...string) string {
+	t.Helper()
+	args := []string{"run", "--detach", "--name", name, "--image", id, "--"}
+	args = append(args, command...)
+	return backgroundID(t, backgroundSuccess(t, args...))
+}
+
+func assertImageInUse(t *testing.T, id string) {
+	t.Helper()
+	code, _, stderr := backgroundCLI(t, "image", "rm", id)
+	if code != 125 || !strings.Contains(stderr, "referenced") {
+		t.Fatalf("referenced image deletion: exit=%d stderr=%q", code, stderr)
+	}
 }

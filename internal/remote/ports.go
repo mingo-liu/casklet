@@ -36,7 +36,8 @@ type PortCheckResult struct {
 
 // CheckHostPorts runs while the guest holds the lifecycle operation lock,
 // after stopping the old execution and before publishing a new generation.
-// Standard pipe/socket inputs close on cancellation; other readers own their read lifetime.
+// Pipe/socket reads are interrupted and joined on cancellation. Caller files
+// stay open; readers without interruptible I/O own their read lifetime.
 func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, ports []config.PortMapping) error {
 	if len(ports) == 0 {
 		return nil
@@ -49,17 +50,30 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	var interrupted io.Closer
+	switch stream := input.(type) {
+	case *os.File:
+		prepared, release, err := portCheckFile(stream)
+		if err != nil {
+			return fmt.Errorf("prepare host port input: %w", err)
+		}
+		defer release()
+		if prepared != nil {
+			input, interrupted = prepared, prepared
+		}
+	case net.Conn:
+		interrupted = stream
+	case *io.PipeReader:
+		interrupted = stream
+	}
 	completed := make(chan error, 1)
 	go func() { completed <- readPortCheck(input) }()
 	select {
 	case <-ctx.Done():
-		if closer, ok := input.(io.Closer); ok {
-			switch input.(type) {
-			case net.Conn, *os.File, *io.PipeReader:
-				_ = closer.Close()
-				//lint:ignore S1005 Cancellation takes precedence over the completed handshake error.
-				_ = <-completed
-			}
+		if interrupted != nil {
+			_ = interrupted.Close()
+			//lint:ignore S1005 Cancellation takes precedence over the completed handshake error.
+			_ = <-completed
 		}
 		return ctx.Err()
 	case err := <-completed:

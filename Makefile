@@ -10,7 +10,7 @@ VERSION := $(CASKLET_RELEASE_VERSION)
 endif
 export VERSION
 
-.PHONY: build engine install fmt fmt-check vet test test-race vuln rootfs test-integration test-macos
+.PHONY: build engine install fmt fmt-check lint vet test test-race vuln rootfs test-integration test-macos
 
 build:
 	test "$(GOOS)" = darwin
@@ -34,6 +34,9 @@ fmt:
 
 fmt-check:
 	./scripts/check-format.sh
+
+lint:
+	GO="$(GO)" ./scripts/check-go-style.sh
 
 vet:
 	$(GO) vet ./...

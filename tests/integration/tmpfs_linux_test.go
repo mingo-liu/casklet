@@ -10,7 +10,7 @@ import (
 )
 
 // All sizes are page-aligned, so df reports the configured capacity exactly.
-const tmpfsCapacityProbe = `test "$(df -Pk /tmp | tail -n 1 | awk '{print $2}')" = 32768 && test "$(df -Pk /dev/shm | tail -n 1 | awk '{print $2}')" = 98304`
+const _tmpfsCapacityProbe = `test "$(df -Pk /tmp | tail -n 1 | awk '{print $2}')" = 32768 && test "$(df -Pk /dev/shm | tail -n 1 | awk '{print $2}')" = 98304`
 
 func TestTmpfsCapacitiesAcrossCopyOverlayHealthExecAndRestart(t *testing.T) {
 	require(t)
@@ -18,7 +18,7 @@ func TestTmpfsCapacitiesAcrossCopyOverlayHealthExecAndRestart(t *testing.T) {
 	for _, source := range []string{"copy", "overlay"} {
 		t.Run(source, func(t *testing.T) {
 			name := backgroundName(t)
-			options := []string{"--tmp-size", "32m", "--shm-size", "96m", "--memory", "256m", "--user", "1000:1000", "--read-only", "--health-cmd", tmpfsCapacityProbe, "--health-interval", "100ms", "--health-timeout", "1s"}
+			options := []string{"--tmp-size", "32m", "--shm-size", "96m", "--memory", "256m", "--user", "1000:1000", "--read-only", "--health-cmd", _tmpfsCapacityProbe, "--health-interval", "100ms", "--health-timeout", "1s"}
 			if source == "overlay" {
 				args := append([]string{"run", "-d", "--name", name, "--image", image}, options...)
 				args = append(args, "--", "/bin/sleep", "300")
@@ -32,7 +32,7 @@ func TestTmpfsCapacitiesAcrossCopyOverlayHealthExecAndRestart(t *testing.T) {
 				if i.Config.TmpSize != 32<<20 || i.Config.ShmSize != 96<<20 {
 					t.Fatalf("inspection: %+v", i.Config)
 				}
-				backgroundSuccess(t, "exec", name, "--", "/bin/sh", "-c", tmpfsCapacityProbe+` && test "$(stat -c %a /tmp):$(stat -c %a /dev/shm)" = 1777:1777 && test ! -e /tmp/allocated && test ! -e /dev/shm/allocated`)
+				backgroundSuccess(t, "exec", name, "--", "/bin/sh", "-c", _tmpfsCapacityProbe+` && test "$(stat -c %a /tmp):$(stat -c %a /dev/shm)" = 1777:1777 && test ! -e /tmp/allocated && test ! -e /dev/shm/allocated`)
 				mounts := backgroundSuccess(t, "exec", name, "--", "/bin/cat", "/proc/mounts")
 				for _, target := range []string{"/tmp", "/dev/shm"} {
 					found := false

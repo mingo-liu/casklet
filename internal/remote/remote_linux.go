@@ -53,7 +53,7 @@ func Run(token string, args []string) (int, error) {
 	if err != nil {
 		return 125, err
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 	defer func() { _ = connection.Close() }()
 	executable, err := os.Executable()
 	if err != nil {

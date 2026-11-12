@@ -17,65 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func startExecTerminal(t *testing.T, options []string, reference string, command ...string) *terminalInvocation {
-	t.Helper()
-	args := append([]string{"exec", "-it"}, options...)
-	args = append(args, reference, "--")
-	args = append(args, command...)
-	return startTerminalArguments(t, args)
-}
-
-func signalExecTerminal(t *testing.T, call *terminalInvocation, sig syscall.Signal) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	control, err := exec.CommandContext(ctx, "systemctl", "show", call.unit, "--property=ControlGroup", "--value").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative := strings.TrimSpace(string(control))
-	if relative == "" || relative == "/" || !strings.HasPrefix(relative, "/") || filepath.Clean(relative) != relative {
-		t.Fatalf("invalid exec client scope cgroup: %q", relative)
-	}
-	root := "/sys/fs/cgroup" + relative
-	for _, file := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
-		processes, _ := os.ReadFile(file)
-		for _, value := range strings.Fields(string(processes)) {
-			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
-			executable, _ := os.Readlink("/proc/" + value + "/exe")
-			command := strings.Split(string(args), "\x00")
-			if executable == binary && len(command) > 1 && command[1] == "exec" {
-				pid, err := strconv.Atoi(value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := syscall.Kill(pid, sig); err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-		}
-	}
-	t.Fatal("exec client is missing from its terminal scope")
-}
-
-func execTerminalCgroup(t *testing.T, call *terminalInvocation, marker string) string {
-	t.Helper()
-	call.outputContains(t, marker)
-	out, err := call.captured()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return execCgroup(t, strings.ReplaceAll(out, "\r\n", "\n"))
-}
-
-func assertExecTerminalReleased(t *testing.T, reference string) {
-	t.Helper()
-	if out := execSuccess(t, nil, reference, "/bin/sh", "-c", `[ "$(ls /dev/pts)" = ptmx ] && echo terminals-released`); out != "terminals-released\n" {
-		t.Fatalf("exec retained a private PTY: %q", out)
-	}
-}
-
 func TestExecTerminalShellInteractionAndResize(t *testing.T) {
 	name, id := execContainer(t, nil)
 	call := startExecTerminal(t, nil, name, "/bin/sh", "-c", `
@@ -232,31 +173,32 @@ func TestExecTerminalConcurrentSessionsRemainIndependent(t *testing.T) {
 func TestExecTerminalExternalSignalTargetsForegroundJob(t *testing.T) {
 	name, id := execContainer(t, nil)
 	const prompt = "exec-external-prompt> "
-	for _, test := range []struct {
+	tests := []struct {
 		name   string
 		signal syscall.Signal
 	}{
 		{"INT", syscall.SIGINT},
 		{"TERM", syscall.SIGTERM},
 		{"HUP", syscall.SIGHUP},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			call := startExecTerminal(t, []string{"--env", "PS1=" + prompt}, name, "/bin/sh", "-c", "echo exec-external-shell-ready; exec /bin/sh")
 			call.outputContains(t, "exec-external-shell-ready\r\n")
 			call.outputContains(t, prompt)
 			job := `/bin/sh -c 'echo exec-external-job-ready; exec sleep 30'`
-			handled := "exec-foreground-" + test.name + "-handled"
-			if test.signal != syscall.SIGINT {
+			handled := "exec-foreground-" + tt.name + "-handled"
+			if tt.signal != syscall.SIGINT {
 				// Readiness comes from the child after the interactive parent has
 				// assigned this separate job its foreground process group.
-				job = fmt.Sprintf(`/bin/sh -c 'trap "echo %s; exit 43" %s; echo exec-external-job-ready; while :; do sleep .1; done'`, handled, test.name)
+				job = fmt.Sprintf(`/bin/sh -c 'trap "echo %s; exit 43" %s; echo exec-external-job-ready; while :; do sleep .1; done'`, handled, tt.name)
 			}
 			call.write(t, job+"\n")
 			call.outputContains(t, "exec-external-job-ready\r\n")
 			before, _ := call.captured()
 			prompts := strings.Count(before, prompt)
 			started := time.Now()
-			signalExecTerminal(t, call, test.signal)
+			signalExecTerminal(t, call, tt.signal)
 			deadline := started.Add(3 * time.Second)
 			for {
 				out, err := call.captured()
@@ -267,18 +209,18 @@ func TestExecTerminalExternalSignalTargetsForegroundJob(t *testing.T) {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("exec %s did not interrupt foreground job: %q", test.name, out)
+					t.Fatalf("exec %s did not interrupt foreground job: %q", tt.name, out)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			continued := "EXEC-EXTERNAL-AFTER-" + test.name
+			continued := "EXEC-EXTERNAL-AFTER-" + tt.name
 			call.write(t, "echo "+continued+"; exit 41\n")
 			code, out, stderr := call.wait(t)
-			if code != 41 || !strings.Contains(out, continued+"\r\n") || (test.signal != syscall.SIGINT && !strings.Contains(out, handled+"\r\n")) {
-				t.Fatalf("exec external %s exit=%d stdout=%q stderr=%q", test.name, code, out, stderr)
+			if code != 41 || !strings.Contains(out, continued+"\r\n") || (tt.signal != syscall.SIGINT && !strings.Contains(out, handled+"\r\n")) {
+				t.Fatalf("exec external %s exit=%d stdout=%q stderr=%q", tt.name, code, out, stderr)
 			}
 			if elapsed := time.Since(started); elapsed > 3*time.Second {
-				t.Fatalf("exec %s waited for forced shutdown: %s", test.name, elapsed)
+				t.Fatalf("exec %s waited for forced shutdown: %s", tt.name, elapsed)
 			}
 			waitBackground(t, id, "running")
 			assertExecTerminalReleased(t, id)
@@ -373,4 +315,63 @@ func TestExecTerminalSupervisorLossRestoresHost(t *testing.T) {
 	}
 	assertCgroupRemoved(t, group)
 	assertBackgroundUnitStopped(t, id)
+}
+
+func startExecTerminal(t *testing.T, options []string, reference string, command ...string) *terminalInvocation {
+	t.Helper()
+	args := append([]string{"exec", "-it"}, options...)
+	args = append(args, reference, "--")
+	args = append(args, command...)
+	return startTerminalArguments(t, args)
+}
+
+func signalExecTerminal(t *testing.T, call *terminalInvocation, sig syscall.Signal) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	control, err := exec.CommandContext(ctx, "systemctl", "show", call.unit, "--property=ControlGroup", "--value").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative := strings.TrimSpace(string(control))
+	if relative == "" || relative == "/" || !strings.HasPrefix(relative, "/") || filepath.Clean(relative) != relative {
+		t.Fatalf("invalid exec client scope cgroup: %q", relative)
+	}
+	root := "/sys/fs/cgroup" + relative
+	for _, file := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
+		processes, _ := os.ReadFile(file)
+		for _, value := range strings.Fields(string(processes)) {
+			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
+			executable, _ := os.Readlink("/proc/" + value + "/exe")
+			command := strings.Split(string(args), "\x00")
+			if executable == _binary && len(command) > 1 && command[1] == "exec" {
+				pid, err := strconv.Atoi(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := syscall.Kill(pid, sig); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("exec client is missing from its terminal scope")
+}
+
+func execTerminalCgroup(t *testing.T, call *terminalInvocation, marker string) string {
+	t.Helper()
+	call.outputContains(t, marker)
+	out, err := call.captured()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return execCgroup(t, strings.ReplaceAll(out, "\r\n", "\n"))
+}
+
+func assertExecTerminalReleased(t *testing.T, reference string) {
+	t.Helper()
+	if out := execSuccess(t, nil, reference, "/bin/sh", "-c", `[ "$(ls /dev/pts)" = ptmx ] && echo terminals-released`); out != "terminals-released\n" {
+		t.Fatalf("exec retained a private PTY: %q", out)
+	}
 }

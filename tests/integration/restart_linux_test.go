@@ -15,38 +15,6 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-func startRestartManager(t *testing.T) {
-	t.Helper()
-	unit := "casklet-restarts.service"
-	if output, err := exec.Command("systemd-run", "--quiet", "--service-type=exec", "--unit="+unit, "--", binary, "__restart-manager").CombinedOutput(); err != nil {
-		t.Fatalf("manager: %v %s", err, output)
-	}
-	t.Cleanup(func() {
-		exec.Command("systemctl", "stop", unit).Run()
-		exec.Command("systemctl", "reset-failed", unit).Run()
-	})
-}
-func restartInspection(t *testing.T, id string) container.Inspection {
-	t.Helper()
-	var r container.Inspection
-	if err := json.Unmarshal([]byte(backgroundSuccess(t, "inspect", id)), &r); err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-func awaitRestart(t *testing.T, id string, check func(container.Inspection) bool) container.Inspection {
-	t.Helper()
-	deadline := time.Now().Add(12 * time.Second)
-	for time.Now().Before(deadline) {
-		r := restartInspection(t, id)
-		if check(r) {
-			return r
-		}
-		time.Sleep(40 * time.Millisecond)
-	}
-	t.Fatalf("restart state: %+v", restartInspection(t, id))
-	return container.Inspection{}
-}
 func TestAutomaticRestartPoliciesAndManualStop(t *testing.T) {
 	require(t)
 	startRestartManager(t)
@@ -101,7 +69,7 @@ func TestAutomaticRestartPoliciesAndManualStop(t *testing.T) {
 		backgroundSuccess(t, "rm", id)
 	})
 	t.Run("more than four services do not starve", func(t *testing.T) {
-		ids := []string{}
+		var ids []string
 		for i := 0; i < 6; i++ {
 			ids = append(ids, startBackground(t, backgroundName(t), []string{"--restart", "unless-stopped"}, "/bin/sh", "-c", "[ -f /resumed ] || { touch /resumed; exit 1; }; exec sleep 300"))
 		}
@@ -111,13 +79,14 @@ func TestAutomaticRestartPoliciesAndManualStop(t *testing.T) {
 		}
 	})
 }
+
 func TestAutomaticRestartRestoresPreviousBootPolicies(t *testing.T) {
 	require(t)
 	store, err := container.OpenStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := map[string]string{}
+	ids := make(map[string]string)
 	for _, policy := range []string{"always", "unless-stopped", "on-failure"} {
 		id := startBackground(t, backgroundName(t), []string{"--restart", policy}, "/bin/sleep", "300")
 		backgroundSuccess(t, "stop", id)
@@ -167,4 +136,39 @@ func TestAutomaticRestartRestoresPreviousBootPolicies(t *testing.T) {
 	if r := restartInspection(t, record.ID); r.RestartCount != 1 || r.Generation != 0 {
 		t.Fatalf("unbounded preparation retry %+v", r)
 	}
+}
+
+func startRestartManager(t *testing.T) {
+	t.Helper()
+	unit := "casklet-restarts.service"
+	if output, err := exec.Command("systemd-run", "--quiet", "--service-type=exec", "--unit="+unit, "--", _binary, "__restart-manager").CombinedOutput(); err != nil {
+		t.Fatalf("manager: %v %s", err, output)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("systemctl", "stop", unit).Run()
+		_ = exec.Command("systemctl", "reset-failed", unit).Run()
+	})
+}
+
+func restartInspection(t *testing.T, id string) container.Inspection {
+	t.Helper()
+	var r container.Inspection
+	if err := json.Unmarshal([]byte(backgroundSuccess(t, "inspect", id)), &r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func awaitRestart(t *testing.T, id string, check func(container.Inspection) bool) container.Inspection {
+	t.Helper()
+	deadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		r := restartInspection(t, id)
+		if check(r) {
+			return r
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+	t.Fatalf("restart state: %+v", restartInspection(t, id))
+	return container.Inspection{}
 }

@@ -14,12 +14,12 @@ import (
 	"github.com/mingo-liu/casklet/internal/container"
 )
 
-const macTmpfsCapacityProbe = `test "$(df -Pk /tmp | tail -n 1 | awk '{print $2}')" = 32768 && test "$(df -Pk /dev/shm | tail -n 1 | awk '{print $2}')" = 98304`
+const _macTmpfsCapacityProbe = `test "$(df -Pk /tmp | tail -n 1 | awk '{print $2}')" = 32768 && test "$(df -Pk /dev/shm | tail -n 1 | awk '{print $2}')" = 98304`
 
 func TestTmpfsRunConfigProjectHealthExecAndRestartThroughMac(t *testing.T) {
 	client(t)
 	file := filepath.Join(t.TempDir(), "run.json")
-	run := map[string]any{"tmp-size": "16m", "shm-size": "96m", "memory": "256m", "read-only": true, "user": "1000:1000", "health-cmd": macTmpfsCapacityProbe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sleep", "300"}}
+	run := map[string]any{"tmp-size": "16m", "shm-size": "96m", "memory": "256m", "read-only": true, "user": "1000:1000", "health-cmd": _macTmpfsCapacityProbe, "health-interval": "100ms", "health-timeout": "1s", "command": []string{"/bin/sleep", "300"}}
 	write := func(doc any) {
 		t.Helper()
 		data, err := json.Marshal(doc)
@@ -38,7 +38,7 @@ func TestTmpfsRunConfigProjectHealthExecAndRestartThroughMac(t *testing.T) {
 		if i.Config.TmpSize != 32<<20 || i.Config.ShmSize != 96<<20 {
 			t.Fatalf("inspection: %+v", i.Config)
 		}
-		success(t, "exec", ref, "--", "/bin/sh", "-c", macTmpfsCapacityProbe+` && test "$(stat -c %a /tmp):$(stat -c %a /dev/shm)" = 1777:1777 && test ! -e /tmp/allocated && test ! -e /dev/shm/allocated`)
+		success(t, "exec", ref, "--", "/bin/sh", "-c", _macTmpfsCapacityProbe+` && test "$(stat -c %a /tmp):$(stat -c %a /dev/shm)" = 1777:1777 && test ! -e /tmp/allocated && test ! -e /dev/shm/allocated`)
 	}
 	check(id)
 	success(t, "exec", id, "--", "/bin/sh", "-c", "dd if=/dev/zero of=/tmp/allocated bs=1M count=20 2>/dev/null && dd if=/dev/zero of=/dev/shm/allocated bs=1M count=68 2>/dev/null")

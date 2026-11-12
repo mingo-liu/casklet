@@ -4,9 +4,10 @@ package macos
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/mingo-liu/casklet/internal/image"
 	"github.com/mingo-liu/casklet/internal/storage"
-	"testing"
 )
 
 func TestDiskUsageThroughMacClient(t *testing.T) {

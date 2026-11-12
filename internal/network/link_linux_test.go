@@ -20,7 +20,7 @@ func TestLinkOwnership(t *testing.T) {
 	if err := addLink(name, "casklet-test", "bridge", ""); err != nil {
 		t.Fatal(err)
 	}
-	defer command(ctx, "ip", "", "link", "delete", name)
+	defer func() { _, _ = command(ctx, "ip", "", "link", "delete", name) }()
 	for _, delay := range []time.Duration{0, 500 * time.Millisecond} {
 		time.Sleep(delay)
 		out, err := command(ctx, "ip", "", "-N", "-j", "-d", "link", "show", name)

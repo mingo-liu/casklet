@@ -5,8 +5,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
@@ -201,22 +203,55 @@ func TestExecTerminalClientFailureDoesNotAuthorizeCommand(t *testing.T) {
 }
 
 func TestExecTerminalInterruptTargetsForegroundGroup(t *testing.T) {
-	master, slave := testPTY(t)
-	command := exec.Command("/bin/sh", "-c", "exec sleep 30")
+	const helper = "CASKLET_TEST_FOREGROUND_INTERRUPT"
+	if os.Getenv(helper) == "1" {
+		interrupts := make(chan os.Signal, 1)
+		signal.Notify(interrupts, syscall.SIGINT)
+		ready := os.NewFile(3, "foreground-ready")
+		if _, err := ready.Write([]byte{1}); err != nil {
+			t.Fatal(err)
+		}
+		_ = ready.Close()
+		<-interrupts
+		os.Exit(130)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var (
+		master, slave      = testPTY(t)
+		ready, writer, err = os.Pipe()
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ready.Close() }()
+	defer func() { _ = writer.Close() }()
+	// A background shell can pass SIG_IGN for SIGINT through exec. Install
+	// the child's handler explicitly and wait until it is ready before signaling.
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestExecTerminalInterruptTargetsForegroundGroup$")
+	command.Env = append(os.Environ(), helper+"=1")
 	command.Stdin, command.Stdout, command.Stderr = slave, slave, slave
+	command.ExtraFiles = []*os.File{writer}
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = command.Process.Kill() }()
-	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
+	_ = writer.Close()
+	done := make(chan struct{})
+	go func() { _ = command.Wait(); close(done) }()
+	defer func() { _ = command.Process.Kill(); <-done }()
+	if err := ready.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var marker [1]byte
+	if _, err := io.ReadFull(ready, marker[:]); err != nil {
+		t.Fatalf("terminal foreground helper readiness: %v", err)
+	}
 	// A working TIOCSIG targets the terminal's actual group; it needs no
 	// numeric PID lookup or cgroup descriptor from this unprivileged test.
 	forwardExecTerminalSignal(master, -1, command.Process.Pid, syscall.SIGINT)
 	select {
-	//lint:ignore S1005 The expected signal exit status is checked below instead of its Wait error.
-	case _ = <-done:
+	case <-done:
 		if code := execStatus(command.ProcessState); code != 130 {
 			t.Fatalf("foreground interrupt exit=%d; want 130", code)
 		}

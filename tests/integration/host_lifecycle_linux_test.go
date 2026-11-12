@@ -35,12 +35,12 @@ func TestHostLifecyclePreflightFencesGenerationAndOperations(t *testing.T) {
 				if action == "restart" {
 					args = append(args, "--timeout", "0s")
 				}
-				cmd := exec.CommandContext(ctx, binary, append(args, id)...)
+				cmd := exec.CommandContext(ctx, _binary, append(args, id)...)
 				input, err := cmd.StdinPipe()
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer input.Close()
+				defer func() { _ = input.Close() }()
 				output, err := cmd.StdoutPipe()
 				if err != nil {
 					t.Fatal(err)
@@ -50,7 +50,7 @@ func TestHostLifecyclePreflightFencesGenerationAndOperations(t *testing.T) {
 				if err := cmd.Start(); err != nil {
 					t.Fatal(err)
 				}
-				defer cmd.Process.Kill()
+				defer func() { _ = cmd.Process.Kill() }()
 				reader := bufio.NewReader(output)
 				line, err := reader.ReadBytes('\n')
 				if err != nil {
@@ -72,7 +72,7 @@ func TestHostLifecyclePreflightFencesGenerationAndOperations(t *testing.T) {
 				lock, err := store.AcquireOperation(contender, id)
 				stopContender()
 				if lock != nil {
-					lock.Close()
+					_ = lock.Close()
 				}
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("preflight released its operation lock: %v", err)
@@ -93,7 +93,7 @@ func TestHostLifecyclePreflightFencesGenerationAndOperations(t *testing.T) {
 					t.Fatal(err)
 				}
 				if outcome != "interrupt" {
-					input.Close()
+					_ = input.Close()
 				}
 				data, readErr := io.ReadAll(reader)
 				err = cmd.Wait()

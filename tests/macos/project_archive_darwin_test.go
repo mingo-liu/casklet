@@ -81,9 +81,9 @@ func TestLoadedOfflineImageProjectPreviewAndSelectedRecreation(t *testing.T) {
 		if err := json.Unmarshal([]byte(data), &records); err != nil {
 			t.Fatal(err)
 		}
-		result := map[string]deploymentIdentity{}
+		result := make(map[string]deploymentIdentity, len(records))
 		for _, record := range records {
-			result[record.Labels[project.LabelService]] = deploymentIdentity{record.ID, record.Name, record.State, record.Generation, record.Labels}
+			result[record.Labels[project.LabelService]] = deploymentIdentity{ID: record.ID, Name: record.Name, State: record.State, Generation: record.Generation, Labels: record.Labels}
 		}
 		return result
 	}

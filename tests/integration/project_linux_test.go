@@ -20,8 +20,8 @@ func TestProjectDeploymentThroughLinuxEngine(t *testing.T) {
 	t.Setenv("CASKLET_MACHINE_STATE_DIR", t.TempDir())
 	file := filepath.Join(t.TempDir(), "project.json")
 	document := map[string]any{"name": name, "volumes": []string{"data"}, "services": map[string]any{
-		"db":  map[string]any{"run": map[string]any{"rootfs": template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "30"}, "health-cmd": "true", "health-interval": "50ms"}},
-		"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"rootfs": template, "command": []string{"/bin/sleep", "30"}}},
+		"db":  map[string]any{"run": map[string]any{"rootfs": _template, "mount": []string{"type=volume,source=data,target=/data"}, "command": []string{"/bin/sleep", "30"}, "health-cmd": "true", "health-interval": "50ms"}},
+		"api": map[string]any{"depends-on": map[string]string{"db": "healthy"}, "run": map[string]any{"rootfs": _template, "command": []string{"/bin/sleep", "30"}}},
 	}}
 	data, _ := json.Marshal(document)
 	if err := os.WriteFile(file, data, 0600); err != nil {
@@ -59,7 +59,9 @@ func TestProjectDeploymentThroughLinuxEngine(t *testing.T) {
 	if output := backgroundSuccess(t, "exec", "cp-"+name+"-db", "--", "cat", "/data/message"); output != "saved" {
 		t.Fatalf("data %q", output)
 	}
-	os.Remove(file)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
 	backgroundSuccess(t, "project", "down", "--volumes", name)
 	if output := backgroundSuccess(t, "project", "ps", "--json", name); output != "[]\n" {
 		t.Fatalf("retained records %q", output)
@@ -76,8 +78,8 @@ func TestProjectWaitCoversLeafReadinessAndRollback(t *testing.T) {
 			probe = "exit 1"
 		}
 		document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{
-			"leaf":   map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "health-cmd": probe, "health-interval": "50ms", "command": []string{"/bin/sh", "-c", "sleep .3; touch /ready; exec sleep 30"}}},
-			"worker": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sleep", "30"}}},
+			"leaf":   map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "health-cmd": probe, "health-interval": "50ms", "command": []string{"/bin/sh", "-c", "sleep .3; touch /ready; exec sleep 30"}}},
+			"worker": map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "command": []string{"/bin/sleep", "30"}}},
 		}}
 		data, _ := json.Marshal(document)
 		file := filepath.Join(t.TempDir(), "project.json")

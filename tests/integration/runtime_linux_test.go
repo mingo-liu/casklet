@@ -18,8 +18,17 @@ import (
 	"time"
 )
 
-var binary, template string
-var sequence atomic.Uint64
+var _binary, _template string
+
+var _sequence atomic.Uint64
+
+type invocation struct {
+	cmd            *exec.Cmd
+	unit           string
+	stdout, stderr *os.File
+	cancel         context.CancelFunc
+	waited         bool
+}
 
 func TestMain(m *testing.M) {
 	if os.Getenv("CASKLET_INTEGRATION") != "1" {
@@ -38,156 +47,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func cleanupTemplate() error {
-	if template == "" {
-		return nil
-	}
-	return os.RemoveAll(template)
-}
-
-func prepare() error {
-	if os.Geteuid() != 0 {
-		return errors.New("root privileges are required")
-	}
-	if _, err := exec.LookPath("systemd-run"); err != nil {
-		return err
-	}
-	if _, err := os.Stat("/run/systemd/system"); err != nil {
-		return errors.New("a running systemd system instance is required")
-	}
-	binary = os.Getenv("CASKLET_BINARY")
-	rootfs := os.Getenv("CASKLET_ROOTFS")
-	helper := os.Getenv("CASKLET_HELPER")
-	for _, path := range []string{binary, rootfs, helper} {
-		if !filepath.IsAbs(path) {
-			return fmt.Errorf("binary, rootfs, and helper must be configured as absolute paths: %q", path)
-		}
-		if _, err := os.Stat(path); err != nil {
-			return err
-		}
-	}
-	var err error
-	template, err = os.MkdirTemp("", "casklet-integration-rootfs-")
-	if err != nil {
-		return err
-	}
-	if output, err := exec.Command("cp", "-a", rootfs+"/.", template).CombinedOutput(); err != nil {
-		return fmt.Errorf("copy rootfs: %w: %s", err, output)
-	}
-	input, err := os.Open(helper)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := os.OpenFile(filepath.Join(template, "bin", "integration-helper"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(output, input)
-	closeErr := output.Close()
-	return errors.Join(err, closeErr)
-}
-
-func require(t *testing.T) {
-	t.Helper()
-	if os.Getenv("CASKLET_INTEGRATION") != "1" {
-		t.Skip("set CASKLET_INTEGRATION=1 through scripts/test-linux.sh for privileged Linux tests")
-	}
-}
-
-type invocation struct {
-	cmd            *exec.Cmd
-	unit           string
-	stdout, stderr *os.File
-	cancel         context.CancelFunc
-	waited         bool
-}
-
-func start(t *testing.T, input string, args ...string) *invocation {
-	t.Helper()
-	require(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	unit := fmt.Sprintf("casklet-test-%d-%d.scope", os.Getpid(), sequence.Add(1))
-	command := append([]string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", binary}, args...)
-	stdout, err := os.CreateTemp(t.TempDir(), "stdout-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stderr, err := os.CreateTemp(t.TempDir(), "stderr-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(ctx, "systemd-run", command...)
-	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=host-only-secret")
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	call := &invocation{cmd: cmd, unit: unit, stdout: stdout, stderr: stderr, cancel: cancel}
-	t.Cleanup(func() {
-		cancel()
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stopCancel()
-		_ = exec.CommandContext(stopCtx, "systemctl", "stop", unit).Run()
-		if !call.waited && cmd.Process != nil {
-			_ = cmd.Wait()
-		}
-		_ = stdout.Close()
-		_ = stderr.Close()
-	})
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	return call
-}
-
-func (call *invocation) wait(t *testing.T) (int, string, string) {
-	t.Helper()
-	call.waited = true
-	err := call.cmd.Wait()
-	call.cancel()
-	code := 0
-	if err != nil {
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatalf("wait: %v", err)
-		}
-		code = exit.ExitCode()
-	}
-	stdout, _ := os.ReadFile(call.stdout.Name())
-	stderr, _ := os.ReadFile(call.stderr.Name())
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		state, _ := exec.Command("systemctl", "is-active", call.unit).Output()
-		active := strings.TrimSpace(string(state))
-		if active != "active" && active != "deactivating" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("scope remains populated after exit: %s stdout=%q stderr=%q", call.unit, stdout, stderr)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return code, string(stdout), string(stderr)
-}
-
-func run(t *testing.T, options []string, command ...string) (int, string, string) {
-	t.Helper()
-	args := append([]string{"run", "--rootfs", template}, options...)
-	args = append(args, "--")
-	args = append(args, command...)
-	return start(t, "", args...).wait(t)
-}
-
-func success(t *testing.T, options []string, command ...string) string {
-	t.Helper()
-	code, out, stderr := run(t, options, command...)
-	if code != 0 {
-		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
-	}
-	return out
-}
-
 func TestDoctor(t *testing.T) {
-	code, stdout, stderr := start(t, "", "doctor", "--rootfs", template).wait(t)
+	code, stdout, stderr := start(t, "", "doctor", "--rootfs", _template).wait(t)
 	if code != 0 {
 		t.Fatalf("doctor exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -201,7 +62,7 @@ func TestExecution(t *testing.T) {
 	if code != 7 {
 		t.Fatalf("exit=%d stderr=%q; expected 7", code, stderr)
 	}
-	code, out, stderr := start(t, "input survives\n", "run", "--rootfs", template, "--", "/bin/cat").wait(t)
+	code, out, stderr := start(t, "input survives\n", "run", "--rootfs", _template, "--", "/bin/cat").wait(t)
 	if code != 0 || out != "input survives\n" {
 		t.Fatalf("stdin exit=%d stdout=%q stderr=%q", code, out, stderr)
 	}
@@ -217,7 +78,7 @@ func TestIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker.Close()
+	_ = marker.Close()
 	t.Cleanup(func() { _ = os.Remove(marker.Name()) })
 	mounts, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
@@ -246,7 +107,7 @@ echo isolation-ok`, "sh", marker.Name(), strconv.Itoa(os.Getpid()))
 	if current != hostname {
 		t.Fatalf("host hostname changed: %q -> %q", hostname, current)
 	}
-	if _, err := os.Stat(filepath.Join(template, "tmp", "container-write")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(_template, "tmp", "container-write")); !os.IsNotExist(err) {
 		t.Fatalf("rootfs template changed: %v", err)
 	}
 	after, err := os.ReadFile("/proc/self/mountinfo")
@@ -295,53 +156,12 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
-func (call *invocation) supervisorPID() int {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	control, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ControlGroup", "--value", call.unit).Output()
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(control)), "/") {
-		return 0
-	}
-	root := "/sys/fs/cgroup" + strings.TrimSpace(string(control))
-	for _, path := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
-		processes, _ := os.ReadFile(path)
-		for _, value := range strings.Fields(string(processes)) {
-			exe, _ := os.Readlink("/proc/" + value + "/exe")
-			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
-			command := strings.Split(string(args), "\x00")
-			if exe == binary && len(command) > 1 && command[1] == "run" {
-				pid, _ := strconv.Atoi(value)
-				return pid
-			}
-		}
-	}
-	return 0
-}
-
-func (call *invocation) supervisor(t *testing.T) int {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		out, _ := os.ReadFile(call.stdout.Name())
-		if strings.Contains(string(out), "ready") {
-			if pid := call.supervisorPID(); pid != 0 {
-				return pid
-			}
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	stdout, _ := os.ReadFile(call.stdout.Name())
-	stderr, _ := os.ReadFile(call.stderr.Name())
-	t.Fatalf("supervisor did not become ready: stdout=%q stderr=%q", stdout, stderr)
-	return 0
-}
-
 func TestSignals(t *testing.T) {
 	require(t)
 	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		t.Run(signal.String(), func(t *testing.T) {
 			before := networkSnapshot(t)
-			call := start(t, "", "run", "--rootfs", template, "--network", "bridge", "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 9' INT TERM HUP QUIT; echo ready; while :; do sleep 1; done")
+			call := start(t, "", "run", "--rootfs", _template, "--network", "bridge", "--", "/bin/sh", "-c", "trap 'echo interrupted; exit 9' INT TERM HUP QUIT; echo ready; while :; do sleep 1; done")
 			pid := call.supervisor(t)
 			if err := syscall.Kill(pid, signal); err != nil {
 				t.Fatal(err)
@@ -387,7 +207,7 @@ func TestRepetitionAndConcurrency(t *testing.T) {
 }
 
 func TestParentDeathRecovery(t *testing.T) {
-	call := start(t, "", "run", "--rootfs", template, "--", "/bin/sh", "-c", "echo ready; sleep 30")
+	call := start(t, "", "run", "--rootfs", _template, "--", "/bin/sh", "-c", "echo ready; sleep 30")
 	pid := call.supervisor(t)
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
@@ -439,7 +259,7 @@ exit %d`, expected)
 func TestSignalDuringPreparation(t *testing.T) {
 	require(t)
 	source := t.TempDir()
-	if out, err := exec.Command("cp", "-a", template+"/.", source).CombinedOutput(); err != nil {
+	if out, err := exec.Command("cp", "-a", _template+"/.", source).CombinedOutput(); err != nil {
 		t.Fatalf("copy template: %v: %s", err, out)
 	}
 	payload := filepath.Join(source, "startup-payload")
@@ -508,6 +328,187 @@ func TestSignalWhileWaitingForStateLock(t *testing.T) {
 	}
 }
 
+func (call *invocation) wait(t *testing.T) (int, string, string) {
+	t.Helper()
+	call.waited = true
+	err := call.cmd.Wait()
+	call.cancel()
+	code := 0
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			t.Fatalf("wait: %v", err)
+		}
+		code = exit.ExitCode()
+	}
+	stdout, _ := os.ReadFile(call.stdout.Name())
+	stderr, _ := os.ReadFile(call.stderr.Name())
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		state, _ := exec.Command("systemctl", "is-active", call.unit).Output()
+		active := strings.TrimSpace(string(state))
+		if active != "active" && active != "deactivating" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("scope remains populated after exit: %s stdout=%q stderr=%q", call.unit, stdout, stderr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return code, string(stdout), string(stderr)
+}
+
+func (call *invocation) supervisorPID() int {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	control, err := exec.CommandContext(ctx, "systemctl", "show", "--property=ControlGroup", "--value", call.unit).Output()
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(control)), "/") {
+		return 0
+	}
+	root := "/sys/fs/cgroup" + strings.TrimSpace(string(control))
+	for _, path := range []string{filepath.Join(root, "manager", "cgroup.procs"), filepath.Join(root, "cgroup.procs")} {
+		processes, _ := os.ReadFile(path)
+		for _, value := range strings.Fields(string(processes)) {
+			exe, _ := os.Readlink("/proc/" + value + "/exe")
+			args, _ := os.ReadFile("/proc/" + value + "/cmdline")
+			command := strings.Split(string(args), "\x00")
+			if exe == _binary && len(command) > 1 && command[1] == "run" {
+				pid, _ := strconv.Atoi(value)
+				return pid
+			}
+		}
+	}
+	return 0
+}
+
+func (call *invocation) supervisor(t *testing.T) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _ := os.ReadFile(call.stdout.Name())
+		if strings.Contains(string(out), "ready") {
+			if pid := call.supervisorPID(); pid != 0 {
+				return pid
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	stdout, _ := os.ReadFile(call.stdout.Name())
+	stderr, _ := os.ReadFile(call.stderr.Name())
+	t.Fatalf("supervisor did not become ready: stdout=%q stderr=%q", stdout, stderr)
+	return 0
+}
+
+func cleanupTemplate() error {
+	if _template == "" {
+		return nil
+	}
+	return os.RemoveAll(_template)
+}
+
+func prepare() error {
+	if os.Geteuid() != 0 {
+		return errors.New("root privileges are required")
+	}
+	if _, err := exec.LookPath("systemd-run"); err != nil {
+		return err
+	}
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return errors.New("a running systemd system instance is required")
+	}
+	_binary = os.Getenv("CASKLET_BINARY")
+	rootfs := os.Getenv("CASKLET_ROOTFS")
+	helper := os.Getenv("CASKLET_HELPER")
+	for _, path := range []string{_binary, rootfs, helper} {
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("binary, rootfs, and helper must be configured as absolute paths: %q", path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			return err
+		}
+	}
+	var err error
+	_template, err = os.MkdirTemp("", "casklet-integration-rootfs-")
+	if err != nil {
+		return err
+	}
+	if output, err := exec.Command("cp", "-a", rootfs+"/.", _template).CombinedOutput(); err != nil {
+		return fmt.Errorf("copy rootfs: %w: %s", err, output)
+	}
+	input, err := os.Open(helper)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = input.Close() }()
+	output, err := os.OpenFile(filepath.Join(_template, "bin", "integration-helper"), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0755)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(output, input)
+	closeErr := output.Close()
+	return errors.Join(err, closeErr)
+}
+
+func require(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CASKLET_INTEGRATION") != "1" {
+		t.Skip("set CASKLET_INTEGRATION=1 through scripts/test-linux.sh for privileged Linux tests")
+	}
+}
+
+func start(t *testing.T, input string, args ...string) *invocation {
+	t.Helper()
+	require(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	unit := fmt.Sprintf("casklet-test-%d-%d.scope", os.Getpid(), _sequence.Add(1))
+	command := append([]string{"--scope", "--quiet", "--unit=" + unit, "--property=Delegate=cpu memory pids", "--", _binary}, args...)
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, "systemd-run", command...)
+	cmd.Env = append(os.Environ(), "CASKLET_HOST_SECRET=host-only-secret")
+	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	call := &invocation{cmd: cmd, unit: unit, stdout: stdout, stderr: stderr, cancel: cancel}
+	t.Cleanup(func() {
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stopCancel()
+		_ = exec.CommandContext(stopCtx, "systemctl", "stop", unit).Run()
+		if !call.waited && cmd.Process != nil {
+			_ = cmd.Wait()
+		}
+		_ = stdout.Close()
+		_ = stderr.Close()
+	})
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return call
+}
+
+func run(t *testing.T, options []string, command ...string) (int, string, string) {
+	t.Helper()
+	args := append([]string{"run", "--rootfs", _template}, options...)
+	args = append(args, "--")
+	args = append(args, command...)
+	return start(t, "", args...).wait(t)
+}
+
+func success(t *testing.T, options []string, command ...string) string {
+	t.Helper()
+	code, out, stderr := run(t, options, command...)
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, out, stderr)
+	}
+	return out
+}
+
 func testSignalWhileWaitingForStateLock(t *testing.T, signal syscall.Signal) {
 	t.Helper()
 	require(t)
@@ -519,14 +520,14 @@ func testSignalWhileWaitingForStateLock(t *testing.T, signal syscall.Signal) {
 		t.Fatal(err)
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		lock.Close()
+		_ = lock.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 		_ = lock.Close()
 	})
-	call := start(t, "", "run", "--rootfs", template, "--", "/bin/echo", "command-must-not-start")
+	call := start(t, "", "run", "--rootfs", _template, "--", "/bin/echo", "command-must-not-start")
 	deadline := time.Now().Add(10 * time.Second)
 	pid := 0
 	for time.Now().Before(deadline) {

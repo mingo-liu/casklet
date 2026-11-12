@@ -93,7 +93,7 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 			response, err := client.Get("http://" + address)
 			if err == nil {
 				data, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-				response.Body.Close()
+				_ = response.Body.Close()
 				if len(data) > 0 {
 					available = true
 					break
@@ -108,11 +108,13 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		buffer := make([]byte, 64)
 		for time.Now().Before(deadline) {
-			connection.SetDeadline(time.Now().Add(300 * time.Millisecond))
-			connection.Write([]byte("recreate"))
+			if err := connection.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = connection.Write([]byte("recreate"))
 			n, err := connection.Read(buffer)
 			if err == nil && string(buffer[:n]) == "echo:recreate" {
 				return
@@ -137,7 +139,7 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 		t.Fatal("Lima did not release stopped port")
 	}
 	failedPort := projectRecreateCode(t, "project", "up", "--config", file, "--recreate", "api")
-	held.Close()
+	_ = held.Close()
 	unchangedAPI := inspect("api")
 	if failedPort != 125 || unchangedAPI.ID != api.ID || unchangedAPI.Generation != api.Generation || unchangedAPI.State != container.StateRunning || inspect("db").State != container.StateExited {
 		t.Fatal("saved host port failure removed selected service")
@@ -160,7 +162,7 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 	}
 	// Missing bind sources must fail before removing the old container.
 	mounts := dbRun["mount"]
-	dbRun["mount"] = append(append([]string(nil), mounts.([]string)...), "type=bind,source="+filepath.Join(filepath.Dir(file), "missing")+",target=/missing")
+	dbRun["mount"] = append(append([]string(nil), requireType[[]string](t, mounts)...), "type=bind,source="+filepath.Join(filepath.Dir(file), "missing")+",target=/missing")
 	save()
 	if projectRecreateCode(t, "project", "up", "--config", file, "--recreate", "db") != 125 || inspect("db").ID != db.ID {
 		t.Fatal("invalid source removed old service")
@@ -187,10 +189,10 @@ func TestProjectSelectedRecreationPreviewAndFailureRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldPublish := dbRun["publish"]
-	dbRun["publish"] = []string{fmt.Sprintf("127.0.0.1:%d:8080", listener.Addr().(*net.TCPAddr).Port)}
+	dbRun["publish"] = []string{fmt.Sprintf("127.0.0.1:%d:8080", requireType[*net.TCPAddr](t, listener.Addr()).Port)}
 	save()
 	code := projectRecreateCode(t, "project", "up", "--config", file, "--recreate", "db")
-	listener.Close()
+	_ = listener.Close()
 	if code != 125 || inspect("db").ID != db.ID {
 		t.Fatal("host port conflict removed old service")
 	}

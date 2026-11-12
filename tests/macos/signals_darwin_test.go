@@ -17,6 +17,52 @@ import (
 	"time"
 )
 
+func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
+	tests := []struct {
+		name   string
+		signal syscall.Signal
+	}{{"HUP", syscall.SIGHUP}, {"QUIT", syscall.SIGQUIT}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			// Recovery is only a fallback for a failed test, after its assertions.
+			t.Cleanup(func() { command(t, "run", "--", "/bin/true") })
+			cmd := exec.CommandContext(ctx, client(t), "run", "--network", "bridge", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' HUP QUIT; cat /proc/self/cgroup; echo signal-ready; while :; do sleep 1; done")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var diagnostic bytes.Buffer
+			cmd.Stderr = &diagnostic
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill() })
+			reader := bufio.NewReader(stdout)
+			membership, err := reader.ReadString('\n')
+			if err != nil {
+				t.Fatalf("read cgroup: %v", err)
+			}
+			ready, err := reader.ReadString('\n')
+			if err != nil || ready != "signal-ready\n" {
+				t.Fatalf("readiness: %q %v", ready, err)
+			}
+			path, cgroup := foregroundRun(t, membership)
+			if err := cmd.Process.Signal(tt.signal); err != nil {
+				t.Fatal(err)
+			}
+			output, readErr := io.ReadAll(reader)
+			err = cmd.Wait()
+			exit, ok := err.(*exec.ExitError)
+			if !ok || exit.ExitCode() != 9 || readErr != nil || !strings.Contains(string(output), "signal-received") {
+				t.Fatalf("signal: %v read=%v output=%q stderr=%s", err, readErr, output, diagnostic.String())
+			}
+			waitForegroundCleanup(t, path, cgroup)
+		})
+	}
+}
+
 // Resolve this invocation's private run through its workload cgroup. Other
 // foreground sessions may be active in the product VM during these tests.
 func foregroundRun(t *testing.T, membership string) (string, string) {
@@ -57,50 +103,5 @@ func waitForegroundCleanup(t *testing.T, path, cgroup string) {
 	output, err := guestRootCommand(t, "nft", "list", "tables")
 	if err != nil || strings.Contains(output, table) {
 		t.Fatalf("foreground NAT cleanup: %q %v", output, err)
-	}
-}
-
-func TestNonTTYHangupAndQuitCleanup(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		signal syscall.Signal
-	}{{"HUP", syscall.SIGHUP}, {"QUIT", syscall.SIGQUIT}} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			// Recovery is only a fallback for a failed test, after its assertions.
-			t.Cleanup(func() { command(t, "run", "--", "/bin/true") })
-			cmd := exec.CommandContext(ctx, client(t), "run", "--network", "bridge", "--", "/bin/sh", "-c", "trap 'echo signal-received; exit 9' HUP QUIT; cat /proc/self/cgroup; echo signal-ready; while :; do sleep 1; done")
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			var diagnostic bytes.Buffer
-			cmd.Stderr = &diagnostic
-			if err := cmd.Start(); err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = cmd.Process.Kill() })
-			reader := bufio.NewReader(stdout)
-			membership, err := reader.ReadString('\n')
-			if err != nil {
-				t.Fatalf("read cgroup: %v", err)
-			}
-			ready, err := reader.ReadString('\n')
-			if err != nil || ready != "signal-ready\n" {
-				t.Fatalf("readiness: %q %v", ready, err)
-			}
-			path, cgroup := foregroundRun(t, membership)
-			if err := cmd.Process.Signal(test.signal); err != nil {
-				t.Fatal(err)
-			}
-			output, readErr := io.ReadAll(reader)
-			err = cmd.Wait()
-			exit, ok := err.(*exec.ExitError)
-			if !ok || exit.ExitCode() != 9 || readErr != nil || !strings.Contains(string(output), "signal-received") {
-				t.Fatalf("signal: %v read=%v output=%q stderr=%s", err, readErr, output, diagnostic.String())
-			}
-			waitForegroundCleanup(t, path, cgroup)
-		})
 	}
 }

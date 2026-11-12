@@ -38,7 +38,7 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 			}
 		}
 	})
-	cfg := config.Config{RootFS: template, Hostname: "history", Memory: 8 << 20, PidsLimit: 8,
+	cfg := config.Config{RootFS: _template, Hostname: "history", Memory: 8 << 20, PidsLimit: 8,
 		Command: []string{"/bin/sh", "-c", strings.Repeat(" ", 32<<10) + "true"}}
 	for i := 0; i < 256; i++ {
 		record, err := store.Create(ctx, cfg, fmt.Sprintf("%s-history-%d", name, i))
@@ -66,7 +66,7 @@ func TestProjectInventorySurvivesLargeUnrelatedHistory(t *testing.T) {
 	})
 	file := filepath.Join(t.TempDir(), "project.json")
 	document := map[string]any{"name": name, "networks": []string{}, "services": map[string]any{
-		"app": map[string]any{"run": map[string]any{"rootfs": template, "network": "none", "command": []string{"/bin/sh", "-c", "echo inventory-ready; sleep 300"}}},
+		"app": map[string]any{"run": map[string]any{"rootfs": _template, "network": "none", "command": []string{"/bin/sh", "-c", "echo inventory-ready; sleep 300"}}},
 	}}
 	data, _ := json.Marshal(document)
 	if err := os.WriteFile(file, data, 0600); err != nil {
@@ -120,7 +120,7 @@ func watchContainerStateReads(t *testing.T, ids []string) func() int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { unix.Close(fd) })
+	t.Cleanup(func() { _ = unix.Close(fd) })
 	for _, id := range ids {
 		if _, err := unix.InotifyAddWatch(fd, filepath.Join("/var/lib/casklet/containers", id, "state.json"), unix.IN_OPEN|unix.IN_CLOSE_NOWRITE); err != nil {
 			t.Fatal(err)

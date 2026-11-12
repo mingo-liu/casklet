@@ -15,20 +15,12 @@ import (
 
 type hostInspection struct {
 	container.Inspection
+
 	GuestResources struct {
 		RootFS  string               `json:"rootfs"`
 		Mounts  []config.BindMount   `json:"mounts"`
 		Publish []config.PortMapping `json:"publish"`
 	} `json:"guest_resources"`
-}
-
-func inspectHost(t *testing.T, id string) hostInspection {
-	t.Helper()
-	var inspection hostInspection
-	if err := json.Unmarshal([]byte(success(t, "inspect", id)), &inspection); err != nil {
-		t.Fatal(err)
-	}
-	return inspection
 }
 
 func TestInspectHostPathsSurviveSourceRemoval(t *testing.T) {
@@ -62,4 +54,13 @@ func TestInspectBuiltinTemplate(t *testing.T) {
 	if inspection.Config.RootFS != machine.BuiltinRootFS || inspection.GuestResources.RootFS != "/var/lib/casklet/templates/busybox" {
 		t.Fatalf("builtin template: %+v", inspection)
 	}
+}
+
+func inspectHost(t *testing.T, id string) hostInspection {
+	t.Helper()
+	var inspection hostInspection
+	if err := json.Unmarshal([]byte(success(t, "inspect", id)), &inspection); err != nil {
+		t.Fatal(err)
+	}
+	return inspection
 }

@@ -37,7 +37,7 @@ func TestNamedNetworkServiceDiscoveryAndHostPublish(t *testing.T) {
 			response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
 			if err == nil {
 				body, e := io.ReadAll(response.Body)
-				response.Body.Close()
+				_ = response.Body.Close()
 				if e == nil && strings.Contains(string(body), "named-network-ok") {
 					return
 				}

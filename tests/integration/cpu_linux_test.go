@@ -14,7 +14,7 @@ import (
 )
 
 func TestCPUQuota(t *testing.T) {
-	call := start(t, "", "run", "--rootfs", template, "--cpus", "0.25", "--timeout", "10s", "--", "/bin/integration-helper", "cpu")
+	call := start(t, "", "run", "--rootfs", _template, "--cpus", "0.25", "--timeout", "10s", "--", "/bin/integration-helper", "cpu")
 	call.supervisor(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

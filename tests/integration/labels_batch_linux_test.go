@@ -97,13 +97,13 @@ func TestBatchRemovalPinsFullIDsAcrossNameReuseAndOperationWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer operation.Close()
+	defer func() { _ = operation.Close() }()
 	if err := unix.Flock(int(operation.Fd()), unix.LOCK_EX); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "rm", first, reusedName)
+	cmd := exec.CommandContext(ctx, _binary, "rm", first, reusedName)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestBatchRemovalPinsFullIDsAcrossNameReuseAndOperationWait(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	line := make(chan string, 1)
 	go func() { value, _ := bufio.NewReader(stdout).ReadString('\n'); line <- value }()
 	select {

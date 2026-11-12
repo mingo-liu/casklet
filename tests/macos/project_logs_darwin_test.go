@@ -22,7 +22,7 @@ func TestProjectLogsSelectionFollowAndCancellation(t *testing.T) {
 	success(t, "doctor")
 	name := fmt.Sprintf("logs-%x", time.Now().UnixNano())
 	file := filepath.Join(t.TempDir(), "project.json")
-	services := map[string]any{}
+	services := make(map[string]any)
 	for _, key := range []string{"api", "db"} {
 		services[key] = map[string]any{"run": map[string]any{"network": "none", "command": []string{"/bin/sh", "-c", "echo first; echo second; sleep 300"}}}
 	}
@@ -99,8 +99,8 @@ func TestProjectLogsCancelsWithFullOutputPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
-	defer writer.Close()
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
 	cmd.Stdout = writer
 	var diagnostic bytes.Buffer
 	cmd.Stderr = &diagnostic
@@ -131,7 +131,8 @@ func TestProjectLogsCancelsWithFullOutputPipe(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		_ = cmd.Process.Kill()
-		<-done
+		//lint:ignore S1005 Joining a canceled process intentionally discards its expected exit error.
+		_ = <-done
 		t.Fatalf("blocked output prevented cancellation: %s", diagnostic.String())
 	}
 	if !strings.Contains(success(t, "project", "ps", name), "running") {
