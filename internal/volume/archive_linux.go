@@ -353,6 +353,7 @@ func restoreArchive(ctx context.Context, root *os.Root, source io.Reader) error 
 			}
 			dirs = append(dirs, header)
 			continue
+		//lint:ignore SA1019 Preserve support for the historical NUL regular-file flag.
 		case tar.TypeReg, tar.TypeRegA:
 			file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 			if err != nil {
