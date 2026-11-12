@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mingo-liu/casklet/internal/config"
+	"github.com/mingo-liu/casklet/internal/ipc"
 )
 
 // PortCheckLimit bounds each private host port authorization message.
@@ -53,7 +54,7 @@ func CheckHostPorts(ctx context.Context, input io.Reader, output io.Writer, port
 	var interrupted io.Closer
 	switch stream := input.(type) {
 	case *os.File:
-		prepared, release, err := portCheckFile(stream)
+		prepared, release, err := ipc.InterruptibleFile(stream)
 		if err != nil {
 			return fmt.Errorf("prepare host port input: %w", err)
 		}

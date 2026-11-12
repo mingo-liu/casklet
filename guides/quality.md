@@ -6,6 +6,22 @@ Use this record when reviewing the project. Check the current implementation
 and regression tests before proposing an item already listed here. Reopen an
 item only with a reproducible regression or a distinct uncovered scenario.
 
+## 2026-11-12: Cancel inherited credential input without blocking
+
+Credential preparation now reads inherited pipes through a pollable duplicate,
+so timeout and signal cancellation interrupt the decoder before joining it.
+The original descriptor stays open and its shared status flags are restored
+after the reader exits. Port authorization uses the same helper in `ipc`;
+unpollable files and custom readers retain their independent read lifetimes.
+
+The inherited-stdin subprocess regression failed before the fix and covers
+deadline expiration, explicit cancellation, successful decoding, flag restoration
+and subsequent caller reads. Existing port-input and uninterruptible-reader
+regressions remain in place.
+
+Validation: Darwin and native Linux race suites, vet and lint; native macOS
+client/embedded-engine builds and stamped version identity checks.
+
 ## 2026-11-12: Adopt the Uber Go Style Guide across the project
 
 Reviewed all 19 internal packages, command entry points, both platform test
